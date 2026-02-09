@@ -1960,3 +1960,5 @@ def main():
                                         st.error("Fill all required fields.")
                 else:
                     _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
+if __name__ == "__main__":
+    main()
