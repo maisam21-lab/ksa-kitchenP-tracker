@@ -362,12 +362,14 @@ CREATE TABLE IF NOT EXISTS allowed_users (
 """
 
 # App-wide discussions: comments and questions from users (not tied to a record)
+# parent_id: NULL = top-level post; else = reply to that id
 TABLE_APP_DISCUSSIONS = """
 CREATE TABLE IF NOT EXISTS app_discussions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
     author TEXT NOT NULL,
-    message TEXT NOT NULL
+    message TEXT NOT NULL,
+    parent_id INTEGER NULL
 )
 """
 
@@ -388,6 +390,15 @@ def _ensure_updated_at():
             c.execute("ALTER TABLE ksa_kitchen_tracker ADD COLUMN updated_at TEXT")
 
 
+def _ensure_discussions_parent_id():
+    """Add parent_id to app_discussions if missing (migration)."""
+    with get_conn() as c:
+        try:
+            c.execute("SELECT parent_id FROM app_discussions LIMIT 1")
+        except sqlite3.OperationalError:
+            c.execute("ALTER TABLE app_discussions ADD COLUMN parent_id INTEGER NULL")
+
+
 def init_db():
     with get_conn() as c:
         c.execute(TABLE)
@@ -402,6 +413,7 @@ def init_db():
         c.execute(TABLE_ALLOWED_USERS)
         c.execute(TABLE_APP_DISCUSSIONS)
     _ensure_updated_at()
+    _ensure_discussions_parent_id()
 
 
 def _get_allowlist_ids_from_config() -> list[str]:
@@ -486,21 +498,21 @@ def is_user_allowed(identifier: str) -> bool:
         return r.fetchone() is not None
 
 
-def insert_app_discussion(author: str, message: str) -> None:
-    """Add a discussion post (comment or question)."""
+def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
+    """Add a discussion post or reply (parent_id=None for top-level)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_conn() as c:
         c.execute(
-            "INSERT INTO app_discussions (created_at, author, message) VALUES (?, ?, ?)",
-            (now, (author or "Anonymous").strip(), (message or "").strip()),
+            "INSERT INTO app_discussions (created_at, author, message, parent_id) VALUES (?, ?, ?, ?)",
+            (now, (author or "Anonymous").strip(), (message or "").strip(), parent_id),
         )
 
 
-def list_app_discussions(limit: int = 100) -> list[dict]:
-    """Return recent discussion posts, newest first."""
+def list_app_discussions(limit: int = 200) -> list[dict]:
+    """Return all discussion posts and replies (with parent_id), newest first."""
     with get_conn() as c:
         r = c.execute(
-            "SELECT id, created_at, author, message FROM app_discussions ORDER BY id DESC LIMIT ?",
+            "SELECT id, created_at, author, message, parent_id FROM app_discussions ORDER BY id DESC LIMIT ?",
             (limit,),
         )
         return [dict(row) for row in r]
@@ -1452,11 +1464,51 @@ def main():
                 st.caption("Enter a search term and click Search.")
         return
 
-    # Discussions: app-wide comments and questions
+    # Discussions: app-wide comments and questions (with replies)
     if section == "Discussions":
         st.title("Discussions")
-        st.caption("Ask questions or add comments. Visible to everyone with access to the tracker.")
+        st.caption("Ask questions or add comments. You can reply to any post.")
         current_name = (st.session_state.get("user_display_name") or "").strip()
+        all_posts = list_app_discussions(200)
+        roots = [p for p in all_posts if p.get("parent_id") is None]
+        replies_by_parent = {}
+        for p in all_posts:
+            pid = p.get("parent_id")
+            if pid is not None:
+                replies_by_parent.setdefault(pid, []).append(p)
+        for r in replies_by_parent.values():
+            r.sort(key=lambda x: x.get("id", 0))
+
+        # Reply form (shown when user clicked "Reply" on a post)
+        reply_to_id = st.session_state.get("discussion_reply_to_id")
+        if reply_to_id is not None:
+            root = next((p for p in all_posts if p.get("id") == reply_to_id), None)
+            if root is None:
+                st.session_state.pop("discussion_reply_to_id", None)
+            else:
+                with st.form("reply_form", clear_on_submit=True):
+                    snippet = (root.get("message") or "")[:60] + ("…" if len(root.get("message") or "") > 60 else "")
+                    st.caption(f"Replying to: **{snippet}**")
+                    reply_author = st.text_input("Your name", value=current_name, key="reply_author", placeholder="e.g. Jane")
+                    reply_message = st.text_area("Your reply", key="reply_message", placeholder="Type your reply…", height=80)
+                    col_r1, col_r2 = st.columns(2)
+                    with col_r1:
+                        post_clicked = st.form_submit_button("Post reply")
+                    with col_r2:
+                        cancel_clicked = st.form_submit_button("Cancel")
+                    if cancel_clicked:
+                        st.session_state.pop("discussion_reply_to_id", None)
+                        _rerun()
+                    if post_clicked:
+                        if not (reply_message or "").strip():
+                            st.error("Please enter a reply.")
+                        else:
+                            insert_app_discussion(reply_author or "Anonymous", reply_message.strip(), parent_id=reply_to_id)
+                            st.session_state.pop("discussion_reply_to_id", None)
+                            st.success("Reply posted.")
+                            _rerun()
+                st.divider()
+
         with st.form("discussion_form", clear_on_submit=True):
             author = st.text_input("Your name", value=current_name, key="discussion_author", placeholder="e.g. Jane")
             message = st.text_area("Comment or question", key="discussion_message", placeholder="Type your message…", height=120)
@@ -1469,16 +1521,23 @@ def main():
                     _rerun()
         st.divider()
         st.subheader("Recent discussions")
-        posts = list_app_discussions(100)
-        if not posts:
+        if not roots:
             st.info("No discussions yet. Post a comment or question above.")
         else:
-            for p in posts:
+            for p in roots:
                 with st.container():
                     st.markdown(
                         f"**{p.get('author') or 'Anonymous'}** · {p.get('created_at', '')[:19].replace('T', ' ')}"
                     )
                     st.markdown(p.get("message", ""))
+                    if st.button("Reply", key=f"reply_btn_{p.get('id')}"):
+                        st.session_state["discussion_reply_to_id"] = p.get("id")
+                        _rerun()
+                    for r in replies_by_parent.get(p.get("id"), []):
+                        st.markdown(
+                            f"↳ **{r.get('author') or 'Anonymous'}** · {r.get('created_at', '')[:19].replace('T', ' ')}"
+                        )
+                        st.markdown(r.get("message", ""))
                     st.divider()
         return
 
@@ -1542,8 +1601,10 @@ def main():
         github_data_url = _get_github_data_url()
         if is_developer and github_data_url:
             with st.expander("Load from GitHub", expanded=True):
-                st.caption("Pull the latest tracker data from a CSV or Excel file in your GitHub repo. Set **GITHUB_TRACKER_CSV_URL** in app Secrets to the **raw** file URL (must start with `https://raw.githubusercontent.com/...`).")
+                st.caption("Pull the latest tracker data from a CSV or Excel file in your GitHub repo. In **Settings → Secrets**, set **GITHUB_TRACKER_CSV_URL** to the full **raw** URL (e.g. `https://raw.githubusercontent.com/maisam21-lab/ksa-kitchenP-tracker/main/data/output/dataoutputksa_kitchen_tracker_wk7.xlsx`). No spaces, no truncation.")
                 st.code(github_data_url, language=None)
+                if not github_data_url.startswith("https://raw.githubusercontent.com/"):
+                    st.warning("The URL above should start with `https://raw.githubusercontent.com/`. If it is cut off or wrong, update it in app Secrets.")
                 if st.button("Load from GitHub", key="btn_load_github"):
                     try:
                         with st.spinner("Fetching from GitHub…"):
