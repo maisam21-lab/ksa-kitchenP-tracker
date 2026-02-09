@@ -11,6 +11,8 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 
 import streamlit as st
 
@@ -91,6 +93,27 @@ GSHEET_HEADER_MAP = {
     "status": "status",
     "notes": "notes",
 }
+
+
+def _get_github_data_url() -> str:
+    """Return URL to fetch tracker data from GitHub (set GITHUB_TRACKER_CSV_URL in secrets or env)."""
+    try:
+        url = st.secrets.get("GITHUB_TRACKER_CSV_URL") or os.environ.get("GITHUB_TRACKER_CSV_URL", "")
+    except Exception:
+        url = os.environ.get("GITHUB_TRACKER_CSV_URL", "")
+    return (url or "").strip()
+
+
+def _fetch_and_parse_from_url(url: str):
+    """Fetch CSV or Excel from URL; return list of dicts. Raises on failure."""
+    with urlopen(url, timeout=60) as resp:
+        content = resp.read()
+    name = url.split("/")[-1].split("?")[0] or "data.csv"
+    if not name.lower().endswith((".csv", ".xlsx", ".xls")):
+        name = "data.csv"
+    buf = io.BytesIO(content)
+    buf.name = name
+    return _parse_uploaded_file(buf)
 
 
 def _parse_uploaded_file(upload):
@@ -362,6 +385,35 @@ def init_db():
         c.execute(TABLE_SAVED_VIEWS)
         c.execute(TABLE_ALLOWED_USERS)
     _ensure_updated_at()
+
+
+def _get_allowlist_ids_from_config() -> list[str]:
+    """Return allowlisted identifiers from ALLOWLIST_IDS (secrets or env)."""
+    try:
+        ids = st.secrets.get("ALLOWLIST_IDS") or os.environ.get("ALLOWLIST_IDS", "")
+    except Exception:
+        ids = os.environ.get("ALLOWLIST_IDS", "")
+    return [s.strip() for s in str(ids).split(",") if s.strip()]
+
+
+def _sync_allowlist_from_config():
+    """If ALLOWLIST_IDS is set, keep DB allowlist in sync with that config.
+
+    This lets admins manage the allowlist from the backend (secrets/env)
+    instead of through the UI inside the tracker.
+    """
+    ids = _get_allowlist_ids_from_config()
+    if not ids:
+        return
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_conn() as c:
+        c.execute("DELETE FROM allowed_users")
+        for identifier in ids:
+            c.execute(
+                "INSERT INTO allowed_users (identifier, added_at) VALUES (?, ?)",
+                (identifier, now),
+            )
+    _sync_allowlist_from_config()
 
 
 def _allowlist_enabled() -> bool:
@@ -1198,47 +1250,61 @@ def main():
         st.session_state["traffic_logged"] = True
     daily = get_daily_traffic_count()
     st.sidebar.metric("Daily traffic", daily, help="Sessions today")
-    is_developer = _is_developer()
-    with st.sidebar.expander("Developer access", expanded=False):
-        if is_developer:
-            st.caption("Unlocked for this session.")
-            if st.button("Lock", key="dev_lock"):
-                st.session_state["developer_unlocked"] = False
-                _rerun()
-            # Manage allowed users (when allowlist is used)
-            st.divider()
-            st.caption("**Allowed users** (when ALLOWLIST_ENABLED=1)")
-            allowed = list_allowed_users()
-            if allowed:
-                for u in allowed[:10]:
-                    st.caption(f"• {u['identifier']}")
-                if len(allowed) > 10:
-                    st.caption(f"… and {len(allowed) - 10} more")
-            else:
-                st.caption("No users in list. Add below.")
-            add_id = st.text_input("Add user (name or email)", key="allowlist_add", placeholder="e.g. jane@company.com")
-            if st.button("Add", key="allowlist_add_btn") and add_id.strip():
-                if add_allowed_user(add_id.strip()):
-                    st.success("Added.")
-                    _rerun()
-                else:
-                    st.caption("Already in list.")
-            if allowed:
-                remove_id = st.selectbox("Remove user", [""] + [u["identifier"] for u in allowed], key="allowlist_remove")
-                if st.button("Remove", key="allowlist_remove_btn") and remove_id:
-                    remove_allowed_user(remove_id)
-                    st.success("Removed.")
-                    _rerun()
-        else:
-            key_in = st.text_input("Key", type="password", key="dev_key_input", placeholder="Enter key")
-            if st.button("Unlock", key="dev_unlock") and key_in.strip():
-                if key_in.strip() == _get_developer_key() and _get_developer_key():
-                    st.session_state["developer_unlocked"] = True
-                    _rerun()
-                else:
-                    st.error("Invalid key")
+    # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name (comments & history)", key="user_display_name", placeholder="e.g. Jane")
     st.sidebar.caption("Used for comments and \"Updated by\" in activity.")
+    current_user = (st.session_state.get("user_display_name") or "").strip()
+
+    is_developer = _is_developer()
+
+    # Helper: list of configured developer identifiers from secrets/env
+    def _get_developer_ids_list() -> list[str]:
+        try:
+            ids = st.secrets.get("DEVELOPER_IDS") or os.environ.get("DEVELOPER_IDS", "")
+        except Exception:
+            ids = os.environ.get("DEVELOPER_IDS", "")
+        return [s.strip().lower() for s in str(ids).split(",") if s.strip()]
+
+    # Optionally hide the Developer access section for non-developer users.
+    # If DEVELOPER_IDS is set (comma-separated names/emails),
+    # only those identifiers (case-insensitive) will see this expander.
+    def _developer_section_visible(user: str) -> bool:
+        """Show Developer access only for configured developers.
+
+        If DEVELOPER_IDS is set (comma-separated), only those names/emails
+        will ever see the Developer access box. If it is NOT set, the box
+        is hidden for everyone (no public developer UI).
+        """
+        ids_list = _get_developer_ids_list()
+        if not ids_list:
+            # No explicit developer list configured: hide for all users
+            return False
+        if _is_developer():
+            return True
+        return (user or "").strip().lower() in ids_list
+
+    # If the current user is listed in DEVELOPER_IDS, auto-unlock developer mode
+    dev_ids = _get_developer_ids_list()
+    if dev_ids and (current_user or "").strip().lower() in dev_ids and not is_developer:
+        st.session_state["developer_unlocked"] = True
+        is_developer = True
+
+    if _developer_section_visible(current_user):
+        with st.sidebar.expander("Developer access", expanded=False):
+            if is_developer:
+                st.caption("Unlocked for this session.")
+                if st.button("Lock", key="dev_lock"):
+                    st.session_state["developer_unlocked"] = False
+                    _rerun()
+            else:
+                key_in = st.text_input("Key", type="password", key="dev_key_input", placeholder="Enter key")
+                if st.button("Unlock", key="dev_unlock") and key_in.strip():
+                    if key_in.strip() == _get_developer_key() and _get_developer_key():
+                        st.session_state["developer_unlocked"] = True
+                        _rerun()
+                    else:
+                        st.error("Invalid key")
+
     st.sidebar.divider()
     section = st.sidebar.radio(
         "Section",
@@ -1252,11 +1318,11 @@ def main():
     if _allowlist_enabled() and not _is_developer():
         if not current_user:
             st.warning("Enter your name or email in the sidebar to access the tracker.")
-            st.info("If you don't have access, ask your admin to add you to the allowed users list.")
+            st.info("If you don't have access, contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added to the allowed users list.")
             st.stop()
         if not is_user_allowed(current_user):
             st.error("Access restricted. Your name or email is not on the authorized list.")
-            st.caption("Contact your admin to be added, or sign in with developer access if you have the key.")
+            st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
             st.stop()
 
     # Dashboard (global-tracker style: KPIs, trends, recent activity, report)
@@ -1401,6 +1467,40 @@ def main():
                             st.error(msg)
         else:
             st.info("Import and refresh are available only to developers. Unlock **Developer access** in the sidebar.")
+        github_data_url = _get_github_data_url()
+        if is_developer and github_data_url:
+            with st.expander("Load from GitHub", expanded=False):
+                st.caption("Pull the latest tracker data from a CSV or Excel file in your GitHub repo. Set **GITHUB_TRACKER_CSV_URL** in app Secrets to the raw file URL (e.g. from raw.githubusercontent.com).")
+                if st.button("Load from GitHub", key="btn_load_github"):
+                    try:
+                        with st.spinner("Fetching from GitHub…"):
+                            rows_from_file = _fetch_and_parse_from_url(github_data_url)
+                        imported = 0
+                        for r in rows_from_file:
+                            row = _normalize_gsheet_row(dict(r))
+                            rid = (row.get("record_id") or "").strip()
+                            if not rid:
+                                continue
+                            if not row.get("report_date") or not row.get("site_id") or not row.get("region") or not row.get("metric_name"):
+                                continue
+                            upsert_row({
+                                "record_id": rid,
+                                "report_date": (row.get("report_date") or "").strip(),
+                                "site_id": (row.get("site_id") or "").strip(),
+                                "site_name": row.get("site_name") or "",
+                                "region": row.get("region") or "KSA",
+                                "metric_name": (row.get("metric_name") or "").strip(),
+                                "value": row.get("value"),
+                                "status": row.get("status") or "",
+                                "notes": row.get("notes") or "",
+                            })
+                            imported += 1
+                        st.success(f"Imported {imported} row(s) from GitHub. Existing record_ids were updated.")
+                        _rerun()
+                    except (URLError, HTTPError) as e:
+                        st.error(f"Could not fetch from GitHub: {e}")
+                    except Exception as e:
+                        st.error(f"Import failed: {e}")
         if is_developer:
             with st.expander("Import from CSV or Excel", expanded=False):
                 st.caption("Upload CSV or Excel (.xlsx) to import into the main data. Columns: record_id, report_date, site_id, site_name, region, metric_name, value, status, notes.")
