@@ -1870,6 +1870,8 @@ def main():
                         display_cols = list(rows_filtered[0].keys())
                     if rows_filtered and display_cols:
                         df_display = pd.DataFrame(rows_filtered)[display_cols]
+                        # Ensure all columns are string so st.data_editor TextColumn is compatible (avoids type errors)
+                        df_display = df_display.astype(str).replace("nan", "")
                         if is_developer:
                             col_config = {c: st.column_config.TextColumn(c) for c in display_cols}
                             col_config["record_id"] = st.column_config.TextColumn("record_id", disabled=True)
