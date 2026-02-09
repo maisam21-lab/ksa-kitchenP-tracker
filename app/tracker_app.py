@@ -1318,7 +1318,7 @@ def main():
     init_db()
 
     # Pre-fill name/email from URL so users can bookmark and avoid typing each time
-    prefilled = st.query_params.get("email") or st.query_params.get("name") or st.query_params.get("user")
+    prefilled = (st.query_params.get("email") or st.query_params.get("name") or st.query_params.get("user") or "").strip()
     if prefilled:
         st.session_state["user_display_name"] = prefilled
 
@@ -1413,8 +1413,13 @@ def main():
     st.sidebar.metric("Updated today", updated_today, help="Records changed today — shows data freshness")
     # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
-    st.sidebar.caption("Used for access, comments, and \"Updated by\". To avoid typing each time, bookmark the app with ?email=your@email.com in the URL.")
     current_user = (st.session_state.get("user_display_name") or "").strip()
+    # Keep email in URL so refreshing or reopening the bookmarked link remembers you (no retyping)
+    if current_user and current_user != prefilled:
+        st.query_params["email"] = current_user
+    st.sidebar.caption("Used for access, comments, and \"Updated by\". We save it in the URL — bookmark this page and you won't need to retype.")
+    st.sidebar.markdown("---")
+    st.sidebar.caption("Developed by **RevOps** team")
 
     is_developer = _is_developer()
 
@@ -1522,6 +1527,8 @@ def main():
             if st.session_state.pop("dash_clear_filters", False):
                 for key in ("dash_f_date_multi", "dash_f_site_multi", "dash_f_region_multi", "dash_f_metric_multi", "dash_search", "dash_f_status_filter"):
                     st.session_state[key] = [] if "multi" in key else ("" if key == "dash_search" else None)
+                st.session_state["dash_from_date"] = None
+                st.session_state["dash_to_date"] = None
                 _rerun()
             view_id = st.session_state.pop("dash_apply_saved_view", None)
             if view_id is not None and is_tracker:
@@ -1563,6 +1570,13 @@ def main():
                         if st.button("Clear filters", key="dash_btn_clear"):
                             st.session_state["dash_clear_filters"] = True
                             _rerun()
+                    # Optional date range (report_date between From and To)
+                    st.caption("Optional date range (filters by report date):")
+                    d1, d2 = st.columns(2)
+                    with d1:
+                        from_date = st.date_input("From report date", value=None, key="dash_from_date")
+                    with d2:
+                        to_date = st.date_input("To report date", value=None, key="dash_to_date")
             rows_filtered = rows
             if is_tracker:
                 filters = {
@@ -1574,6 +1588,27 @@ def main():
                 rows_filtered = filter_rows(rows, {k: v for k, v in filters.items() if v})
                 if st.session_state.get("dash_f_status_filter") == "no_status":
                     rows_filtered = [r for r in rows_filtered if not (r.get("status") or "").strip() or str(r.get("status") or "").strip().lower() in ("no status", "n/a", "na", "—", "-")]
+                # Optional date range (report_date)
+                from_date = st.session_state.get("dash_from_date")
+                to_date = st.session_state.get("dash_to_date")
+                if from_date or to_date:
+                    def _parse_rd(s):
+                        if not s:
+                            return None
+                        s = str(s).strip()[:10]
+                        try:
+                            return datetime.strptime(s, "%Y-%m-%d").date()
+                        except Exception:
+                            try:
+                                return datetime.strptime(s, "%d/%m/%Y").date()
+                            except Exception:
+                                return None
+                    rows_filtered = [
+                        r for r in rows_filtered
+                        if (_parse_rd(r.get("report_date")) is not None
+                            and (from_date is None or _parse_rd(r.get("report_date")) >= from_date)
+                            and (to_date is None or _parse_rd(r.get("report_date")) <= to_date))
+                    ]
             if (search or "").strip():
                 term = (search or "").strip().lower()
                 all_keys = set()
@@ -1582,11 +1617,22 @@ def main():
                 rows_filtered = [r for r in rows_filtered if any(term in str(r.get(k) or "").lower() for k in (all_keys or ["_"]))]
             st.markdown("---")
             st.caption(f"**{len(rows_filtered)}** of **{total}** rows")
+            if total > 0 and len(rows_filtered) == 0:
+                st.info("No rows match your filters. Try clearing or relaxing filters.")
+            # Column picker: choose which columns to show in the table
+            if rows_filtered:
+                all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
+                default_show = st.session_state.get("dash_columns_show") or all_cols
+                default_show = [c for c in default_show if c in all_cols] or all_cols
+                cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="dash_columns_show", placeholder="All columns")
+                if not cols_to_show:
+                    cols_to_show = all_cols
             if HAS_EXCEL and rows_filtered:
-                st.dataframe(pd.DataFrame(rows_filtered), use_container_width=True, hide_index=True)
+                display_df = pd.DataFrame(rows_filtered)[cols_to_show] if cols_to_show else pd.DataFrame(rows_filtered)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
             elif rows_filtered:
                 for r in rows_filtered[:100]:
-                    st.json(r)
+                    st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
                 if len(rows_filtered) > 100:
                     st.caption(f"… and {len(rows_filtered) - 100} more.")
             if rows_filtered:
@@ -1628,7 +1674,16 @@ def main():
                                     val_col = pv_agg.replace("Mean of ", "")
                                     pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, values=val_col, aggfunc="mean", fill_value=0)
                                 pivot = pivot.round(2)
+                                # Subtotals: row totals (right) and column total (bottom)
+                                pivot["Total"] = pivot.sum(axis=1)
+                                pivot.loc["Total", :] = pivot.sum(axis=0)
                             st.dataframe(pivot, use_container_width=True, hide_index=False)
+                            # Download current pivot as CSV
+                            try:
+                                pivot_csv = pivot.to_csv()
+                                st.download_button("Download pivot (CSV)", data=pivot_csv, file_name="dashboard_pivot.csv", mime="text/csv", key="dash_dl_pivot_csv")
+                            except Exception:
+                                pass
                             try:
                                 import plotly.graph_objects as go
                                 fig = go.Figure(data=go.Heatmap(
@@ -2015,6 +2070,302 @@ def main():
                                         _rerun()
                                     else:
                                         st.error("Fill all required fields.")
+                else:
+                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
+
+if __name__ == "__main__":
+    main()
+                    # Apply saved view (set filter state and rerun)
+                    view_id = st.session_state.pop("apply_saved_view", None)
+                    if view_id is not None:
+                        v = get_saved_view(view_id)
+                        if v and v.get("filters_json"):
+                            f = v["filters_json"]
+                            for key, sk in [("report_date", "f_date_multi"), ("site_id", "f_site_multi"), ("region", "f_region_multi"), ("metric_name", "f_metric_multi")]:
+                                val = f.get(key)
+                                st.session_state[sk] = val if isinstance(val, list) else ([val] if val else [])
+                            st.session_state["smart_tracker_search"] = f.get("search", "")
+                        _rerun()
+                    last_updated = get_last_updated(rows)
+                    c1, c2, c3, c4 = st.columns(4)
+                    with c1:
+                        st.metric("Total records", len(rows))
+                    with c2:
+                        st.metric("Sites", len(set(r.get("site_id") for r in rows if r.get("site_id"))))
+                    with c3:
+                        st.metric("Metrics", len(set(r.get("metric_name") for r in rows if r.get("metric_name"))))
+                    with c4:
+                        st.metric("Last updated", last_updated or "—")
+                    st.divider()
+
+                    # Saved views (global-tracker style)
+                    with st.expander("Saved views", expanded=False):
+                        saved_list = list_saved_views()
+                        if saved_list:
+                            view_opts = {f"{v['name']} ({v['created_at'][:10]})": v["id"] for v in saved_list}
+                            sv_col1, sv_col2 = st.columns([2, 1])
+                            with sv_col1:
+                                chosen_view = st.selectbox("Load view", ["— None —"] + list(view_opts.keys()), key="saved_view_select")
+                            with sv_col2:
+                                if st.button("Apply view", key="apply_view_btn") and chosen_view and chosen_view != "— None —":
+                                    st.session_state["apply_saved_view"] = view_opts.get(chosen_view)
+                                    _rerun()
+                        save_name = st.text_input("Save current filters as view", key="saved_view_name", placeholder="e.g. Riyadh weekly")
+                        if st.button("Save view", key="save_view_btn") and save_name.strip():
+                            save_saved_view(save_name.strip(), {
+                                "report_date": st.session_state.get("f_date_multi") or [],
+                                "site_id": st.session_state.get("f_site_multi") or [],
+                                "region": st.session_state.get("f_region_multi") or [],
+                                "metric_name": st.session_state.get("f_metric_multi") or [],
+                                "search": st.session_state.get("smart_tracker_search", ""),
+                            })
+                            st.success("View saved.")
+                            _rerun()
+
+                    # Filter bar + row (same look as other tabs)
+                    st.markdown(
+                        '<div style="background: linear-gradient(90deg, #F0FDFA 0%, #F8FAFC 100%); border-left: 4px solid #0F766E; '
+                        'padding: 10px 14px; margin-bottom: 12px; border-radius: 0 8px 8px 0; font-weight: 600; color: #134E4A;">'
+                        "Filter by column</div>",
+                        unsafe_allow_html=True,
+                    )
+                    tracker_cols = ["record_id", "report_date", "site_id", "site_name", "region", "metric_name", "value", "status", "notes"]
+                    uniq = lambda k: sorted(set(r.get(k) for r in rows if r.get(k)))
+                    multiselect_keys = ("report_date", "site_id", "region", "metric_name")
+                    default_dates = [x for x in (st.session_state.get("f_date_multi") or []) if x in uniq("report_date")]
+                    default_sites = [x for x in (st.session_state.get("f_site_multi") or []) if x in uniq("site_id")]
+                    default_reg = [x for x in (st.session_state.get("f_region_multi") or []) if x in uniq("region")]
+                    default_met = [x for x in (st.session_state.get("f_metric_multi") or []) if x in uniq("metric_name")]
+                    fcols = st.columns(9)
+                    filter_vals_tracker = {}
+                    for i, col in enumerate(tracker_cols):
+                        with fcols[i]:
+                            st.markdown(f'<span style="font-size: 0.85rem; font-weight: 600; color: #475569;">{col}</span>', unsafe_allow_html=True)
+                            if col in multiselect_keys:
+                                opts = uniq(col)
+                                default = default_dates if col == "report_date" else default_sites if col == "site_id" else default_reg if col == "region" else default_met
+                                key = {"report_date": "f_date_multi", "site_id": "f_site_multi", "region": "f_region_multi", "metric_name": "f_metric_multi"}[col]
+                                filter_vals_tracker[col] = st.multiselect(col, opts, default=default, key=key, placeholder="All", label_visibility="collapsed")
+                            else:
+                                filter_vals_tracker[col] = st.text_input(col, key=f"f_txt_{col}", placeholder="Filter…", label_visibility="collapsed")
+                    clear_col, _ = st.columns([1, 8])
+                    with clear_col:
+                        if st.button("Clear all filters", key="btn_clear_filters"):
+                            st.session_state["smart_tracker_clear_filters"] = True
+                            _rerun()
+                    filters = {
+                        "report_date": None if not filter_vals_tracker.get("report_date") else filter_vals_tracker["report_date"],
+                        "site_id": None if not filter_vals_tracker.get("site_id") else filter_vals_tracker["site_id"],
+                        "region": None if not filter_vals_tracker.get("region") else filter_vals_tracker["region"],
+                        "metric_name": None if not filter_vals_tracker.get("metric_name") else filter_vals_tracker["metric_name"],
+                    }
+                    rows_filtered = filter_rows(rows, filters)
+                    for col in ("record_id", "site_name", "value", "status", "notes"):
+                        val = (filter_vals_tracker.get(col) or "").strip() if isinstance(filter_vals_tracker.get(col), str) else ""
+                        if val:
+                            term = val.lower()
+                            rows_filtered = [r for r in rows_filtered if term in str(r.get(col) or "").lower()]
+                    # Saved view may restore a global search
+                    saved_search = (st.session_state.get("smart_tracker_search") or "").strip()
+                    if saved_search:
+                        term = saved_search.lower()
+                        rows_filtered = [r for r in rows_filtered if any(term in str(r.get(k) or "").lower() for k in ("record_id", "site_id", "site_name", "region", "metric_name", "status", "notes"))]
+                    st.caption(f"Showing **{len(rows_filtered)}** of **{len(rows)}** record(s). Filters do not change stored data.")
+                    st.divider()
+
+                    # Summary charts (interactive: respond to current filters)
+                    if rows_filtered:
+                        if HAS_EXCEL:
+                            df_f = pd.DataFrame(rows_filtered)
+                            chart_col1, chart_col2 = st.columns(2)
+                            with chart_col1:
+                                by_region = df_f.get("region", pd.Series(dtype=object)).value_counts()
+                                if not by_region.empty:
+                                    st.bar_chart(pd.DataFrame({"Records": by_region}), height=220)
+                            with chart_col2:
+                                by_metric = df_f.get("metric_name", pd.Series(dtype=object)).value_counts()
+                                if not by_metric.empty:
+                                    st.bar_chart(pd.DataFrame({"Records": by_metric}), height=220)
+
+                    # Single interactive table: edit in place, then Save or Download
+                    display_cols = [c for c in EXPORT_COLUMNS if c in (rows_filtered[0] if rows_filtered else [])]
+                    if not display_cols and rows_filtered:
+                        display_cols = list(rows_filtered[0].keys())
+                    if rows_filtered and display_cols:
+                        df_display = pd.DataFrame(rows_filtered)[display_cols]
+                        # Ensure all columns are string so st.data_editor TextColumn is compatible (avoids type errors)
+                        df_display = df_display.astype(str).replace("nan", "")
+                        if is_developer:
+                            col_config = {c: st.column_config.TextColumn(c) for c in display_cols}
+                            col_config["record_id"] = st.column_config.TextColumn("record_id", disabled=True)
+                            edited_df = st.data_editor(
+                                df_display,
+                                column_config=col_config,
+                                hide_index=True,
+                                key="smart_tracker_editor",
+                                use_container_width=True,
+                                num_rows="fixed",
+                            )
+                            btn_col1, btn_col2, _ = st.columns([1, 1, 2])
+                            with btn_col1:
+                                if st.button("Save changes to database", key="btn_save_editor"):
+                                    try:
+                                        by_user = st.session_state.get("user_display_name", "")
+                                        for _, r in edited_df.iterrows():
+                                            rec = {}
+                                            for k, v in r.to_dict().items():
+                                                if v is None or (isinstance(v, float) and (v != v)):
+                                                    rec[k] = None if k == "value" else ""
+                                                else:
+                                                    rec[k] = v
+                                            rid = str(rec.get("record_id", "")).strip()
+                                            if not rid:
+                                                continue
+                                            update_row(rid, rec, by_user=by_user)
+                                        st.success("Saved.")
+                                        _rerun()
+                                    except Exception as e:
+                                        st.error(str(e))
+                            with btn_col2:
+                                csv_filtered = export_csv(rows_filtered)
+                                st.download_button(
+                                    "Download filtered CSV",
+                                    data=csv_filtered,
+                                    file_name="smart_tracker_filtered.csv",
+                                    mime="text/csv",
+                                    key="dl_filtered_csv",
+                                )
+                        else:
+                            st.dataframe(df_display, use_container_width=True, hide_index=True)
+                            csv_filtered = export_csv(rows_filtered)
+                            st.download_button(
+                                "Download filtered CSV",
+                                data=csv_filtered,
+                                file_name="smart_tracker_filtered.csv",
+                                mime="text/csv",
+                                key="dl_filtered_csv",
+                            )
+                    elif rows_filtered:
+                        st.caption("No standard columns to display. Use the **Exports** expander above for full data.")
+
+                    # Comments & activity (Quip-style)
+                    if rows_filtered:
+                        with st.expander("Comments & activity (by record)"):
+                            st.caption("Select a record to view or add comments and see activity history. Use **@name** in comments to mention someone.")
+                            record_ids = [r.get("record_id") for r in rows_filtered if r.get("record_id")]
+                            selected_rid = st.selectbox("Record", record_ids, key="comment_record_select", format_func=lambda x: str(x)[:60] + ("…" if len(str(x)) > 60 else ""))
+                            if selected_rid:
+                                activity = list_record_activity(selected_rid)
+                                comments = list_comments(selected_rid)
+                                ac, co = st.columns(2)
+                                with ac:
+                                    st.markdown("**Activity**")
+                                    if not activity:
+                                        st.caption("No activity yet.")
+                                    else:
+                                        for a in activity[:15]:
+                                            who = (a.get("by_user") or "—") or "—"
+                                            st.caption(f"{a.get('at', '')[:16]} · **{a.get('action', '')}** by {who}")
+                                with co:
+                                    st.markdown("**Comments**")
+                                    for c in comments:
+                                        st.caption(f"**{c.get('author', '')}** · {c.get('created_at', '')[:16]}")
+                                        st.markdown(c.get("comment_text", ""))
+                                    st.markdown("**Add comment**")
+                                    with st.form("comment_form"):
+                                        author = st.text_input("Your name", value=st.session_state.get("user_display_name", ""), key="comment_author")
+                                        msg = st.text_area("Comment (use @name to mention)")
+                                        if st.form_submit_button("Post"):
+                                            if msg.strip():
+                                                add_comment(selected_rid, author or "Anonymous", msg)
+                                                st.success("Comment added.")
+                                                _rerun()
+                                            else:
+                                                st.error("Enter a comment.")
+
+            with tab_add:
+                if not is_developer:
+                    st.info("Only developers can add or edit source data. Unlock **Developer access** in the sidebar.")
+                    st.caption("You can still view, filter, search, export, and add comments.")
+                else:
+                    st.caption("Add new records only. Required: record_id, report_date, site_id, region, metric_name.")
+                    templates = list_templates()
+                    template_options = {f"{t['name']} ({t['created_at'][:10]})": t["id"] for t in templates}
+                    if template_options:
+                        tcol1, tcol2 = st.columns([2, 1])
+                        with tcol1:
+                            chosen = st.selectbox("Load template", options=["— None —"] + list(template_options.keys()), key="template_select")
+                        with tcol2:
+                            if st.button("Apply template", key="btn_apply_tpl"):
+                                if chosen and chosen != "— None —":
+                                    tid = template_options.get(chosen)
+                                    if tid:
+                                        t = get_template(tid)
+                                        if t and t.get("data"):
+                                            st.session_state["add_form_template"] = t["data"]
+                                            _rerun()
+                        defaults = st.session_state.pop("add_form_template", None) or {}
+                    else:
+                        defaults = {}
+                    with st.form("add_form"):
+                        record_id = st.text_input("record_id *", value=defaults.get("record_id", ""))
+                        report_date = st.text_input("report_date * (YYYY-MM-DD)", value=defaults.get("report_date", ""))
+                        site_id = st.text_input("site_id *", value=defaults.get("site_id", ""))
+                        site_name = st.text_input("site_name", value=defaults.get("site_name", ""))
+                        region = st.text_input("region", value=defaults.get("region", "KSA"))
+                        metric_name = st.text_input("metric_name *", value=defaults.get("metric_name", ""))
+                        value = st.text_input("value (number or leave empty)", value=defaults.get("value", ""))
+                        status = st.text_input("status", value=defaults.get("status", ""))
+                        notes = st.text_input("notes", value=defaults.get("notes", ""))
+                        if st.form_submit_button("Add"):
+                            if record_id and report_date and site_id and region and metric_name:
+                                by_user = st.session_state.get("user_display_name", "")
+                                insert_row({
+                                    "record_id": record_id.strip(),
+                                    "report_date": report_date.strip(),
+                                    "site_id": site_id.strip(),
+                                    "site_name": site_name,
+                                    "region": region or "KSA",
+                                    "metric_name": metric_name.strip(),
+                                    "value": value,
+                                    "status": status,
+                                    "notes": notes,
+                                }, by_user=by_user)
+                                st.success("Added.")
+                                _rerun()
+                            else:
+                                st.error("Fill required fields: record_id, report_date, site_id, region, metric_name.")
+                    with st.expander("Save as template"):
+                        st.caption("Save current values as a reusable template for the Add form.")
+                        with st.form("save_template_form"):
+                            tpl_name = st.text_input("Template name", key="tpl_name", placeholder="e.g. Riyadh weekly")
+                            tpl_id = st.text_input("record_id", key="tpl_record_id")
+                            tpl_date = st.text_input("report_date", key="tpl_report_date")
+                            tpl_site = st.text_input("site_id", key="tpl_site_id")
+                            tpl_site_name = st.text_input("site_name", key="tpl_site_name")
+                            tpl_region = st.text_input("region", value="KSA", key="tpl_region")
+                            tpl_metric = st.text_input("metric_name", key="tpl_metric")
+                            tpl_value = st.text_input("value", key="tpl_value")
+                            tpl_status = st.text_input("status", key="tpl_status")
+                            tpl_notes = st.text_input("notes", key="tpl_notes")
+                            if st.form_submit_button("Save template"):
+                                if tpl_name.strip():
+                                    save_template(tpl_name.strip(), {
+                                        "record_id": st.session_state.get("tpl_record_id", ""),
+                                        "report_date": st.session_state.get("tpl_report_date", ""),
+                                        "site_id": st.session_state.get("tpl_site_id", ""),
+                                        "site_name": st.session_state.get("tpl_site_name", ""),
+                                        "region": st.session_state.get("tpl_region", "KSA") or "KSA",
+                                        "metric_name": st.session_state.get("tpl_metric", ""),
+                                        "value": st.session_state.get("tpl_value", ""),
+                                        "status": st.session_state.get("tpl_status", ""),
+                                        "notes": st.session_state.get("tpl_notes", ""),
+                                    })
+                                    st.success("Template saved. Use \"Load template\" above to apply it.")
+                                    _rerun()
+                                else:
+                                    st.error("Enter a template name.")
+
                 else:
                     _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
 
