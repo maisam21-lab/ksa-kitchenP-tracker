@@ -108,6 +108,12 @@ def _fetch_and_parse_from_url(url: str):
     """Fetch CSV or Excel from URL; return list of dicts. Raises on failure."""
     with urlopen(url, timeout=60) as resp:
         content = resp.read()
+    # If we got HTML (e.g. GitHub blob or error page), raise a clear error
+    if content.lstrip()[:500].lower().startswith((b"<!doctype", b"<html")):
+        raise ValueError(
+            "The URL returned a web page instead of a file. Use the **raw** file URL: "
+            "on GitHub open the file, click 'Raw', and copy that URL (it must start with https://raw.githubusercontent.com/...)."
+        )
     name = url.split("/")[-1].split("?")[0] or "data.csv"
     if not name.lower().endswith((".csv", ".xlsx", ".xls")):
         name = "data.csv"
@@ -355,6 +361,16 @@ CREATE TABLE IF NOT EXISTS allowed_users (
 )
 """
 
+# App-wide discussions: comments and questions from users (not tied to a record)
+TABLE_APP_DISCUSSIONS = """
+CREATE TABLE IF NOT EXISTS app_discussions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    author TEXT NOT NULL,
+    message TEXT NOT NULL
+)
+"""
+
 
 def get_conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -384,6 +400,7 @@ def init_db():
         c.execute(TABLE_TRACKER_TEMPLATES)
         c.execute(TABLE_SAVED_VIEWS)
         c.execute(TABLE_ALLOWED_USERS)
+        c.execute(TABLE_APP_DISCUSSIONS)
     _ensure_updated_at()
 
 
@@ -467,6 +484,26 @@ def is_user_allowed(identifier: str) -> bool:
             (id_,),
         )
         return r.fetchone() is not None
+
+
+def insert_app_discussion(author: str, message: str) -> None:
+    """Add a discussion post (comment or question)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_conn() as c:
+        c.execute(
+            "INSERT INTO app_discussions (created_at, author, message) VALUES (?, ?, ?)",
+            (now, (author or "Anonymous").strip(), (message or "").strip()),
+        )
+
+
+def list_app_discussions(limit: int = 100) -> list[dict]:
+    """Return recent discussion posts, newest first."""
+    with get_conn() as c:
+        r = c.execute(
+            "SELECT id, created_at, author, message FROM app_discussions ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(row) for row in r]
 
 
 def list_rows():
@@ -1161,6 +1198,11 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide")
     init_db()
 
+    # Pre-fill name/email from URL so users can bookmark and avoid typing each time
+    prefilled = st.query_params.get("email") or st.query_params.get("name") or st.query_params.get("user")
+    if prefilled:
+        st.session_state["user_display_name"] = prefilled
+
     # KitchenPark-style theme: light header, teal hero + CTAs (match KitchenPark site)
     st.markdown("""
         <style>
@@ -1251,8 +1293,8 @@ def main():
     daily = get_daily_traffic_count()
     st.sidebar.metric("Daily traffic", daily, help="Sessions today")
     # Name / identity for comments, activity, and (optionally) developer visibility
-    st.sidebar.text_input("Your name (comments & history)", key="user_display_name", placeholder="e.g. Jane")
-    st.sidebar.caption("Used for comments and \"Updated by\" in activity.")
+    st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
+    st.sidebar.caption("Used for access, comments, and \"Updated by\". To avoid typing each time, bookmark the app with ?email=your@email.com in the URL.")
     current_user = (st.session_state.get("user_display_name") or "").strip()
 
     is_developer = _is_developer()
@@ -1308,7 +1350,7 @@ def main():
     st.sidebar.divider()
     section = st.sidebar.radio(
         "Section",
-        ["Dashboard", "Data", "Search"],
+        ["Dashboard", "Discussions", "Data", "Search"],
         index=0,
         label_visibility="collapsed",
     )
@@ -1410,6 +1452,36 @@ def main():
                 st.caption("Enter a search term and click Search.")
         return
 
+    # Discussions: app-wide comments and questions
+    if section == "Discussions":
+        st.title("Discussions")
+        st.caption("Ask questions or add comments. Visible to everyone with access to the tracker.")
+        current_name = (st.session_state.get("user_display_name") or "").strip()
+        with st.form("discussion_form", clear_on_submit=True):
+            author = st.text_input("Your name", value=current_name, key="discussion_author", placeholder="e.g. Jane")
+            message = st.text_area("Comment or question", key="discussion_message", placeholder="Type your message…", height=120)
+            if st.form_submit_button("Post"):
+                if not (message or "").strip():
+                    st.error("Please enter a message.")
+                else:
+                    insert_app_discussion(author or "Anonymous", message.strip())
+                    st.success("Posted.")
+                    _rerun()
+        st.divider()
+        st.subheader("Recent discussions")
+        posts = list_app_discussions(100)
+        if not posts:
+            st.info("No discussions yet. Post a comment or question above.")
+        else:
+            for p in posts:
+                with st.container():
+                    st.markdown(
+                        f"**{p.get('author') or 'Anonymous'}** · {p.get('created_at', '')[:19].replace('T', ' ')}"
+                    )
+                    st.markdown(p.get("message", ""))
+                    st.divider()
+        return
+
     # —— Data: all sheet tabs as horizontal tabs ——
     if section == "Data":
         st.title("Data")
@@ -1469,12 +1541,16 @@ def main():
             st.info("Import and refresh are available only to developers. Unlock **Developer access** in the sidebar.")
         github_data_url = _get_github_data_url()
         if is_developer and github_data_url:
-            with st.expander("Load from GitHub", expanded=False):
-                st.caption("Pull the latest tracker data from a CSV or Excel file in your GitHub repo. Set **GITHUB_TRACKER_CSV_URL** in app Secrets to the raw file URL (e.g. from raw.githubusercontent.com).")
+            with st.expander("Load from GitHub", expanded=True):
+                st.caption("Pull the latest tracker data from a CSV or Excel file in your GitHub repo. Set **GITHUB_TRACKER_CSV_URL** in app Secrets to the **raw** file URL (must start with `https://raw.githubusercontent.com/...`).")
+                st.code(github_data_url, language=None)
                 if st.button("Load from GitHub", key="btn_load_github"):
                     try:
                         with st.spinner("Fetching from GitHub…"):
                             rows_from_file = _fetch_and_parse_from_url(github_data_url)
+                        if not rows_from_file:
+                            st.warning("The file is empty or has no data rows.")
+                            _rerun()
                         imported = 0
                         for r in rows_from_file:
                             row = _normalize_gsheet_row(dict(r))
@@ -1497,8 +1573,12 @@ def main():
                             imported += 1
                         st.success(f"Imported {imported} row(s) from GitHub. Existing record_ids were updated.")
                         _rerun()
-                    except (URLError, HTTPError) as e:
-                        st.error(f"Could not fetch from GitHub: {e}")
+                    except HTTPError as e:
+                        st.error(f"Could not fetch from GitHub (HTTP {e.code}): {e.reason}. Check that the URL is correct and the repo/file is **public**. Use the **Raw** link from the file page on GitHub.")
+                    except URLError as e:
+                        st.error(f"Could not reach GitHub: {e.reason}. Check the URL and your network.")
+                    except ValueError as e:
+                        st.error(str(e))
                     except Exception as e:
                         st.error(f"Import failed: {e}")
         if is_developer:
