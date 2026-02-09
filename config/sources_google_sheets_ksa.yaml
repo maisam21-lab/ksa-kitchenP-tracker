@@ -1,0 +1,18 @@
+# KSA Kitchen Tracker — source = Google Sheets API (Google API)
+# 1. Enable Google Sheets API; create a service account and JSON key (or ask admin).
+# 2. Share the Google Sheet with the service account email (Viewer).
+# 3. Set credentials_path below or env GOOGLE_APPLICATION_CREDENTIALS to the JSON path.
+# 4. Run: python run_google_sheets_ksa.py  (after pip install -r requirements.txt)
+# See docs/GOOGLE_API_SETUP.md
+
+sources:
+  - id: ksa_kitchen_tracker
+    type: google_sheets
+    sheet_id: "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
+    table_name_or_gid: "1341293927"   # tab gid from URL #gid=... or use tab name e.g. "KSA Kitchen Tracker"
+    schema_ref: ksa_kitchen_tracker
+    credentials_path: scripts/credentials.json   # or set env GOOGLE_APPLICATION_CREDENTIALS
+
+output:
+  type: file
+  path: data/output

@@ -1,0 +1,24 @@
+# Source definitions — single source of truth for extract configuration.
+# Add or edit sources here; ETL reads this only (no per-user state).
+
+sources:
+  - id: example_events
+    type: file
+    path: data/input/events.csv
+    schema_ref: events
+    # type: bigquery
+    # project: my-project
+    # dataset: raw
+    # table: events
+  # - id: api_metrics
+  #   type: http
+  #   url: https://api.example.com/v1/metrics
+  #   schema_ref: metrics
+
+output:
+  type: file
+  path: data/output
+  # For Looker Studio: use BigQuery and point Looker to the dataset.
+  # type: bigquery
+  # project: my-project
+  # dataset: bi_modeled

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KSA Kitchen Tracker - Auto Refresh Execution Log",
+  "description": "Audit log: when each sheet was refreshed (Report Id, Status, User)",
+  "type": "object",
+  "properties": {
+    "Refresh Time": { "type": "string" },
+    "Sheet": { "type": "string" },
+    "Operation": { "type": "string" },
+    "Status": { "type": "string" },
+    "User": { "type": "string" }
+  },
+  "required": ["Refresh Time", "Sheet", "Operation", "Status", "User"],
+  "additionalProperties": true
+}

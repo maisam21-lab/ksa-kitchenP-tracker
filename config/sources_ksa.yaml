@@ -1,0 +1,12 @@
+# KSA Kitchen Tracker — test config (single source of truth for this tracker)
+# Use: python run_ksa_test.py
+
+sources:
+  - id: ksa_kitchen_tracker
+    type: file
+    path: data/input/ksa_kitchen_tracker.csv
+    schema_ref: ksa_kitchen_tracker
+
+output:
+  type: file
+  path: data/output

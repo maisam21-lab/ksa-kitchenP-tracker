@@ -1,0 +1,10 @@
+# Trackers theme: dark teal accent, clean light layout
+[theme]
+primaryColor = "#2E7D6E"
+backgroundColor = "#FAFBFC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1E293B"
+font = "sans serif"
+
+[server]
+headless = true

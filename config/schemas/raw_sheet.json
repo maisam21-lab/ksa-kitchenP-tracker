@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Raw sheet",
+  "description": "Accept any tab from Google Sheets (first row = headers). Use for tabs without a specific schema.",
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": true
+}

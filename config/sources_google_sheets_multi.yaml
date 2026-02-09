@@ -1,0 +1,34 @@
+# Read MULTIPLE sheets (tabs) from the same Google Sheet — no CSV (CSV only gives one tab).
+# 1. Share the workbook with the service account (Viewer).
+# 2. Set credentials_path or GOOGLE_APPLICATION_CREDENTIALS.
+# 3. Run: py run_etl.py  (with config path) or: py -c "import sys; sys.path.insert(0,'src'); from etl.pipeline import run_pipeline; run_pipeline('config/sources_google_sheets_multi.yaml')"
+# Each source = one tab. Output: data/output/<source_id>.csv
+
+sources:
+  # Tab 1: KSA Kitchen Tracker (validated with KSA schema)
+  - id: ksa_kitchen_tracker
+    type: google_sheets
+    sheet_id: "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
+    table_name_or_gid: "1341293927"   # or use exact tab name: "KSA Kitchen Tracker"
+    schema_ref: ksa_kitchen_tracker
+    credentials_path: scripts/credentials.json
+
+  # Tab 2: Example — use tab NAME (as it appears in the workbook)
+  # - id: price_multipliers
+  #   type: google_sheets
+  #   sheet_id: "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
+  #   table_name_or_gid: "Price Multipliers"
+  #   schema_ref: raw_sheet
+  #   credentials_path: scripts/credentials.json
+
+  # Tab 3: Or use tab GID (open the tab, copy from URL #gid=...)
+  # - id: sf_kitchen_data
+  #   type: google_sheets
+  #   sheet_id: "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
+  #   table_name_or_gid: "0"   # first sheet is often gid 0
+  #   schema_ref: raw_sheet
+  #   credentials_path: scripts/credentials.json
+
+output:
+  type: file
+  path: data/output

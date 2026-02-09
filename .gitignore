@@ -1,0 +1,11 @@
+# Do not commit Google service account key or Trino secrets
+scripts/credentials.json
+.secrets/
+.streamlit/secrets.toml
+
+# Virtual env
+.venv/
+venv/
+
+# Your own product (local SQLite from tracker app)
+app/data/*.db

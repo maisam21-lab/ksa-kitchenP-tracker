@@ -1,0 +1,4 @@
+event_id,event_date,event_name,user_id,value
+evt-001,2025-02-01,page_view,u1,1
+evt-002,2025-02-01,signup,u2,
+evt-003,2025-02-02,purchase,u1,99.50

@@ -1,0 +1,18 @@
+# KSA Kitchen Tracker — source = your own product (SQLite from app/tracker_app.py)
+# 1. Run the tracker app: streamlit run app/tracker_app.py
+# 2. Add/edit/remove entries in the app (data stored in app/data/tracker.db)
+# 3. Run ETL: python run_sqlite_ksa.py  (reads from the same DB, writes data/output/ksa_kitchen_tracker.csv)
+# See docs/CREATE_YOUR_OWN_PRODUCT.md
+
+sources:
+  - id: ksa_kitchen_tracker
+    type: sqlite
+    db_path: app/data/tracker.db
+    table_name: ksa_kitchen_tracker
+    schema_ref: ksa_kitchen_tracker
+    # Optional: use a query instead of table_name
+    # query: "SELECT * FROM ksa_kitchen_tracker WHERE region = 'KSA'"
+
+output:
+  type: file
+  path: data/output

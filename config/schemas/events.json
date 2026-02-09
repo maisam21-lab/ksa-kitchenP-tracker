@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Events",
+  "description": "Canonical schema for event data — enforces single source of truth",
+  "type": "object",
+  "properties": {
+    "event_id": { "type": "string", "minLength": 1 },
+    "event_date": { "type": "string", "format": "date" },
+    "event_name": { "type": "string" },
+    "user_id": { "type": ["string", "null"] },
+    "value": { "type": ["number", "null"] }
+  },
+  "required": ["event_id", "event_date", "event_name"],
+  "additionalProperties": true
+}

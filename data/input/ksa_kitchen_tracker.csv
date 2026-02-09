@@ -1,0 +1,9 @@
+record_id,report_date,site_id,site_name,region,metric_name,value,status,notes
+KSA-001,2025-02-01,SITE-RUH-01,Kitchen Riyadh 01,KSA,inventory_count,150,OK,
+KSA-002,2025-02-01,SITE-RUH-01,Kitchen Riyadh 01,KSA,orders_today,42,OK,
+KSA-003,2025-02-01,SITE-JED-01,Kitchen Jeddah 01,KSA,inventory_count,98,OK,
+KSA-004,2025-02-01,SITE-JED-01,Kitchen Jeddah 01,KSA,orders_today,28,OK,
+KSA-005,2025-02-02,SITE-RUH-01,Kitchen Riyadh 01,KSA,inventory_count,142,Low,Restock scheduled
+KSA-006,2025-02-02,SITE-RUH-01,Kitchen Riyadh 01,KSA,orders_today,55,OK,
+KSA-007,2025-02-02,SITE-DMM-01,Kitchen Dammam 01,KSA,inventory_count,200,OK,
+KSA-008,2025-02-02,SITE-DMM-01,Kitchen Dammam 01,KSA,orders_today,31,OK,

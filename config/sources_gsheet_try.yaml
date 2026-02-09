@@ -1,0 +1,18 @@
+# Try Google Sheets API — use your sheet and .secrets/gsheet-service.json
+# 1. Put your service account JSON at:  .secrets/gsheet-service.json  (or scripts/credentials.json)
+# 2. Share the Google Sheet with the service account email (Viewer).
+# 3. Set sheet_id and table_name_or_gid below (tab name or gid from URL #gid=...).
+# 4. Run: py run_google_sheets_ksa.py  (uses this config if you point to it)
+#    Or: py -c "import sys; sys.path.insert(0,'src'); from etl.pipeline import run_pipeline; run_pipeline('config/sources_gsheet_try.yaml')"
+
+sources:
+  - id: ksa_kitchen_tracker
+    type: google_sheets
+    sheet_id: "15yjrjG0w_caal_ONp7MJeRkNDDNen76YSvgrxKPLds"
+    table_name_or_gid: "0"
+    schema_ref: ksa_kitchen_tracker
+    credentials_path: .secrets/gsheet-service.json
+
+output:
+  type: file
+  path: data/output

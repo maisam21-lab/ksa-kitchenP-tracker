@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KSA Kitchen Tracker",
+  "description": "Canonical schema for KSA Kitchen Tracker — single source of truth for kitchen metrics",
+  "type": "object",
+  "properties": {
+    "record_id": { "type": "string", "minLength": 1 },
+    "report_date": { "type": "string", "format": "date" },
+    "site_id": { "type": "string" },
+    "site_name": { "type": "string" },
+    "region": { "type": "string", "enum": ["KSA"] },
+    "metric_name": { "type": "string" },
+    "value": { "type": ["number", "string", "null"] },
+    "status": { "type": ["string", "null"] },
+    "notes": { "type": ["string", "null"] }
+  },
+  "required": ["record_id", "report_date", "site_id", "region", "metric_name"],
+  "additionalProperties": true
+}

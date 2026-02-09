@@ -1,0 +1,27 @@
+# KSA Kitchen Tracker — source = Airtable (replaces Google Sheets)
+# 1. Create an Airtable base with a table matching the schema (see docs/AIRTABLE_SETUP.md).
+# 2. Set env AIRTABLE_API_KEY or put api_key below (do not commit real keys).
+# 3. Run: python run_airtable_ksa.py  (from repo root, after pip install -r requirements.txt)
+
+sources:
+  - id: ksa_kitchen_tracker
+    type: airtable
+    base_id: YOUR_BASE_ID          # From Airtable URL: airtable.com/BASE_ID/...
+    table_name: KSA Kitchen Tracker   # Table name or table ID
+    schema_ref: ksa_kitchen_tracker
+    # api_key: optional; else set env AIRTABLE_API_KEY
+    # Map Airtable field names to schema if different (optional):
+    # field_mapping:
+    #   "Record ID": record_id
+    #   "Report Date": report_date
+    #   "Site ID": site_id
+    #   "Site Name": site_name
+    #   "Region": region
+    #   "Metric Name": metric_name
+    #   "Value": value
+    #   "Status": status
+    #   "Notes": notes
+
+output:
+  type: file
+  path: data/output
