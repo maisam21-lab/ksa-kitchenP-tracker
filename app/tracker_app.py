@@ -534,17 +534,38 @@ def remove_allowed_user(identifier: str) -> bool:
         return c.rowcount > 0
 
 
+def _allowlist_ids_from_secrets() -> set[str]:
+    """IDs (emails/names) from ALLOWLIST_IDS secrets/env, lowercased."""
+    try:
+        raw = st.secrets.get("ALLOWLIST_IDS") or os.environ.get("ALLOWLIST_IDS", "")
+    except Exception:
+        raw = os.environ.get("ALLOWLIST_IDS", "")
+    ids: set[str] = set()
+    for part in str(raw).split(","):
+        s = part.strip()
+        if s:
+            ids.add(s.lower())
+    return ids
+
+
 def is_user_allowed(identifier: str) -> bool:
-    """True if the given email/name is in the allowlist (case-insensitive)."""
-    id_ = (identifier or "").strip()
+    """True if the given email/name is in the allowlist (secrets or DB, case-insensitive)."""
+    id_ = (identifier or "").strip().lower()
     if not id_:
         return False
+
+    # 1) From ALLOWLIST_IDS in secrets/env
+    allowed = _allowlist_ids_from_secrets()
+
+    # 2) From allowed_users table (Developer UI)
     with get_conn() as c:
-        r = c.execute(
-            "SELECT 1 FROM allowed_users WHERE LOWER(TRIM(identifier)) = LOWER(?) LIMIT 1",
-            (id_,),
-        )
-        return r.fetchone() is not None
+        r = c.execute("SELECT identifier FROM allowed_users")
+        for row in r:
+            s = (row["identifier"] or "").strip().lower()
+            if s:
+                allowed.add(s)
+
+    return id_ in allowed
 
 
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
