@@ -1196,7 +1196,10 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
     out = {}
     for ws in spreadsheet.worksheets():
         rows = ws.get_all_values()
-        if not rows:
+        if not rows:   cd /workspaces/ksa-kitchenP-tracker
+   git add app/tracker_app.py
+   git commit -m "Use gsheet_service_account from secrets for Google Sheets"
+   git push
             out[ws.title] = []
             continue
         headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
