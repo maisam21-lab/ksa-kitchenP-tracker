@@ -1049,17 +1049,26 @@ def save_generic_tab(tab_id, rows):
 
 
 def _get_google_credentials_path():
-    """Resolve path to Google service account JSON for Sheets API."""
-    # Streamlit secrets (e.g. on Cloud)
+    """Resolve credentials for Google Sheets API.
+
+    If [gsheet_service_account] is in Streamlit secrets, return a sentinel
+    value so we know to use that dict instead of a file path.
+    """
+    # Prefer service account from Streamlit secrets
+    try:
+        if hasattr(st, "secrets") and "gsheet_service_account" in st.secrets:
+            return "__FROM_SECRETS__"
+    except Exception:
+        pass
+
+    # Fallbacks: old path-based behaviour
     if hasattr(st, "secrets") and st.secrets:
         p = st.secrets.get("google_credentials_path") or st.secrets.get("GOOGLE_APPLICATION_CREDENTIALS")
         if p and Path(p).exists():
             return str(p)
-    # Env
     p = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if p and Path(p).exists():
         return p
-    # Repo paths
     for rel in ["scripts/credentials.json", ".secrets/gsheet-service.json", "app/data/credentials.json"]:
         path = REPO_ROOT / rel
         if path.exists():
@@ -1173,8 +1182,15 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
         from google.oauth2.service_account import Credentials
     except ImportError:
         raise ImportError("Install: pip install gspread google-auth") from None
-    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+       scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+
+    # Use service account from secrets when credentials_path is the sentinel
+    if credentials_path == "__FROM_SECRETS__":
+        info = dict(st.secrets["gsheet_service_account"])
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(sheet_id)
     out = {}
