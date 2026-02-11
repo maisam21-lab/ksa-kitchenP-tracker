@@ -1182,7 +1182,8 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
         from google.oauth2.service_account import Credentials
     except ImportError:
         raise ImportError("Install: pip install gspread google-auth") from None
-       scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
     # Use service account from secrets when credentials_path is the sentinel
     if credentials_path == "__FROM_SECRETS__":
@@ -1196,10 +1197,7 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
     out = {}
     for ws in spreadsheet.worksheets():
         rows = ws.get_all_values()
-        if not rows:   cd /workspaces/ksa-kitchenP-tracker
-   git add app/tracker_app.py
-   git commit -m "Use gsheet_service_account from secrets for Google Sheets"
-   git push
+        if not rows:
             out[ws.title] = []
             continue
         headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
