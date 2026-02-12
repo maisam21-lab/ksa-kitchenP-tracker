@@ -985,17 +985,72 @@ def _get_google_credentials_path():
     return None
 
 
+def _salesforce_token_from_password(
+    consumer_key: str,
+    consumer_secret: str,
+    username: str,
+    password: str,
+    use_sandbox: bool = False,
+) -> dict | None:
+    """Get access_token and instance_url via OAuth password flow. Returns {"base_url": ..., "token": ...} or None."""
+    login_host = "https://test.salesforce.com" if use_sandbox else "https://login.salesforce.com"
+    url = f"{login_host}/services/oauth2/token"
+    data = {
+        "grant_type": "password",
+        "client_id": consumer_key,
+        "client_secret": consumer_secret,
+        "username": username,
+        "password": password,
+    }
+    try:
+        resp = requests.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
+        resp.raise_for_status()
+        out = resp.json()
+        base = (out.get("instance_url") or "").rstrip("/")
+        token = out.get("access_token")
+        if base and token:
+            return {"base_url": base, "token": token}
+    except Exception:
+        pass
+    return None
+
+
 def _get_salesforce_config() -> dict | None:
-    """Salesforce connection from env or Streamlit secrets (SF_INSTANCE_URL, SF_ACCESS_TOKEN)."""
+    """Salesforce connection: use SF_ACCESS_TOKEN + SF_INSTANCE_URL, or Consumer Key/Secret + Username/Password."""
     try:
         secrets = getattr(st, "secrets", None) or {}
         base_url = os.environ.get("SF_INSTANCE_URL") or secrets.get("SF_INSTANCE_URL")
         token = os.environ.get("SF_ACCESS_TOKEN") or secrets.get("SF_ACCESS_TOKEN")
+
+        if base_url and token:
+            return {"base_url": str(base_url).rstrip("/"), "token": str(token)}
+
+        # Password flow: Consumer Key + Secret + Username + Password (password = user password + security token if required)
+        consumer_key = os.environ.get("SF_CONSUMER_KEY") or secrets.get("SF_CONSUMER_KEY")
+        consumer_secret = os.environ.get("SF_CONSUMER_SECRET") or secrets.get("SF_CONSUMER_SECRET")
+        username = os.environ.get("SF_USERNAME") or secrets.get("SF_USERNAME")
+        password = (os.environ.get("SF_PASSWORD") or secrets.get("SF_PASSWORD") or "").strip()
+        security_token = (os.environ.get("SF_SECURITY_TOKEN") or secrets.get("SF_SECURITY_TOKEN") or "").strip()
+        if security_token:
+            password = password + security_token
+        use_sandbox = str(os.environ.get("SF_USE_SANDBOX") or secrets.get("SF_USE_SANDBOX") or "").strip().lower() in ("1", "true", "yes")
+
+        if consumer_key and consumer_secret and username and password:
+            cache_key = "sf_api_config_cache"
+            cache = st.session_state.get(cache_key)
+            if isinstance(cache, dict) and cache.get("expires_at") and datetime.now(timezone.utc).timestamp() < cache.get("expires_at", 0):
+                return {"base_url": cache["base_url"], "token": cache["token"]}
+            cfg = _salesforce_token_from_password(consumer_key, consumer_secret, username, password, use_sandbox)
+            if cfg:
+                st.session_state[cache_key] = {
+                    "base_url": cfg["base_url"],
+                    "token": cfg["token"],
+                    "expires_at": datetime.now(timezone.utc).timestamp() + 5400,
+                }
+                return cfg
     except Exception:
-        return None
-    if not base_url or not token:
-        return None
-    return {"base_url": str(base_url).rstrip("/"), "token": str(token)}
+        pass
+    return None
 
 
 def _salesforce_query(soql: str, config: dict) -> list[dict]:
@@ -1014,38 +1069,54 @@ def _salesforce_query(soql: str, config: dict) -> list[dict]:
     return cleaned
 
 
+def _get_salesforce_tab_queries() -> dict[str, str]:
+    """Tab name → SOQL. From secrets [sf_tab_queries] or env SF_TAB_QUERIES (JSON)."""
+    try:
+        # Streamlit secrets: [sf_tab_queries] with keys like "SF Kitchen Data" = "SELECT ..."
+        sq = getattr(st, "secrets", None) and st.secrets.get("sf_tab_queries")
+        if isinstance(sq, dict):
+            return {k: str(v).strip() for k, v in sq.items() if v}
+        raw = os.environ.get("SF_TAB_QUERIES", "")
+        if raw and raw.strip():
+            return json.loads(raw)
+    except (json.JSONDecodeError, TypeError, Exception):
+        pass
+    return {}
+
+
 def _refresh_from_salesforce():
-    """Pull data from Salesforce and load into Data tabs. Returns (success, message)."""
+    """Pull real-time data from Salesforce API and load into Data tabs. Returns (success, message)."""
     config = _get_salesforce_config()
     if not config:
-        return False, "Salesforce not configured. Set SF_INSTANCE_URL and SF_ACCESS_TOKEN in secrets or env."
-    try:
-        loaded = []
-        # Example: SF Kitchen Data (adjust SOQL to your Salesforce objects/fields)
-        soql_kitchens = "SELECT Id, Name FROM Account LIMIT 500"
+        return False, (
+            "Salesforce not configured. Use either (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, "
+            "or (2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD (and SF_SECURITY_TOKEN if required)."
+        )
+    tab_queries = _get_salesforce_tab_queries()
+    if not tab_queries:
+        return False, (
+            "No SOQL configured. In Streamlit secrets add [sf_tab_queries] with e.g. "
+            '"SF Kitchen Data" = "SELECT Id, Name FROM YourObject__c", or set SF_TAB_QUERIES JSON in env.'
+        )
+    loaded = []
+    errors = []
+    for tab_id, soql in tab_queries.items():
+        if not soql:
+            continue
         try:
-            rows = _salesforce_query(soql_kitchens, config)
+            rows = _salesforce_query(soql, config)
             if rows:
-                save_generic_tab("SF Kitchen Data", rows)
-                loaded.append(f"SF Kitchen Data ({len(rows)} rows)")
+                save_generic_tab(tab_id, rows)
+                loaded.append(f"{tab_id} ({len(rows)} rows)")
+            else:
+                loaded.append(f"{tab_id} (0 rows)")
         except Exception as e:
-            loaded.append(f"SF Kitchen Data: {e}")
-        # Example: SF Churn Data (adjust SOQL to your schema)
-        soql_churn = "SELECT Id, Name FROM Account LIMIT 500"
-        try:
-            rows = _salesforce_query(soql_churn, config)
-            if rows:
-                save_generic_tab("SF Churn Data", rows)
-                loaded.append(f"SF Churn Data ({len(rows)} rows)")
-        except Exception as e:
-            loaded.append(f"SF Churn Data: {e}")
-        if loaded and not any(":" in s for s in loaded):
-            return True, "Loaded from Salesforce: " + "; ".join(loaded)
-        if loaded:
-            return False, "Salesforce: " + "; ".join(loaded)
-        return False, "No Salesforce data loaded. Configure SOQL in app or add SF_* secrets."
-    except Exception as e:
-        return False, f"Salesforce refresh failed: {e}"
+            errors.append(f"{tab_id}: {e}")
+    if loaded and not errors:
+        return True, "Real-time Salesforce: " + "; ".join(loaded)
+    if errors:
+        return False, "Salesforce: " + "; ".join(errors)
+    return False, "No Salesforce data returned. Check SOQL in sf_tab_queries."
 
 
 def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
@@ -1743,7 +1814,10 @@ def main():
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         if is_developer:
             with st.expander("Refresh data (Google Sheet & Salesforce only)", expanded=True):
-                st.caption("Data sources are **Google Sheets API** and **Salesforce API** only. Pull the latest into the app.")
+                st.caption(
+                    "**Google Sheet** = same data as the online sheet (refreshed every 4 hours via your Salesforce connector). "
+                    "**Salesforce** = **real-time** data straight from the SF API — use this when you need up-to-the-minute numbers."
+                )
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("**Google Sheet API** — service account JSON (share the sheet with its email).")
@@ -1756,7 +1830,7 @@ def main():
                         else:
                             st.error(msg)
                 with col2:
-                    st.markdown("**Salesforce API** — set SF_INSTANCE_URL and SF_ACCESS_TOKEN in secrets or env.")
+                    st.markdown("**Salesforce API (real-time)** — Consumer Key/Secret + Username/Password, or Access Token; plus sf_tab_queries.")
                     if st.button("Refresh from Salesforce", key="btn_salesforce"):
                         with st.spinner("Loading from Salesforce…"):
                             ok, msg = _refresh_from_salesforce()
@@ -1765,6 +1839,33 @@ def main():
                             _rerun()
                         else:
                             st.error(msg)
+                with st.expander("How to configure real-time Salesforce", expanded=False):
+                    st.markdown("""
+                    In **Streamlit Cloud** → app → **Settings** → **Secrets**, add either:
+
+                    **Option A — Access token (manual)**  
+                    - `SF_INSTANCE_URL` — e.g. `https://yourdomain.my.salesforce.com`  
+                    - `SF_ACCESS_TOKEN` — token from your OAuth/Connected App flow  
+
+                    **Option B — Consumer Key + password (recommended)**  
+                    - `SF_CONSUMER_KEY` — Connected App Consumer Key  
+                    - `SF_CONSUMER_SECRET` — Connected App Consumer Secret  
+                    - `SF_USERNAME` — integration user username  
+                    - `SF_PASSWORD` — integration user password  
+                    - `SF_SECURITY_TOKEN` — (optional) append to password if your org requires it  
+                    - `SF_USE_SANDBOX` — set to `true` if the org is a sandbox  
+
+                    **Tab → SOQL (required for real-time data)**  
+                    - `sf_tab_queries` — map each tab name to a SOQL query, e.g.:
+
+                    ```toml
+                    [sf_tab_queries]
+                    "SF Kitchen Data" = "SELECT Id, Name, Region__c FROM YourObject__c"
+                    "SF Churn Data"   = "SELECT Id, Name, Churn_Date__c FROM Churn__c"
+                    ```
+
+                    Tab names must match the Data tabs. Results replace that tab with **real-time** Salesforce data.
+                    """)
         else:
             st.info("Refresh is available only to developers. Unlock **Developer access** in the sidebar.")
         # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
