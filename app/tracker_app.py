@@ -991,8 +991,8 @@ def _salesforce_token_from_password(
     username: str,
     password: str,
     use_sandbox: bool = False,
-) -> dict | None:
-    """Get access_token and instance_url via OAuth password flow. Returns {"base_url": ..., "token": ...} or None."""
+) -> tuple[dict | None, str | None]:
+    """Get access_token and instance_url via OAuth password flow. Returns (config, None) on success or (None, error_message) on failure."""
     login_host = "https://test.salesforce.com" if use_sandbox else "https://login.salesforce.com"
     url = f"{login_host}/services/oauth2/token"
     data = {
@@ -1004,15 +1004,24 @@ def _salesforce_token_from_password(
     }
     try:
         resp = requests.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
-        resp.raise_for_status()
-        out = resp.json()
-        base = (out.get("instance_url") or "").rstrip("/")
-        token = out.get("access_token")
-        if base and token:
-            return {"base_url": base, "token": token}
-    except Exception:
-        pass
-    return None
+        if resp.ok:
+            out = resp.json()
+            base = (out.get("instance_url") or "").rstrip("/")
+            token = out.get("access_token")
+            if base and token:
+                return ({"base_url": base, "token": token}, None)
+            return (None, "Salesforce returned no instance_url or access_token.")
+        # Capture Salesforce error for debugging
+        try:
+            err = resp.json()
+            msg = err.get("error_description") or err.get("error") or resp.text or f"HTTP {resp.status_code}"
+        except Exception:
+            msg = resp.text or f"HTTP {resp.status_code}"
+        return (None, f"Salesforce OAuth: {msg}")
+    except requests.RequestException as e:
+        return (None, f"Network error: {e}")
+    except Exception as e:
+        return (None, str(e))
 
 
 def _get_salesforce_config() -> dict | None:
@@ -1040,7 +1049,9 @@ def _get_salesforce_config() -> dict | None:
             cache = st.session_state.get(cache_key)
             if isinstance(cache, dict) and cache.get("expires_at") and datetime.now(timezone.utc).timestamp() < cache.get("expires_at", 0):
                 return {"base_url": cache["base_url"], "token": cache["token"]}
-            cfg = _salesforce_token_from_password(consumer_key, consumer_secret, username, password, use_sandbox)
+            cfg, err = _salesforce_token_from_password(consumer_key, consumer_secret, username, password, use_sandbox)
+            if err:
+                st.session_state["sf_last_auth_error"] = err
             if cfg:
                 st.session_state[cache_key] = {
                     "base_url": cfg["base_url"],
@@ -1048,8 +1059,8 @@ def _get_salesforce_config() -> dict | None:
                     "expires_at": datetime.now(timezone.utc).timestamp() + 5400,
                 }
                 return cfg
-    except Exception:
-        pass
+    except Exception as e:
+        st.session_state["sf_last_auth_error"] = str(e)
     return None
 
 
@@ -1088,6 +1099,9 @@ def _refresh_from_salesforce():
     """Pull real-time data from Salesforce API and load into Data tabs. Returns (success, message)."""
     config = _get_salesforce_config()
     if not config:
+        err = st.session_state.pop("sf_last_auth_error", None)
+        if err:
+            return False, err
         return False, (
             "Salesforce not configured. Use either (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, "
             "or (2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD (and SF_SECURITY_TOKEN if required)."
