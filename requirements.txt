@@ -9,7 +9,5 @@ google-cloud-bigquery>=3.0
 streamlit>=1.28
 pandas>=2.0
 openpyxl>=3.0
-# Optional: Trino for "Refresh from Trino" (same sheet data via Trino/Superset)
-trino>=0.328
 # Optional: AI section (Ask AI) — set OPENAI_API_KEY in .streamlit/secrets.toml
 openai>=1.0

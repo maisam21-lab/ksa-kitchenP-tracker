@@ -11,9 +11,8 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.request import urlopen
-from urllib.error import URLError, HTTPError
 
+import requests
 import streamlit as st
 
 try:
@@ -24,30 +23,6 @@ except ImportError:
 
 # Online sheet: same ID as the workbook
 SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
-
-# Trino: same tabs as KSA_TRACKER_GOOGLE_SHEETS_QUERIES.sql (tabs that have data)
-TRINO_TAB_RANGES = [
-    "Auto Refresh Execution Log",
-    "SF Kitchen Data",
-    "Sellable No Status",
-    "All no status kitchens",
-    "LF Comp",
-    "Pivot Table 10",
-    "Area Data",
-    "SF Churn Data",
-    "KSA Facility details",
-    "Inflation FPx",
-    "Price Multipliers",
-    "Occupancy",
-    "Pivot Table 4",
-    "Qurtoba - Old",
-    "Jarir - Old",
-    "Salam - Old",
-    "Narjis - Old",
-    "Aqrabiya - Old",
-    "Zuhur - Old",
-    "Hofuf - Old",
-]
 
 # Rerun works in Streamlit 1.27+; fallback for older versions
 def _rerun():
@@ -102,49 +77,6 @@ GSHEET_HEADER_MAP = {
     "status": "status",
     "notes": "notes",
 }
-
-
-def _get_github_data_url() -> str:
-    """Return URL to fetch tracker data from GitHub (set GITHUB_TRACKER_CSV_URL in secrets or env)."""
-    try:
-        url = st.secrets.get("GITHUB_TRACKER_CSV_URL") or os.environ.get("GITHUB_TRACKER_CSV_URL", "")
-    except Exception:
-        url = os.environ.get("GITHUB_TRACKER_CSV_URL", "")
-    return (url or "").strip()
-
-
-def _fetch_and_parse_from_url(url: str):
-    """Fetch CSV or Excel from URL; return list of dicts. Raises on failure."""
-    with urlopen(url, timeout=60) as resp:
-        content = resp.read()
-    # If we got HTML (e.g. GitHub blob or error page), raise a clear error
-    if content.lstrip()[:500].lower().startswith((b"<!doctype", b"<html")):
-        raise ValueError(
-            "The URL returned a web page instead of a file. Use the **raw** file URL: "
-            "on GitHub open the file, click 'Raw', and copy that URL (it must start with https://raw.githubusercontent.com/...)."
-        )
-    name = url.split("/")[-1].split("?")[0] or "data.csv"
-    if not name.lower().endswith((".csv", ".xlsx", ".xls")):
-        name = "data.csv"
-    buf = io.BytesIO(content)
-    buf.name = name
-    return _parse_uploaded_file(buf)
-
-
-def _fetch_workbook_from_url(url: str) -> dict[str, list[dict]] | None:
-    """Fetch Excel from URL and return {sheet_name: rows} for all sheets, or None if not Excel."""
-    with urlopen(url, timeout=60) as resp:
-        content = resp.read()
-    if content.lstrip()[:500].lower().startswith((b"<!doctype", b"<html")):
-        raise ValueError(
-            "The URL returned a web page instead of a file. Use the **raw** file URL (https://raw.githubusercontent.com/...)."
-        )
-    name = url.split("/")[-1].split("?")[0] or "data.xlsx"
-    if not name.lower().endswith((".xlsx", ".xls")):
-        return None
-    buf = io.BytesIO(content)
-    buf.name = name
-    return _parse_workbook_all_sheets(buf, only_known_tabs=False)
 
 
 def _parse_uploaded_file(upload):
@@ -870,30 +802,7 @@ def get_template(template_id: int):
 
 
 def upsert_row(row):
-    """Insert or replace by record_id (for CSV import)."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    with get_conn() as c:
-        c.execute(
-            """INSERT OR REPLACE INTO ksa_kitchen_tracker
-               (record_id, report_date, site_id, site_name, region, metric_name, value, status, notes, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                row.get("record_id", "").strip(),
-                row.get("report_date", "").strip(),
-                row.get("site_id", "").strip(),
-                row.get("site_name") or "",
-                row.get("region") or "KSA",
-                row.get("metric_name", "").strip(),
-                row.get("value") if row.get("value") != "" else None,
-                row.get("status") or "",
-                row.get("notes") or "",
-                now,
-            ),
-        )
-
-
-def upsert_row(row):
-    """Insert or replace (for CSV import)."""
+    """Insert or replace by record_id (for GSheet/Salesforce import)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_conn() as c:
         c.execute(
@@ -1076,103 +985,67 @@ def _get_google_credentials_path():
     return None
 
 
-def _get_trino_config():
-    """Trino connection: from env TRINO_HOST, TRINO_PORT, TRINO_CATALOG, TRINO_USER or Streamlit secrets."""
+def _get_salesforce_config() -> dict | None:
+    """Salesforce connection from env or Streamlit secrets (SF_INSTANCE_URL, SF_ACCESS_TOKEN)."""
     try:
         secrets = getattr(st, "secrets", None) or {}
-        host = os.environ.get("TRINO_HOST") or secrets.get("TRINO_HOST") or secrets.get("trino_host")
-        port = int(os.environ.get("TRINO_PORT", "443") or secrets.get("TRINO_PORT") or secrets.get("trino_port") or "443")
-        catalog = os.environ.get("TRINO_CATALOG", "google_spreadsheets") or secrets.get("TRINO_CATALOG") or secrets.get("trino_catalog") or "google_spreadsheets"
-        user = os.environ.get("TRINO_USER", "trino") or secrets.get("TRINO_USER") or secrets.get("trino_user") or "trino"
-        if host:
-            return {"host": host, "port": port, "catalog": catalog, "user": user}
+        base_url = os.environ.get("SF_INSTANCE_URL") or secrets.get("SF_INSTANCE_URL")
+        token = os.environ.get("SF_ACCESS_TOKEN") or secrets.get("SF_ACCESS_TOKEN")
     except Exception:
-        pass
-    return None
+        return None
+    if not base_url or not token:
+        return None
+    return {"base_url": str(base_url).rstrip("/"), "token": str(token)}
 
 
-def _fetch_trino_sheet(tab_name: str, config: dict) -> list[dict]:
-    """Run one Trino sheet query; return list of dicts (column name -> value)."""
+def _salesforce_query(soql: str, config: dict) -> list[dict]:
+    """Run a SOQL query via REST API; return list of records (strip attributes)."""
+    url = f"{config['base_url']}/services/data/v59.0/query"
+    headers = {"Authorization": f"Bearer {config['token']}", "Content-Type": "application/json"}
+    resp = requests.get(url, headers=headers, params={"q": soql}, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    records = data.get("records", [])
+    cleaned = []
+    for r in records:
+        r = dict(r)
+        r.pop("attributes", None)
+        cleaned.append(r)
+    return cleaned
+
+
+def _refresh_from_salesforce():
+    """Pull data from Salesforce and load into Data tabs. Returns (success, message)."""
+    config = _get_salesforce_config()
+    if not config:
+        return False, "Salesforce not configured. Set SF_INSTANCE_URL and SF_ACCESS_TOKEN in secrets or env."
     try:
-        from trino.dbapi import connect
-    except ImportError:
-        raise ImportError("Trino support requires: pip install trino") from None
-    query = (
-        "SELECT * FROM TABLE(google_spreadsheets.system.sheet("
-        f"id => '{SHEET_ID}', "
-        f"range => '{tab_name}!A1:Z1000'))"
-    )
-    conn = connect(
-        host=config["host"],
-        port=config["port"],
-        user=config["user"],
-        catalog=config["catalog"],
-        schema="system",
-        http_scheme="https" if config["port"] == 443 else "http",
-    )
-    rows = []
-    cur = conn.cursor()
-    try:
-        cur.execute(query)
-        if cur.description:
-            columns = [d[0] for d in cur.description]
-            for row in cur.fetchall():
-                rows.append(dict(zip(columns, ((str(v) if v is not None else "") for v in row))))
-    finally:
-        cur.close()
-        conn.close()
-    return rows
-
-
-def _refresh_from_trino():
-    """Pull sheet data via Trino (same queries as Superset) and load into app DB. Returns (success, message)."""
-    try:
-        config = _get_trino_config()
-        if not config:
-            return False, "Trino not configured. Set TRINO_HOST (and optionally TRINO_PORT, TRINO_CATALOG, TRINO_USER) in env or Streamlit secrets."
         loaded = []
-        errors = []
-        for tab_name in TRINO_TAB_RANGES:
-            try:
-                rows = _fetch_trino_sheet(tab_name, config)
-            except Exception as e:
-                errors.append(f"{tab_name}: {e}")
-                continue
-            if not rows:
-                continue
-            tab_id = MAIN_TRACKER_TAB_ID if (tab_name.strip() in KITCHEN_TRACKER_SHEET_ALIASES or tab_name.strip().lower() in {s.strip().lower() for s in KITCHEN_TRACKER_SHEET_ALIASES}) else tab_name
-            if tab_id == "Auto Refresh Execution Log":
-                with get_conn() as c:
-                    c.execute("DELETE FROM ksa_auto_refresh_execution_log")
-                for r in rows:
-                    insert_exec_log({
-                        "refresh_time": _row_key(r, "Refresh Time", "refresh_time") or datetime.now().strftime("%m/%d/%Y %H:%M"),
-                        "sheet": _row_key(r, "Sheet", "sheet"),
-                        "operation": _row_key(r, "Operation", "operation"),
-                        "status": _row_key(r, "Status", "status"),
-                        "user": _row_key(r, "User", "user"),
-                    })
-                loaded.append(f"{tab_id} ({len(rows)} rows)")
-            elif _is_main_tracker_tab(tab_id):
-                for r in rows:
-                    row = _normalize_gsheet_row(r)
-                    rid = (row.get("record_id") or "").strip()
-                    if not rid:
-                        continue
-                    if not row.get("report_date") or not row.get("site_id") or not row.get("region") or not row.get("metric_name"):
-                        continue
-                    upsert_row(row)
-                loaded.append(f"{tab_id} ({len(rows)} rows)")
-            else:
-                save_generic_tab(tab_id, rows)
-                loaded.append(f"{tab_id} ({len(rows)} rows)")
+        # Example: SF Kitchen Data (adjust SOQL to your Salesforce objects/fields)
+        soql_kitchens = "SELECT Id, Name FROM Account LIMIT 500"
+        try:
+            rows = _salesforce_query(soql_kitchens, config)
+            if rows:
+                save_generic_tab("SF Kitchen Data", rows)
+                loaded.append(f"SF Kitchen Data ({len(rows)} rows)")
+        except Exception as e:
+            loaded.append(f"SF Kitchen Data: {e}")
+        # Example: SF Churn Data (adjust SOQL to your schema)
+        soql_churn = "SELECT Id, Name FROM Account LIMIT 500"
+        try:
+            rows = _salesforce_query(soql_churn, config)
+            if rows:
+                save_generic_tab("SF Churn Data", rows)
+                loaded.append(f"SF Churn Data ({len(rows)} rows)")
+        except Exception as e:
+            loaded.append(f"SF Churn Data: {e}")
+        if loaded and not any(":" in s for s in loaded):
+            return True, "Loaded from Salesforce: " + "; ".join(loaded)
         if loaded:
-            return True, "Loaded via Trino: " + "; ".join(loaded)
-        if errors:
-            return False, "Trino connection or query failed (e.g. host unreachable from this machine). First error: " + (errors[0][:200] if errors else "")
-        return False, "No data returned from Trino."
+            return False, "Salesforce: " + "; ".join(loaded)
+        return False, "No Salesforce data loaded. Configure SOQL in app or add SF_* secrets."
     except Exception as e:
-        return False, "Trino refresh failed: " + str(e)
+        return False, f"Salesforce refresh failed: {e}"
 
 
 def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
@@ -1274,76 +1147,55 @@ def _refresh_from_online_sheet():
 
 
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False):
-    """Full tool UI for a generic sheet tab: upload CSV (developer only), view/filter, download."""
+    """View/filter/download for a generic tab. Data is loaded from Google Sheet or Salesforce only."""
     rows = list_generic_tab(tab_id)
-    sub_view, sub_upload = st.tabs(["View & filter", "Upload / replace"])
-
-    with sub_upload:
-        if not is_developer:
-            st.info("Only developers can upload or replace this tab's data. Unlock **Developer access** in the sidebar.")
-        else:
-            st.caption("Upload CSV or Excel (.xlsx) to load or replace this tab's data. All records stay here.")
-            upload = st.file_uploader("CSV or Excel", type=["csv", "xlsx", "xls"], key=f"gen_upload_{key_suffix}")
-            if upload:
-                try:
-                    loaded = _parse_uploaded_file(upload)
-                    if loaded:
-                        save_generic_tab(tab_id, loaded)
-                        st.success(f"Loaded {len(loaded)} row(s).")
-                        _rerun()
-                    else:
-                        st.warning("File has no data rows.")
-                except Exception as e:
-                    st.error(f"Upload failed: {e}")
-
-    with sub_view:
-        if not rows:
-            st.info("No data yet." + (" Click the **Upload / replace** tab above to load data." if is_developer else ""))
-            return
-        # Cleaner filtering: one search box + optional single-column filter in expander
-        cols = list(rows[0].keys()) if rows else []
-        search_all = st.text_input(
-            "Search in all columns",
-            key=f"f_{key_suffix}_search",
-            placeholder="Type to search across every column…",
-            help="Filters rows where any column contains this text.",
-        )
-        rows_shown = rows
-        if (search_all or "").strip():
-            term = search_all.strip().lower()
-            all_keys = list(rows[0].keys()) if rows else []
-            rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in all_keys)]
-        with st.expander("Filter by one column (optional)", expanded=False):
-            chosen_col = st.selectbox("Column", ["— None —"] + cols, key=f"f_{key_suffix}_col")
-            col_val = None
-            if chosen_col and chosen_col != "— None —":
-                uniq_vals = sorted({str(r.get(chosen_col, "")).strip() for r in rows_shown if r.get(chosen_col) is not None and str(r.get(chosen_col, "")).strip()})
-                if len(uniq_vals) <= 50:
-                    opts = ["— All —"] + uniq_vals
-                    col_val = st.selectbox("Value", opts, key=f"f_{key_suffix}_col_val")
-                    if col_val and col_val != "— All —":
-                        rows_shown = [r for r in rows_shown if str(r.get(chosen_col, "")) == str(col_val)]
-                else:
-                    col_val = st.text_input("Contains", key=f"f_{key_suffix}_col_val", placeholder="Type to filter this column…")
-                    if (col_val or "").strip():
-                        t = col_val.strip().lower()
-                        rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
-        st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
-        st.divider()
-        st.dataframe(rows_shown, use_container_width=True, hide_index=True)
-        # Download CSV
-        buf = io.StringIO()
-        if rows_shown:
-            w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows_shown)
-        st.download_button(
-            "Download CSV",
-            data=buf.getvalue(),
-            file_name=f"{tab_id.replace(' ', '_')}.csv",
-            mime="text/csv",
-            key=f"dl_{key_suffix}",
-        )
+    if not rows:
+        st.info("No data yet. Use **Refresh from online sheet** or **Refresh from Salesforce** above to load data.")
+        return
+    # Cleaner filtering: one search box + optional single-column filter in expander
+    cols = list(rows[0].keys()) if rows else []
+    search_all = st.text_input(
+        "Search in all columns",
+        key=f"f_{key_suffix}_search",
+        placeholder="Type to search across every column…",
+        help="Filters rows where any column contains this text.",
+    )
+    rows_shown = rows
+    if (search_all or "").strip():
+        term = search_all.strip().lower()
+        all_keys = list(rows[0].keys()) if rows else []
+        rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in all_keys)]
+    with st.expander("Filter by one column (optional)", expanded=False):
+        chosen_col = st.selectbox("Column", ["— None —"] + cols, key=f"f_{key_suffix}_col")
+        col_val = None
+        if chosen_col and chosen_col != "— None —":
+            uniq_vals = sorted({str(r.get(chosen_col, "")).strip() for r in rows_shown if r.get(chosen_col) is not None and str(r.get(chosen_col, "")).strip()})
+            if len(uniq_vals) <= 50:
+                opts = ["— All —"] + uniq_vals
+                col_val = st.selectbox("Value", opts, key=f"f_{key_suffix}_col_val")
+                if col_val and col_val != "— All —":
+                    rows_shown = [r for r in rows_shown if str(r.get(chosen_col, "")) == str(col_val)]
+            else:
+                col_val = st.text_input("Contains", key=f"f_{key_suffix}_col_val", placeholder="Type to filter this column…")
+                if (col_val or "").strip():
+                    t = col_val.strip().lower()
+                    rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
+    st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
+    st.divider()
+    st.dataframe(rows_shown, use_container_width=True, hide_index=True)
+    # Download CSV
+    buf = io.StringIO()
+    if rows_shown:
+        w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows_shown)
+    st.download_button(
+        "Download CSV",
+        data=buf.getvalue(),
+        file_name=f"{tab_id.replace(' ', '_')}.csv",
+        mime="text/csv",
+        key=f"dl_{key_suffix}",
+    )
 
 
 def main():
@@ -1890,25 +1742,8 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         if is_developer:
-            # One Excel file → all tabs (developer only)
-            with st.expander("Import workbook (one Excel file → all tabs)", expanded=True):
-                st.caption("Upload one .xlsx export. Sheets named **Smart Tracker**, **Kitchen Tracker**, or **KitchenTracker** load into the main Data tab; other sheets match by name. No credentials needed.")
-                workbook_upload = st.file_uploader("Excel workbook (.xlsx)", type=["xlsx", "xls"], key="workbook_import")
-                if workbook_upload:
-                    try:
-                        with st.spinner("Reading workbook (large files may take 1–2 min)…"):
-                            data = _parse_workbook_all_sheets(workbook_upload)
-                        prog = st.progress(0, text="Loading into tabs…")
-                        ok, msg = _load_workbook_into_db(data, progress_placeholder=prog)
-                        if ok:
-                            st.success(msg)
-                            _rerun()
-                        else:
-                            st.warning(msg)
-                    except Exception as e:
-                        st.error(str(e))
-            with st.expander("Refresh data from online sheet"):
-                st.caption("Pull the latest data into the app. Choose one source:")
+            with st.expander("Refresh data (Google Sheet & Salesforce only)", expanded=True):
+                st.caption("Data sources are **Google Sheets API** and **Salesforce API** only. Pull the latest into the app.")
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("**Google Sheet API** — service account JSON (share the sheet with its email).")
@@ -1921,118 +1756,17 @@ def main():
                         else:
                             st.error(msg)
                 with col2:
-                    st.markdown("**Trino** — same queries as Superset. (From a PC, Trino may be unreachable; use Google Sheet API if so.)")
-                    if st.button("Refresh from Trino", key="btn_trino"):
-                        with st.spinner("Loading from Trino (this can take a minute)…"):
-                            ok, msg = _refresh_from_trino()
+                    st.markdown("**Salesforce API** — set SF_INSTANCE_URL and SF_ACCESS_TOKEN in secrets or env.")
+                    if st.button("Refresh from Salesforce", key="btn_salesforce"):
+                        with st.spinner("Loading from Salesforce…"):
+                            ok, msg = _refresh_from_salesforce()
                         if ok:
                             st.success(msg)
                             _rerun()
                         else:
                             st.error(msg)
         else:
-            st.info("Import and refresh are available only to developers. Unlock **Developer access** in the sidebar.")
-        github_data_url = _get_github_data_url()
-        if is_developer and github_data_url:
-            with st.expander("Load from GitHub", expanded=True):
-                st.caption("Pull the latest data from your GitHub repo. **Excel (.xlsx)**: all sheets load into their tabs (Tracker, Execution Log, SF Kitchen Data, Pivot Table 10, etc.). **CSV**: loads into the Tracker tab only. Set **GITHUB_TRACKER_CSV_URL** in Settings → Secrets to the full **raw** URL.")
-                st.code(github_data_url, language=None)
-                if not github_data_url.startswith("https://raw.githubusercontent.com/"):
-                    st.warning("The URL above should start with `https://raw.githubusercontent.com/`. If it is cut off or wrong, update it in app Secrets.")
-                if st.button("Load from GitHub", key="btn_load_github"):
-                    try:
-                        url_lower = github_data_url.lower()
-                        if url_lower.endswith(".xlsx") or url_lower.endswith(".xls"):
-                            with st.spinner("Fetching Excel from GitHub…"):
-                                workbook_data = _fetch_workbook_from_url(github_data_url)
-                            if not workbook_data:
-                                st.error("Could not parse the Excel file.")
-                                _rerun()
-                            prog = st.progress(0, text="Loading all sheets into tabs…")
-                            ok, msg = _load_workbook_into_db(workbook_data, progress_placeholder=prog)
-                            prog.empty()
-                            if ok:
-                                st.success(msg)
-                                _rerun()
-                            else:
-                                st.warning(msg)
-                        else:
-                            with st.spinner("Fetching from GitHub…"):
-                                rows_from_file = _fetch_and_parse_from_url(github_data_url)
-                            if not rows_from_file:
-                                st.warning("The file is empty or has no data rows.")
-                                _rerun()
-                            imported = 0
-                            for r in rows_from_file:
-                                row = _normalize_gsheet_row(dict(r))
-                                rid = (row.get("record_id") or "").strip()
-                                if not rid:
-                                    continue
-                                if not row.get("report_date") or not row.get("site_id") or not row.get("region") or not row.get("metric_name"):
-                                    continue
-                                upsert_row({
-                                    "record_id": rid,
-                                    "report_date": (row.get("report_date") or "").strip(),
-                                    "site_id": (row.get("site_id") or "").strip(),
-                                    "site_name": row.get("site_name") or "",
-                                    "region": row.get("region") or "KSA",
-                                    "metric_name": (row.get("metric_name") or "").strip(),
-                                    "value": row.get("value"),
-                                    "status": row.get("status") or "",
-                                    "notes": row.get("notes") or "",
-                                })
-                                imported += 1
-                            if imported > 0:
-                                st.success(f"Imported {imported} row(s) into Tracker. Existing record_ids were updated.")
-                                _rerun()
-                            else:
-                                sample = rows_from_file[0] if rows_from_file else {}
-                                file_columns = list(sample.keys()) if isinstance(sample, dict) else []
-                                st.warning(
-                                    f"**No rows were imported** (0 of {len(rows_from_file)}). "
-                                    "Each row needs: **record_id**, **report_date**, **site_id**, **region**, **metric_name**. "
-                                    "Your file's columns: **" + ", ".join(str(c) for c in file_columns[:15]) + ("…" if len(file_columns) > 15 else "") + "**. "
-                                    "Rename columns to match (e.g. 'Record ID' → record_id) or use an **Excel file** with multiple sheets to load all tabs."
-                                )
-                    except HTTPError as e:
-                        st.error(f"Could not fetch from GitHub (HTTP {e.code}): {e.reason}. Check that the URL is correct and the repo/file is **public**. Use the **Raw** link from the file page on GitHub.")
-                    except URLError as e:
-                        st.error(f"Could not reach GitHub: {e.reason}. Check the URL and your network.")
-                    except ValueError as e:
-                        st.error(str(e))
-                    except Exception as e:
-                        st.error(f"Import failed: {e}")
-        if is_developer:
-            with st.expander("Import from CSV or Excel", expanded=False):
-                st.caption("Upload CSV or Excel (.xlsx) to import into the main data. Columns: record_id, report_date, site_id, site_name, region, metric_name, value, status, notes.")
-                upload = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"], key="import_csv")
-                if upload:
-                    try:
-                        rows_from_file = _parse_uploaded_file(upload)
-                        imported = 0
-                        for r in rows_from_file:
-                            row = _normalize_gsheet_row(dict(r))
-                            rid = (row.get("record_id") or "").strip()
-                            if not rid:
-                                continue
-                            if not row.get("report_date") or not row.get("site_id") or not row.get("region") or not row.get("metric_name"):
-                                continue
-                            upsert_row({
-                                "record_id": rid,
-                                "report_date": (row.get("report_date") or "").strip(),
-                                "site_id": (row.get("site_id") or "").strip(),
-                                "site_name": row.get("site_name") or "",
-                                "region": row.get("region") or "KSA",
-                                "metric_name": (row.get("metric_name") or "").strip(),
-                                "value": row.get("value"),
-                                "status": row.get("status") or "",
-                                "notes": row.get("notes") or "",
-                            })
-                            imported += 1
-                        st.success(f"Imported {imported} row(s). Existing record_ids were updated.")
-                        _rerun()
-                    except Exception as e:
-                        st.error(f"Import failed: {e}")
+            st.info("Refresh is available only to developers. Unlock **Developer access** in the sidebar.")
         # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
         all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
         sheet_tabs = st.tabs(all_tab_ids)
