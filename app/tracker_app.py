@@ -1203,19 +1203,83 @@ def _salesforce_query(soql: str, config: dict) -> list[dict]:
     return cleaned
 
 
+def _is_report_id(value: str) -> bool:
+    """True if value looks like a Salesforce Report ID (00O... 15 or 18 chars)."""
+    if not value or not isinstance(value, str):
+        return False
+    s = value.strip()
+    return len(s) in (15, 18) and s.startswith("00O") and s[3:].replace("_", "").isalnum()
+
+
+def _salesforce_report_data(report_id: str, config: dict) -> list[dict]:
+    """Fetch report by ID via Analytics REST API; return list of row dicts (column label -> value)."""
+    url = f"{config['base_url']}/services/data/v59.0/analytics/reports/{report_id.strip()}"
+    headers = {"Authorization": f"Bearer {config['token']}", "Content-Type": "application/json"}
+    resp = requests.get(url, headers=headers, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    # Column labels (detailColumns or reportMetadata.detailColumns)
+    detail_cols = data.get("reportMetadata", {}).get("detailColumns") or data.get("detailColumns") or []
+    if isinstance(detail_cols, list) and detail_cols:
+        cols = [c.get("label") or c.get("name") or str(c) if isinstance(c, dict) else str(c) for c in detail_cols]
+    else:
+        cols = []
+    # Rows from factMap (tabular: T!T, summary: 0!T, or first key with "rows")
+    fact_map = data.get("factMap") or {}
+    rows_data = []
+    for key in ("T!T", "0!T", "T!F"):
+        if key in fact_map and isinstance(fact_map[key], dict):
+            rows_data = fact_map[key].get("rows") or fact_map[key].get("data") or []
+            break
+    if not rows_data and fact_map:
+        for v in fact_map.values():
+            if isinstance(v, dict) and (v.get("rows") or v.get("data")):
+                rows_data = v.get("rows") or v.get("data")
+                break
+    out = []
+    for r in rows_data:
+        cells = r.get("dataCells") or r.get("cells") or r.get("cell") or []
+        if not isinstance(cells, list):
+            continue
+        row = {}
+        for i, cell in enumerate(cells):
+            label = cols[i] if i < len(cols) else f"Column{i}"
+            if isinstance(cell, dict):
+                row[label] = cell.get("label") if cell.get("label") is not None else cell.get("value")
+            else:
+                row[label] = cell
+        if row:
+            out.append(row)
+    return out
+
+
 def _get_salesforce_tab_queries() -> dict[str, str]:
-    """Tab name → SOQL. From secrets [sf_tab_queries] or env SF_TAB_QUERIES (JSON)."""
+    """Tab name → SOQL. From secrets [sf_tab_queries], or SF_TAB_QUERIES (JSON string), or env."""
+    out: dict[str, str] = {}
     try:
-        # Streamlit secrets: [sf_tab_queries] with keys like "SF Kitchen Data" = "SELECT ..."
-        sq = getattr(st, "secrets", None) and st.secrets.get("sf_tab_queries")
-        if isinstance(sq, dict):
-            return {k: str(v).strip() for k, v in sq.items() if v}
-        raw = os.environ.get("SF_TAB_QUERIES", "")
-        if raw and raw.strip():
-            return json.loads(raw)
-    except (json.JSONDecodeError, TypeError, Exception):
+        raw_secrets = getattr(st, "secrets", None)
+        if raw_secrets is not None:
+            # 1) Section [sf_tab_queries] — Streamlit may expose as non-dict; normalize to dict
+            sq = raw_secrets.get("sf_tab_queries") if hasattr(raw_secrets, "get") else None
+            if sq is not None:
+                try:
+                    d = dict(sq) if not isinstance(sq, dict) else sq
+                    out = {str(k).strip(): str(v).strip() for k, v in d.items() if v}
+                except (TypeError, AttributeError):
+                    pass
+            # 2) Top-level key SF_TAB_QUERIES = "{\"Tab\": \"SOQL\"}" (JSON string)
+            if not out:
+                json_str = raw_secrets.get("SF_TAB_QUERIES") if hasattr(raw_secrets, "get") else None
+                if isinstance(json_str, str) and json_str.strip():
+                    out = {k: str(v).strip() for k, v in json.loads(json_str).items() if v}
+        # 3) Environment variable (e.g. in CI or Streamlit env)
+        if not out:
+            raw = os.environ.get("SF_TAB_QUERIES", "")
+            if raw and raw.strip():
+                out = {k: str(v).strip() for k, v in json.loads(raw).items() if v}
+    except (json.JSONDecodeError, TypeError, KeyError, Exception):
         pass
-    return {}
+    return out
 
 
 def _refresh_from_salesforce():
@@ -1233,16 +1297,19 @@ def _refresh_from_salesforce():
     tab_queries = _get_salesforce_tab_queries()
     if not tab_queries:
         return False, (
-            "No SOQL configured. In Streamlit secrets add [sf_tab_queries] with e.g. "
-            '"SF Kitchen Data" = "SELECT Id, Name FROM YourObject__c", or set SF_TAB_QUERIES JSON in env.'
+            "No SOQL or Report IDs configured. In Streamlit secrets add [sf_tab_queries] (or SF_TAB_QUERIES) with e.g. "
+            '"SF Kitchen Data" = "SELECT Id, Name FROM YourObject__c" or "SF Kitchen Data" = "00O1234567890AbC" (Report ID).'
         )
     loaded = []
     errors = []
-    for tab_id, soql in tab_queries.items():
-        if not soql:
+    for tab_id, soql_or_report_id in tab_queries.items():
+        if not soql_or_report_id:
             continue
         try:
-            rows = _salesforce_query(soql, config)
+            if _is_report_id(soql_or_report_id):
+                rows = _salesforce_report_data(soql_or_report_id, config)
+            else:
+                rows = _salesforce_query(soql_or_report_id, config)
             if rows:
                 save_generic_tab(tab_id, rows)
                 loaded.append(f"{tab_id} ({len(rows)} rows)")
@@ -1995,13 +2062,13 @@ def main():
                     **Option C — Username + password**  
                     - `SF_CONSUMER_KEY`, `SF_CONSUMER_SECRET`, `SF_USERNAME`, `SF_PASSWORD`, optional `SF_SECURITY_TOKEN`, `SF_USE_SANDBOX`  
 
-                    **Tab → SOQL (required for real-time data)**  
-                    - `sf_tab_queries` — map each tab name to a SOQL query, e.g.:
+                    **Tab → SOQL or Report ID (required for real-time data)**  
+                    - `sf_tab_queries` — map each tab name to a **SOQL** query or a **Report ID** (15/18 chars starting with `00O`). Use Report ID to run a report directly without writing SOQL.
 
                     ```toml
                     [sf_tab_queries]
                     "SF Kitchen Data" = "SELECT Id, Name, Region__c FROM YourObject__c"
-                    "SF Churn Data"   = "SELECT Id, Name, Churn_Date__c FROM Churn__c"
+                    "SF Churn Data"   = "00Oca000001AbCd"
                     ```
 
                     Tab names must match the Data tabs. Results replace that tab with **real-time** Salesforce data.
