@@ -1968,7 +1968,8 @@ def main():
                         else:
                             st.error(msg)
                 with col2:
-                    st.markdown("**Salesforce API (real-time)** — Consumer Key/Secret + Username/Password, or Access Token; plus sf_tab_queries.")
+                    st.markdown("**Salesforce API (real-time)** — Refresh token or username/password + sf_tab_queries.")
+                    st.caption("If SF auth isn’t set up yet, use **Refresh from online sheet** — it’s synced from Salesforce every 4 hours.")
                     if st.button("Refresh from Salesforce", key="btn_salesforce"):
                         with st.spinner("Loading from Salesforce…"):
                             ok, msg = _refresh_from_salesforce()
