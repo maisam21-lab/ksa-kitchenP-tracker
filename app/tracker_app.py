@@ -1049,6 +1049,13 @@ def _sf_secret(secrets: dict, section, *key_variants: str) -> str:
         val = os.environ.get(key) or _get_from_obj(section, key) or secrets.get(key)
         if val and str(val).strip():
             return str(val).strip()
+    # Fallback: SF_* keys may have been pasted under [gsheet_service_account] by mistake
+    gsheet = secrets.get("gsheet_service_account") if isinstance(secrets, dict) else None
+    if gsheet:
+        for key in key_variants:
+            val = _get_from_obj(gsheet, key)
+            if val and str(val).strip():
+                return str(val).strip()
     return ""
 
 
