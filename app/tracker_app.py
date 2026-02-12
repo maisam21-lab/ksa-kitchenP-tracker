@@ -1028,21 +1028,39 @@ def _get_salesforce_config() -> dict | None:
     """Salesforce connection: use SF_ACCESS_TOKEN + SF_INSTANCE_URL, or Consumer Key/Secret + Username/Password."""
     try:
         secrets = getattr(st, "secrets", None) or {}
-        base_url = os.environ.get("SF_INSTANCE_URL") or secrets.get("SF_INSTANCE_URL")
-        token = os.environ.get("SF_ACCESS_TOKEN") or secrets.get("SF_ACCESS_TOKEN")
+        # Support nested [salesforce] section in secrets
+        sf_secrets = secrets.get("salesforce") if isinstance(secrets.get("salesforce"), dict) else secrets
+        base_url = os.environ.get("SF_INSTANCE_URL") or sf_secrets.get("SF_INSTANCE_URL") or secrets.get("SF_INSTANCE_URL")
+        token = os.environ.get("SF_ACCESS_TOKEN") or sf_secrets.get("SF_ACCESS_TOKEN") or secrets.get("SF_ACCESS_TOKEN")
 
         if base_url and token:
             return {"base_url": str(base_url).rstrip("/"), "token": str(token)}
 
         # Password flow: Consumer Key + Secret + Username + Password (password = user password + security token if required)
-        consumer_key = os.environ.get("SF_CONSUMER_KEY") or secrets.get("SF_CONSUMER_KEY")
-        consumer_secret = os.environ.get("SF_CONSUMER_SECRET") or secrets.get("SF_CONSUMER_SECRET")
-        username = os.environ.get("SF_USERNAME") or secrets.get("SF_USERNAME")
-        password = (os.environ.get("SF_PASSWORD") or secrets.get("SF_PASSWORD") or "").strip()
-        security_token = (os.environ.get("SF_SECURITY_TOKEN") or secrets.get("SF_SECURITY_TOKEN") or "").strip()
+        consumer_key = os.environ.get("SF_CONSUMER_KEY") or sf_secrets.get("SF_CONSUMER_KEY") or secrets.get("SF_CONSUMER_KEY")
+        consumer_secret = os.environ.get("SF_CONSUMER_SECRET") or sf_secrets.get("SF_CONSUMER_SECRET") or secrets.get("SF_CONSUMER_SECRET")
+        username = os.environ.get("SF_USERNAME") or sf_secrets.get("SF_USERNAME") or secrets.get("SF_USERNAME")
+        password = (os.environ.get("SF_PASSWORD") or sf_secrets.get("SF_PASSWORD") or secrets.get("SF_PASSWORD") or "").strip()
+        security_token = (os.environ.get("SF_SECURITY_TOKEN") or sf_secrets.get("SF_SECURITY_TOKEN") or secrets.get("SF_SECURITY_TOKEN") or "").strip()
         if security_token:
             password = password + security_token
-        use_sandbox = str(os.environ.get("SF_USE_SANDBOX") or secrets.get("SF_USE_SANDBOX") or "").strip().lower() in ("1", "true", "yes")
+        use_sandbox = str(os.environ.get("SF_USE_SANDBOX") or sf_secrets.get("SF_USE_SANDBOX") or secrets.get("SF_USE_SANDBOX") or "").strip().lower() in ("1", "true", "yes")
+
+        # Diagnostic: if any credential missing, store message so UI can show it
+        if not (consumer_key and consumer_secret and username and password):
+            parts = []
+            if not consumer_key:
+                parts.append("SF_CONSUMER_KEY")
+            if not consumer_secret:
+                parts.append("SF_CONSUMER_SECRET")
+            if not username:
+                parts.append("SF_USERNAME")
+            if not password:
+                parts.append("SF_PASSWORD (or SF_SECURITY_TOKEN)")
+            st.session_state["sf_last_auth_error"] = (
+                f"Missing in secrets: {', '.join(parts)}. "
+                "Add them at top level (no [section]) in Streamlit Settings → Secrets, then Save and Reboot."
+            )
 
         if consumer_key and consumer_secret and username and password:
             cache_key = "sf_api_config_cache"
