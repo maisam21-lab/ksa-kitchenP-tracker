@@ -1024,29 +1024,43 @@ def _salesforce_token_from_password(
         return (None, str(e))
 
 
+def _sf_secret(secrets: dict, section: dict | None, *key_variants: str) -> str:
+    """Get first non-empty value from env, then section, then secrets, trying each key variant (e.g. SF_KEY, sf_key)."""
+    for key in key_variants:
+        val = os.environ.get(key) or (section.get(key) if section else None) or secrets.get(key)
+        if val and str(val).strip():
+            return str(val).strip()
+    return ""
+
+
 def _get_salesforce_config() -> dict | None:
     """Salesforce connection: use SF_ACCESS_TOKEN + SF_INSTANCE_URL, or Consumer Key/Secret + Username/Password."""
     try:
-        secrets = getattr(st, "secrets", None) or {}
-        # Support nested [salesforce] section in secrets
-        sf_secrets = secrets.get("salesforce") if isinstance(secrets.get("salesforce"), dict) else secrets
-        base_url = os.environ.get("SF_INSTANCE_URL") or sf_secrets.get("SF_INSTANCE_URL") or secrets.get("SF_INSTANCE_URL")
-        token = os.environ.get("SF_ACCESS_TOKEN") or sf_secrets.get("SF_ACCESS_TOKEN") or secrets.get("SF_ACCESS_TOKEN")
+        secrets = dict(getattr(st, "secrets", None) or {})
+        section = None
+        try:
+            section = secrets.get("salesforce")
+            if not isinstance(section, dict):
+                section = None
+        except Exception:
+            pass
 
+        base_url = _sf_secret(secrets, section, "SF_INSTANCE_URL", "sf_instance_url")
+        token = _sf_secret(secrets, section, "SF_ACCESS_TOKEN", "sf_access_token")
         if base_url and token:
-            return {"base_url": str(base_url).rstrip("/"), "token": str(token)}
+            return {"base_url": base_url.rstrip("/"), "token": token}
 
-        # Password flow: Consumer Key + Secret + Username + Password (password = user password + security token if required)
-        consumer_key = os.environ.get("SF_CONSUMER_KEY") or sf_secrets.get("SF_CONSUMER_KEY") or secrets.get("SF_CONSUMER_KEY")
-        consumer_secret = os.environ.get("SF_CONSUMER_SECRET") or sf_secrets.get("SF_CONSUMER_SECRET") or secrets.get("SF_CONSUMER_SECRET")
-        username = os.environ.get("SF_USERNAME") or sf_secrets.get("SF_USERNAME") or secrets.get("SF_USERNAME")
-        password = (os.environ.get("SF_PASSWORD") or sf_secrets.get("SF_PASSWORD") or secrets.get("SF_PASSWORD") or "").strip()
-        security_token = (os.environ.get("SF_SECURITY_TOKEN") or sf_secrets.get("SF_SECURITY_TOKEN") or secrets.get("SF_SECURITY_TOKEN") or "").strip()
+        consumer_key = _sf_secret(secrets, section, "SF_CONSUMER_KEY", "sf_consumer_key")
+        consumer_secret = _sf_secret(secrets, section, "SF_CONSUMER_SECRET", "sf_consumer_secret")
+        username = _sf_secret(secrets, section, "SF_USERNAME", "sf_username")
+        password = _sf_secret(secrets, section, "SF_PASSWORD", "sf_password")
+        security_token = _sf_secret(secrets, section, "SF_SECURITY_TOKEN", "sf_security_token")
         if security_token:
             password = password + security_token
-        use_sandbox = str(os.environ.get("SF_USE_SANDBOX") or sf_secrets.get("SF_USE_SANDBOX") or secrets.get("SF_USE_SANDBOX") or "").strip().lower() in ("1", "true", "yes")
+        use_sandbox_raw = _sf_secret(secrets, section, "SF_USE_SANDBOX", "sf_use_sandbox") or ""
+        use_sandbox = use_sandbox_raw.lower() in ("1", "true", "yes")
 
-        # Diagnostic: if any credential missing, store message so UI can show it
+        # Diagnostic: if any credential missing, show which and what keys we see (names only)
         if not (consumer_key and consumer_secret and username and password):
             parts = []
             if not consumer_key:
@@ -1057,9 +1071,17 @@ def _get_salesforce_config() -> dict | None:
                 parts.append("SF_USERNAME")
             if not password:
                 parts.append("SF_PASSWORD (or SF_SECURITY_TOKEN)")
+            try:
+                top = list(secrets.keys())[:25] if isinstance(secrets, dict) else []
+                sec = list(section.keys())[:25] if isinstance(section, dict) else []
+                seen = f" Top-level keys: {', '.join(str(k) for k in top)}."
+                if sec:
+                    seen += f" Under [salesforce]: {', '.join(str(k) for k in sec)}."
+            except Exception:
+                seen = ""
             st.session_state["sf_last_auth_error"] = (
-                f"Missing in secrets: {', '.join(parts)}. "
-                "Add them at top level (no [section]) in Streamlit Settings → Secrets, then Save and Reboot."
+                f"Missing in secrets: {', '.join(parts)}."
+                f"{seen} Add SF_* at top level or under [salesforce] in Streamlit Settings → Secrets, Save, then Reboot."
             )
 
         if consumer_key and consumer_secret and username and password:
