@@ -1024,10 +1024,29 @@ def _salesforce_token_from_password(
         return (None, str(e))
 
 
-def _sf_secret(secrets: dict, section: dict | None, *key_variants: str) -> str:
-    """Get first non-empty value from env, then section, then secrets, trying each key variant (e.g. SF_KEY, sf_key)."""
+def _get_from_obj(obj, key: str):
+    """Get value from obj (dict or Streamlit secret section)."""
+    if obj is None:
+        return None
+    try:
+        if hasattr(obj, "get"):
+            v = obj.get(key)
+            if v is not None:
+                return v
+        if hasattr(obj, "__getitem__"):
+            return obj[key]
+    except (KeyError, TypeError):
+        pass
+    try:
+        return getattr(obj, key, None) or getattr(obj, key.lower(), None)
+    except Exception:
+        return None
+
+
+def _sf_secret(secrets: dict, section, *key_variants: str) -> str:
+    """Get first non-empty value from env, then section, then secrets, trying each key variant."""
     for key in key_variants:
-        val = os.environ.get(key) or (section.get(key) if section else None) or secrets.get(key)
+        val = os.environ.get(key) or _get_from_obj(section, key) or secrets.get(key)
         if val and str(val).strip():
             return str(val).strip()
     return ""
@@ -1036,12 +1055,14 @@ def _sf_secret(secrets: dict, section: dict | None, *key_variants: str) -> str:
 def _get_salesforce_config() -> dict | None:
     """Salesforce connection: use SF_ACCESS_TOKEN + SF_INSTANCE_URL, or Consumer Key/Secret + Username/Password."""
     try:
-        secrets = dict(getattr(st, "secrets", None) or {})
+        raw = getattr(st, "secrets", None)
+        try:
+            secrets = dict(raw) if raw else {}
+        except Exception:
+            secrets = {}
         section = None
         try:
-            section = secrets.get("salesforce")
-            if not isinstance(section, dict):
-                section = None
+            section = secrets.get("salesforce") or (getattr(raw, "salesforce", None) if raw else None)
         except Exception:
             pass
 
@@ -1073,7 +1094,7 @@ def _get_salesforce_config() -> dict | None:
                 parts.append("SF_PASSWORD (or SF_SECURITY_TOKEN)")
             try:
                 top = list(secrets.keys())[:25] if isinstance(secrets, dict) else []
-                sec = list(section.keys())[:25] if isinstance(section, dict) else []
+                sec = list(section.keys())[:25] if hasattr(section, "keys") else []
                 seen = f" Top-level keys: {', '.join(str(k) for k in top)}."
                 if sec:
                     seen += f" Under [salesforce]: {', '.join(str(k) for k in sec)}."
