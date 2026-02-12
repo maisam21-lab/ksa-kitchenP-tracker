@@ -985,6 +985,42 @@ def _get_google_credentials_path():
     return None
 
 
+def _salesforce_token_from_refresh(
+    consumer_key: str,
+    consumer_secret: str,
+    refresh_token: str,
+    use_sandbox: bool = False,
+) -> tuple[dict | None, str | None]:
+    """Get access_token and instance_url via OAuth refresh_token flow. No username/password."""
+    login_host = "https://test.salesforce.com" if use_sandbox else "https://login.salesforce.com"
+    url = f"{login_host}/services/oauth2/token"
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": consumer_key,
+        "client_secret": consumer_secret,
+        "refresh_token": refresh_token,
+    }
+    try:
+        resp = requests.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
+        if resp.ok:
+            out = resp.json()
+            base = (out.get("instance_url") or "").rstrip("/")
+            token = out.get("access_token")
+            if base and token:
+                return ({"base_url": base, "token": token}, None)
+            return (None, "Salesforce returned no instance_url or access_token.")
+        try:
+            err = resp.json()
+            msg = err.get("error_description") or err.get("error") or resp.text or f"HTTP {resp.status_code}"
+        except Exception:
+            msg = resp.text or f"HTTP {resp.status_code}"
+        return (None, f"Salesforce OAuth: {msg}")
+    except requests.RequestException as e:
+        return (None, f"Network error: {e}")
+    except Exception as e:
+        return (None, str(e))
+
+
 def _salesforce_token_from_password(
     consumer_key: str,
     consumer_secret: str,
@@ -1080,25 +1116,44 @@ def _get_salesforce_config() -> dict | None:
 
         consumer_key = _sf_secret(secrets, section, "SF_CONSUMER_KEY", "sf_consumer_key")
         consumer_secret = _sf_secret(secrets, section, "SF_CONSUMER_SECRET", "sf_consumer_secret")
+        refresh_token = _sf_secret(secrets, section, "SF_REFRESH_TOKEN", "sf_refresh_token")
+        use_sandbox_raw = _sf_secret(secrets, section, "SF_USE_SANDBOX", "sf_use_sandbox") or ""
+        use_sandbox = use_sandbox_raw.lower() in ("1", "true", "yes")
+
+        # Option 1: Refresh token (no username/password)
+        if consumer_key and consumer_secret and refresh_token:
+            cache_key = "sf_api_config_cache"
+            cache = st.session_state.get(cache_key)
+            if isinstance(cache, dict) and cache.get("expires_at") and datetime.now(timezone.utc).timestamp() < cache.get("expires_at", 0):
+                return {"base_url": cache["base_url"], "token": cache["token"]}
+            cfg, err = _salesforce_token_from_refresh(consumer_key, consumer_secret, refresh_token, use_sandbox)
+            if err:
+                st.session_state["sf_last_auth_error"] = err
+            if cfg:
+                st.session_state[cache_key] = {
+                    "base_url": cfg["base_url"],
+                    "token": cfg["token"],
+                    "expires_at": datetime.now(timezone.utc).timestamp() + 5400,
+                }
+                return cfg
+
+        # Option 2: Username + password
         username = _sf_secret(secrets, section, "SF_USERNAME", "sf_username")
         password = _sf_secret(secrets, section, "SF_PASSWORD", "sf_password")
         security_token = _sf_secret(secrets, section, "SF_SECURITY_TOKEN", "sf_security_token")
         if security_token:
             password = password + security_token
-        use_sandbox_raw = _sf_secret(secrets, section, "SF_USE_SANDBOX", "sf_use_sandbox") or ""
-        use_sandbox = use_sandbox_raw.lower() in ("1", "true", "yes")
 
-        # Diagnostic: if any credential missing, show which and what keys we see (names only)
-        if not (consumer_key and consumer_secret and username and password):
+        if not (consumer_key and consumer_secret and (refresh_token or (username and password))):
             parts = []
             if not consumer_key:
                 parts.append("SF_CONSUMER_KEY")
             if not consumer_secret:
                 parts.append("SF_CONSUMER_SECRET")
-            if not username:
-                parts.append("SF_USERNAME")
-            if not password:
-                parts.append("SF_PASSWORD (or SF_SECURITY_TOKEN)")
+            if not refresh_token and not username:
+                parts.append("SF_REFRESH_TOKEN (or SF_USERNAME + SF_PASSWORD)")
+            elif not refresh_token and not password:
+                parts.append("SF_PASSWORD")
             try:
                 top = list(secrets.keys())[:25] if isinstance(secrets, dict) else []
                 sec = list(section.keys())[:25] if hasattr(section, "keys") else []
@@ -1109,7 +1164,7 @@ def _get_salesforce_config() -> dict | None:
                 seen = ""
             st.session_state["sf_last_auth_error"] = (
                 f"Missing in secrets: {', '.join(parts)}."
-                f"{seen} Add SF_* at top level or under [salesforce] in Streamlit Settings → Secrets, Save, then Reboot."
+                f"{seen} Use SF_REFRESH_TOKEN (no username/password) or SF_USERNAME + SF_PASSWORD. Save, then Reboot."
             )
 
         if consumer_key and consumer_secret and username and password:
@@ -1171,8 +1226,9 @@ def _refresh_from_salesforce():
         if err:
             return False, err
         return False, (
-            "Salesforce not configured. Use either (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, "
-            "or (2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD (and SF_SECURITY_TOKEN if required)."
+            "Salesforce not configured. Use (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, "
+            "or (2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_REFRESH_TOKEN (no username/password), "
+            "or (3) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD."
         )
     tab_queries = _get_salesforce_tab_queries()
     if not tab_queries:
@@ -1929,13 +1985,14 @@ def main():
                     - `SF_INSTANCE_URL` — e.g. `https://yourdomain.my.salesforce.com`  
                     - `SF_ACCESS_TOKEN` — token from your OAuth/Connected App flow  
 
-                    **Option B — Consumer Key + password (recommended)**  
+                    **Option B — Refresh token (no username/password)**  
                     - `SF_CONSUMER_KEY` — Connected App Consumer Key  
                     - `SF_CONSUMER_SECRET` — Connected App Consumer Secret  
-                    - `SF_USERNAME` — integration user username  
-                    - `SF_PASSWORD` — integration user password  
-                    - `SF_SECURITY_TOKEN` — (optional) append to password if your org requires it  
-                    - `SF_USE_SANDBOX` — set to `true` if the org is a sandbox  
+                    - `SF_REFRESH_TOKEN` — refresh token (get once via OAuth in browser or from admin)  
+                    - `SF_USE_SANDBOX` — set to `true` for sandbox  
+
+                    **Option C — Username + password**  
+                    - `SF_CONSUMER_KEY`, `SF_CONSUMER_SECRET`, `SF_USERNAME`, `SF_PASSWORD`, optional `SF_SECURITY_TOKEN`, `SF_USE_SANDBOX`  
 
                     **Tab → SOQL (required for real-time data)**  
                     - `sf_tab_queries` — map each tab name to a SOQL query, e.g.:
