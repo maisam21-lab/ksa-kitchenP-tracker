@@ -257,9 +257,9 @@ CREATE TABLE IF NOT EXISTS ksa_auto_refresh_execution_log (
 EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
-HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details", "Price Multipliers", "Area Data"]
+HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens", "KSA Facility details", "Price Multipliers", "Area Data"]
 # Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
-SF_COUNTRIES = ["UAE", "BH", "KW", "SA", "QA"]
+SF_COUNTRIES = ["UAE", "Bahrain", "BH", "Kuwait", "KW", "Saudi Arabia", "SA", "Qatar", "QA"]
 # Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE")
 COUNTRY_ALIASES = {
     "uae": ["united arab emirates", "uae", "ae"],
@@ -1140,6 +1140,45 @@ def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None, str 
     return ([], "", None, None, None, None)
 
 
+def _get_combined_kitchens_dataset() -> tuple[list[dict], list[str], dict]:
+    """
+    Build a unified Kitchens dataset by combining rows from all hierarchy source tabs.
+    Returns (rows, all_columns, col_map) where col_map has account_col, kitchen_col, country_col, facility_col
+    for filtering. Each row gets _Country, _Facility, _Kitchen, _Source for consistent filtering.
+    """
+    all_rows: list[dict] = []
+    all_keys: set[str] = set()
+    col_map = {}
+
+    for tab_id in HIERARCHY_SOURCE_TABS:
+        rows = list_generic_tab(tab_id)
+        if not rows:
+            continue
+        r0 = rows[0]
+        account_col = _find_col(r0, *HIERARCHY_ACCOUNT_CANDIDATES)
+        kitchen_col = _find_col(r0, *HIERARCHY_KITCHEN_CANDIDATES)
+        country_col = _find_col(r0, *HIERARCHY_COUNTRY_CANDIDATES)
+        facility_col = _find_col(r0, *HIERARCHY_FACILITY_CANDIDATES)
+        if not col_map:
+            col_map = {"account_col": account_col, "kitchen_col": kitchen_col, "country_col": country_col, "facility_col": facility_col}
+
+        for r in rows:
+            c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
+            row = dict(r)
+            row["_Country"] = c
+            row["_Facility"] = f
+            row["_Kitchen"] = k
+            row["_Source"] = tab_id
+            all_rows.append(row)
+            all_keys.update(row.keys())
+
+    # Ensure consistent columns: _Source, _Country, _Facility, _Kitchen first, then rest
+    meta = ["_Source", "_Country", "_Facility", "_Kitchen"]
+    others = sorted(k for k in all_keys if k not in meta)
+    columns = meta + others
+    return (all_rows, columns, col_map)
+
+
 def _hierarchy_filtered_rows(
     rows: list[dict],
     account_col: str | None,
@@ -1817,7 +1856,7 @@ def main():
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
-    # Last refresh
+    # Last refresh + Refresh button
     refreshed_at, refresh_source = get_last_data_refresh()
     if refreshed_at:
         ago = _humanize_ago(refreshed_at)
@@ -1829,6 +1868,16 @@ def main():
         )
     else:
         st.sidebar.metric("Last refresh", "—", help="Refresh data from Data section.")
+    if st.sidebar.button("Refresh data", key="sidebar_refresh", help="Pull latest from Salesforce or Google Sheet"):
+        with st.spinner("Refreshing…"):
+            ok, msg = _refresh_from_salesforce()
+            if not ok:
+                ok, msg = _refresh_from_online_sheet()
+            if ok:
+                st.session_state["goto_data_after_refresh"] = True
+                st.rerun()
+            else:
+                st.sidebar.error(msg[:100] if msg else "Refresh failed")
     # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
     current_user = (st.session_state.get("user_display_name") or "").strip()
@@ -1915,24 +1964,25 @@ def main():
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
             st.stop()
 
-    # Kitchens: Country → Facility → Kitchen dropdown view
+    # Kitchens: unified dataset from all sources, filter by Country/Facility/Kitchen + any column
     if section == "Kitchens":
         st.title("Browse Kitchens")
-        st.caption("Select **Country**, then **Facility**, then **Kitchen** to filter the data.")
-        rows, tab_id, account_col, kitchen_col, country_col, facility_col = _get_hierarchy_data()
+        st.caption("Unified kitchen data from all sources. Filter by Country, Facility, Kitchen, or any column.")
+        rows, columns, col_map = _get_combined_kitchens_dataset()
         if not rows:
-            st.info("No hierarchy data yet. Use **Data** → **Refresh from Salesforce** to load SF Churn Data, SF Kitchen Data, or KSA Facility details.")
+            st.info("No kitchen data yet. Use **Refresh data** in the sidebar or **Data** → **Refresh from Salesforce** to load SF Churn Data, SF Kitchen Data, Price Multipliers, etc.")
             st.stop()
-        # Show all headers (columns) from the current data source
-        with st.expander("Column reference (all headers in this view)", expanded=True):
-            headers = list(rows[0].keys()) if rows else []
-            st.write(", ".join(f"`{h}`" for h in headers))
-        # Build unique values for cascading filters (SA, UAE, Kuwait, Bahrain, Qatar)
+
+        # Column reference: all headers in the unified dataset
+        with st.expander("Column reference (all headers)", expanded=True):
+            st.write(", ".join(f"`{h}`" for h in columns))
+
+        # Build hierarchy values from _Country, _Facility, _Kitchen
         countries: set[str] = set()
         facilities_by_country: dict[str, set[str]] = {}
         kitchens_by_facility: dict[tuple[str, str], set[str]] = {}
         for r in rows:
-            c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
+            c, f, k = r.get("_Country", ""), r.get("_Facility", ""), r.get("_Kitchen", "")
             if c:
                 countries.add(c)
                 facilities_by_country.setdefault(c, set()).add(f or "—")
@@ -1943,50 +1993,82 @@ def main():
                     kitchens_by_facility.setdefault(key, set()).add(k)
         countries.update(SF_COUNTRIES)
         countries_sorted = sorted(countries)
-        country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
-        facilities_options = ["— All —"]
-        if country_sel and country_sel != "— All —":
+
+        # Filters: Country, Facility, Kitchen + search + column filter
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
+        with f2:
             fac_set = set()
-            for c, fset in facilities_by_country.items():
-                if _country_matches(c, country_sel):
+            if country_sel and country_sel != "— All —":
+                for c, fset in facilities_by_country.items():
+                    if _country_matches(c, country_sel):
+                        fac_set.update(fset)
+            else:
+                fac_set = set()
+                for fset in facilities_by_country.values():
                     fac_set.update(fset)
-            facilities_options += sorted(fac_set)
-        facility_sel = st.selectbox("Facility", facilities_options, key="h_facility")
-        kitchen_options = ["— All —"]
-        if country_sel and country_sel != "— All —" and facility_sel and facility_sel != "— All —":
+            facility_sel = st.selectbox("Facility", ["— All —"] + sorted(fac_set), key="h_facility")
+        with f3:
             k_set = set()
-            for (c, f), kset in kitchens_by_facility.items():
-                if _country_matches(c, country_sel) and f == facility_sel:
+            if country_sel and country_sel != "— All —" and facility_sel and facility_sel != "— All —":
+                for (c, f), kset in kitchens_by_facility.items():
+                    if _country_matches(c, country_sel) and f == facility_sel:
+                        k_set.update(kset)
+            elif country_sel and country_sel != "— All —":
+                for (c, f), kset in kitchens_by_facility.items():
+                    if _country_matches(c, country_sel):
+                        k_set.update(kset)
+            else:
+                for kset in kitchens_by_facility.values():
                     k_set.update(kset)
-            kitchen_options += sorted(k_set)
-        elif country_sel and country_sel != "— All —":
-            all_k = set()
-            for (c, f), kset in kitchens_by_facility.items():
-                if _country_matches(c, country_sel):
-                    all_k.update(kset)
-            kitchen_options += sorted(all_k)
-        else:
-            all_k = set()
-            for kset in kitchens_by_facility.values():
-                all_k.update(kset)
-            kitchen_options += sorted(all_k)
-        kitchen_sel = st.selectbox("Kitchen", kitchen_options, key="h_kitchen")
-        # Filter rows
+            kitchen_sel = st.selectbox("Kitchen", ["— All —"] + sorted(k_set), key="h_kitchen")
+
+        # Filter by hierarchy
         c_filter = country_sel if country_sel and country_sel != "— All —" else None
         f_filter = facility_sel if facility_sel and facility_sel != "— All —" else None
         k_filter = kitchen_sel if kitchen_sel and kitchen_sel != "— All —" else None
-        filtered = _hierarchy_filtered_rows(rows, account_col, kitchen_col, c_filter, f_filter, k_filter, country_col, facility_col)
-        st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** row(s) from **{tab_id}**.")
+        filtered = rows
+        if c_filter or f_filter or k_filter:
+            filtered = [r for r in filtered if
+                (not c_filter or _country_matches(r.get("_Country", ""), c_filter)) and
+                (not f_filter or r.get("_Facility", "") == f_filter) and
+                (not k_filter or r.get("_Kitchen", "") == k_filter)]
+
+        # Search across all columns
+        search_all = st.text_input("Search in all columns", key="h_search", placeholder="Filter by any value…")
+        if (search_all or "").strip():
+            term = search_all.strip().lower()
+            filtered = [r for r in filtered if any(term in str(v).lower() for v in r.values() if v is not None)]
+
+        # Filter by one column (optional)
+        with st.expander("Filter by column", expanded=False):
+            chosen_col = st.selectbox("Column", ["— None —"] + columns, key="h_col_filter")
+            if chosen_col and chosen_col != "— None —":
+                uniq = sorted({str(r.get(chosen_col, "")).strip() for r in filtered if r.get(chosen_col) is not None})
+                if len(uniq) <= 80:
+                    col_val = st.selectbox("Value", ["— All —"] + uniq, key="h_col_val")
+                    if col_val and col_val != "— All —":
+                        filtered = [r for r in filtered if str(r.get(chosen_col, "")) == col_val]
+                else:
+                    col_val = st.text_input("Contains", key="h_col_val", placeholder="Type to filter…")
+                    if (col_val or "").strip():
+                        t = col_val.strip().lower()
+                        filtered = [r for r in filtered if t in str(r.get(chosen_col, "") or "").lower()]
+
+        st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** row(s) from combined dataset.")
         if filtered:
-            cols = list(filtered[0].keys()) if filtered else []
-            st.dataframe(filtered, use_container_width=True, hide_index=True)
+            # Order columns for display
+            display_cols = [c for c in columns if c in (filtered[0].keys() if filtered else [])]
+            out_rows = [{k: r.get(k, "") for k in display_cols} for r in filtered]
+            st.dataframe(out_rows, use_container_width=True, hide_index=True)
             buf = io.StringIO()
-            w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            w = csv.DictWriter(buf, fieldnames=display_cols, extrasaction="ignore")
             w.writeheader()
-            w.writerows(filtered)
+            w.writerows(out_rows)
             st.download_button("Download filtered CSV", data=buf.getvalue(), file_name="kitchens_filtered.csv", mime="text/csv", key="dl_hierarchy")
         else:
-            st.info("No rows match your selection. Try changing the filters.")
+            st.info("No rows match your filters. Try changing Country, Facility, or search.")
         return
 
     # Dashboard: choose any tab → filter → download report
