@@ -191,6 +191,10 @@ TAB_DESCRIPTIONS = {
     "Area Data": "Area data. View and filter.",
     "SF Churn Data": "SF Churn data. View and filter.",
     "KSA Facility details": "KSA facility details. View and filter.",
+    "UAE Facility details": "UAE facility details. View and filter.",
+    "Kuwait Facility details": "Kuwait facility details. View and filter.",
+    "Bahrain Facility details": "Bahrain facility details. View and filter.",
+    "Qatar Facility details": "Qatar facility details. View and filter.",
     "Inflation FPx": "Inflation FPx data. View and filter.",
     "Price Multipliers": "Price multipliers. View and filter.",
     "Occupancy": "Occupancy data. View and filter.",
@@ -215,6 +219,10 @@ SHEET_TAB_IDS = [
     "Area Data",
     "SF Churn Data",
     "KSA Facility details",
+    "UAE Facility details",
+    "Kuwait Facility details",
+    "Bahrain Facility details",
+    "Qatar Facility details",
     "Inflation FPx",
     "Price Multipliers",
     "Occupancy",
@@ -257,9 +265,15 @@ CREATE TABLE IF NOT EXISTS ksa_auto_refresh_execution_log (
 EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
-HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens", "KSA Facility details", "Price Multipliers", "Area Data"]
-# Kitchens tab: kitchen-level data only (excludes Price Multipliers, Area Data, KSA Facility details)
+HIERARCHY_SOURCE_TABS = [
+    "SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens",
+    "KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details",
+    "Price Multipliers", "Area Data",
+]
+# Kitchens tab: kitchen-level + facility details (Account-Facility-Kitchen for all countries, same as SA)
 KITCHENS_SOURCE_TABS = ["SF Kitchen Data", "SF Churn Data", "Sellable No Status", "All no status kitchens"]
+# Facility details tabs per country — same structure as KSA for UAE, Kuwait, Bahrain, Qatar
+FACILITY_DETAILS_TABS = ["KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details"]
 # Preferred column order for Kitchens display (matches SF-style grouped table)
 KITCHENS_DISPLAY_ORDER = [
     ("Type", ["Kitchen_Number__c.Type__c", "Type", "type"]),
@@ -275,9 +289,15 @@ KITCHENS_DISPLAY_ORDER = [
 # Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
 SF_COUNTRIES = ["UAE", "Bahrain", "BH", "Kuwait", "KW", "Saudi Arabia", "SA", "Qatar", "QA"]
 # Tabs for regular users (kitchen-only). Super users see all tabs.
-KITCHEN_ONLY_TABS = ["SF Kitchen Data", "SF Churn Data", "KSA Facility details", "Sellable No Status", "All no status kitchens"]
+KITCHEN_ONLY_TABS = [
+    "SF Kitchen Data", "SF Churn Data", "Sellable No Status", "All no status kitchens",
+    "KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details",
+]
 # 6 reports as sidebar functions for super users only (all countries). Facility Sell Price Multipliers, etc.
-SUPERUSER_REPORTS = ["Price Multipliers", "Area Data", "SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens"]
+SUPERUSER_REPORTS = [
+    "Price Multipliers", "Area Data", "SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens",
+    "KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details",
+]
 # Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE")
 COUNTRY_ALIASES = {
     "uae": ["united arab emirates", "uae", "ae"],
@@ -1113,7 +1133,7 @@ def _kitchens_display_columns(rows: list[dict], all_columns: list[str]) -> list[
         if found and found not in used:
             result.append((display_name, found))
             used.add(found)
-    meta = ["_Country", "_Facility", "_Kitchen", "_Source"]
+    meta = ["_Account", "_Country", "_Facility", "_Kitchen", "_Source"]
     for m in meta:
         if m in r0 and m not in used:
             result.append((m, m))
@@ -1187,14 +1207,16 @@ def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None, str 
 
 def _get_combined_kitchens_dataset() -> tuple[list[dict], list[str], dict]:
     """
-    Build a unified Kitchens dataset from kitchen-level tabs only (SF Kitchen Data, Churn, Sellable/No Status).
-    Returns (rows, all_columns, col_map). Each row gets _Country, _Facility, _Kitchen, _Source.
+    Build a unified Kitchens dataset: Account-Facility-Kitchen for all countries (same structure as SA).
+    Merges kitchen-level tabs (SF Kitchen Data, Churn, etc.) + facility details (KSA, UAE, Kuwait, Bahrain, Qatar).
+    Returns (rows, all_columns, col_map). Each row gets _Account, _Country, _Facility, _Kitchen, _Source.
     """
     all_rows: list[dict] = []
     all_keys: set[str] = set()
     col_map = {}
 
-    for tab_id in KITCHENS_SOURCE_TABS:
+    tabs_to_merge = list(KITCHENS_SOURCE_TABS) + list(FACILITY_DETAILS_TABS)
+    for tab_id in tabs_to_merge:
         rows = list_generic_tab(tab_id)
         if not rows:
             continue
@@ -1209,6 +1231,7 @@ def _get_combined_kitchens_dataset() -> tuple[list[dict], list[str], dict]:
         for r in rows:
             c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
             row = dict(r)
+            row["_Account"] = str(r.get(account_col, "") or "").strip() if account_col else ""
             row["_Country"] = c
             row["_Facility"] = f
             row["_Kitchen"] = k
@@ -1216,8 +1239,8 @@ def _get_combined_kitchens_dataset() -> tuple[list[dict], list[str], dict]:
             all_rows.append(row)
             all_keys.update(row.keys())
 
-    # Ensure consistent columns: _Source, _Country, _Facility, _Kitchen first, then rest
-    meta = ["_Source", "_Country", "_Facility", "_Kitchen"]
+    # Ensure consistent columns: _Account, _Country, _Facility, _Kitchen, _Source first, then rest
+    meta = ["_Account", "_Source", "_Country", "_Facility", "_Kitchen"]
     others = sorted(k for k in all_keys if k not in meta)
     columns = meta + others
     return (all_rows, columns, col_map)
@@ -2005,7 +2028,7 @@ def main():
     # Kitchens: raw kitchen data only (SF Kitchen Data, Churn, Sellable/No Status)
     if section == "Kitchens":
         st.title("Kitchens")
-        st.caption("Raw kitchen data. Filter by Country, Facility, Kitchen, or search.")
+        st.caption("Account, Facility, Kitchen data for all countries (SA, UAE, Kuwait, Bahrain, Qatar). Filter by Country, Facility, Kitchen, or search.")
         rows, columns, col_map = _get_combined_kitchens_dataset()
         if not rows:
             st.info("No kitchen data yet. Data auto-refreshes every 15 mins. Developers can trigger a refresh in **Data** → Refresh from Salesforce or Google Sheet.")
