@@ -739,12 +739,15 @@ def _humanize_ago(iso_ts: str) -> str:
 
 
 def _auto_refresh_enabled() -> bool:
-    """True if auto-refresh every N minutes is enabled (AUTO_REFRESH_ENABLED in secrets/env)."""
+    """True if auto-refresh every N minutes is enabled. Defaults to True (no manual refresh needed). Set AUTO_REFRESH_ENABLED = false to disable."""
     try:
         v = st.secrets.get("AUTO_REFRESH_ENABLED") or os.environ.get("AUTO_REFRESH_ENABLED", "")
     except Exception:
         v = os.environ.get("AUTO_REFRESH_ENABLED", "")
-    return str(v).strip().lower() in ("1", "true", "yes")
+    s = str(v).strip().lower()
+    if not s:
+        return True  # Default: enabled, refresh SF data every 15 mins without manual intervention
+    return s in ("1", "true", "yes")
 
 
 def _auto_refresh_minutes() -> int:
@@ -2525,7 +2528,7 @@ def main():
         if not all_tab_ids and from_online_sheet:
             st.info("No data tabs available for your role. Kitchen users see SF Kitchen Data, Churn, Facility details, Sellable/No Status. Super users see all tabs.")
             st.caption("Add SUPER_USER_IDS in secrets to grant full access (e.g. SUPER_USER_IDS = \"email@company.com, other@company.com\").")
-        else:
+        elif all_tab_ids:
             sheet_tabs = st.tabs(all_tab_ids)
             # Tab tooltips: descriptions shown on hover
             tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
