@@ -270,6 +270,16 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details"]
+# All Middle East countries (names and common codes) — merged with data-derived countries in dropdown
+MIDDLE_EAST_COUNTRIES = [
+    "Bahrain", "BH", "Cyprus", "CY", "Egypt", "EG",
+    "Iran", "IR", "Iraq", "IQ", "Israel", "IL",
+    "Jordan", "JO", "Kuwait", "KW", "Lebanon", "LB",
+    "Oman", "OM", "Palestine", "PS", "Qatar", "QA",
+    "Saudi Arabia", "SA", "KSA", "Syria", "SY",
+    "Turkey", "TR", "United Arab Emirates", "UAE", "AE",
+    "Yemen", "YE",
+]
 # Column names to try (case-insensitive). Excel/Report headers: "Account Name", "Kitchen Number Name". API: "Account.Name", "Kitchen_Number__c.Name".
 HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "Account Name", "account name"]
 HIERARCHY_KITCHEN_CANDIDATES = ["Kitchen Number Name", "Kitchen_Number__c.Name", "Kitchen Number ID 18", "Kitchen", "Name"]
@@ -1756,6 +1766,8 @@ def main():
                 key = (c, f or "—")
                 if k:
                     kitchens_by_facility.setdefault(key, set()).add(k)
+        # Merge with all Middle East countries so dropdown shows full region
+        countries.update(MIDDLE_EAST_COUNTRIES)
         countries_sorted = sorted(countries)
         country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
         facilities_options = ["— All —"]
