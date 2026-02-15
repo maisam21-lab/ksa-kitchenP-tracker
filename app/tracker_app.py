@@ -268,6 +268,12 @@ CREATE TABLE IF NOT EXISTS ksa_auto_refresh_execution_log (
 """
 EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
+# Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
+HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details"]
+# Column names (case-insensitive match) or keys. For "Account.Name" = "SA - RUH - Sweidi", we parse: country=1st segment, facility=2nd+3rd.
+HIERARCHY_ACCOUNT_COL = "Account.Name"  # or "Account Name" — parsed as "X - Y - Z" → country=X, facility=Y - Z
+HIERARCHY_KITCHEN_COL = "Kitchen_Number__c.Name"  # or "Name", "Kitchen" — the kitchen identifier
+
 # Generic tab data: any sheet tab (SF Kitchen Data, Area Data, etc.) — store rows as JSON per row
 TABLE_GENERIC_TAB = """
 CREATE TABLE IF NOT EXISTS generic_tab_data (
@@ -957,6 +963,76 @@ def save_generic_tab(tab_id, rows):
             )
 
 
+def _find_col(row: dict, *candidates: str) -> str | None:
+    """Return first matching column key (case-insensitive) from row, or None."""
+    keys_lower = {str(k).strip().lower(): k for k in (row or {}).keys()}
+    for c in candidates:
+        c0 = (c or "").strip().lower()
+        if c0 in keys_lower:
+            return keys_lower[c0]
+        for k in keys_lower:
+            if c0 in k or k in c0:
+                return keys_lower[k]
+    return None
+
+
+def _extract_hierarchy_from_row(row: dict, account_col: str | None, kitchen_col: str | None) -> tuple[str, str, str]:
+    """Extract (country, facility, kitchen) from a row. Returns ("", "", "") if missing."""
+    country, facility, kitchen = "", "", ""
+    if account_col and row.get(account_col):
+        parts = [p.strip() for p in str(row[account_col]).split(" - ") if p.strip()]
+        if len(parts) >= 1:
+            country = parts[0]
+        if len(parts) >= 2:
+            facility = " - ".join(parts[1:])
+        elif len(parts) == 1:
+            facility = parts[0]
+    if kitchen_col and row.get(kitchen_col):
+        kitchen = str(row[kitchen_col]).strip()
+    return (country, facility, kitchen)
+
+
+def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None]:
+    """
+    Get rows from first available hierarchy source tab.
+    Returns (rows, tab_id, account_col, kitchen_col).
+    """
+    for tab_id in HIERARCHY_SOURCE_TABS:
+        rows = list_generic_tab(tab_id)
+        if not rows:
+            continue
+        r0 = rows[0]
+        account_col = _find_col(r0, HIERARCHY_ACCOUNT_COL, "Account.Name", "Account Name", "account.name")
+        kitchen_col = _find_col(r0, HIERARCHY_KITCHEN_COL, "Kitchen_Number__c.Name", "Kitchen Name", "Name", "Kitchen")
+        return (rows, tab_id, account_col, kitchen_col)
+    return ([], "", None, None)
+
+
+def _hierarchy_filtered_rows(
+    rows: list[dict],
+    account_col: str | None,
+    kitchen_col: str | None,
+    country: str | None,
+    facility: str | None,
+    kitchen: str | None,
+) -> list[dict]:
+    """Filter rows by selected country, facility, kitchen."""
+    out = rows
+    if not country and not facility and not kitchen:
+        return out
+    filtered = []
+    for r in rows:
+        c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col)
+        if country and c != country:
+            continue
+        if facility and f != facility:
+            continue
+        if kitchen and k != kitchen:
+            continue
+        filtered.append(r)
+    return filtered
+
+
 def _get_google_credentials_path():
     """Resolve credentials for Google Sheets API.
 
@@ -1637,7 +1713,7 @@ def main():
     st.sidebar.divider()
     section = st.sidebar.radio(
         "Section",
-        ["Dashboard", "Discussions", "Data", "Search"],
+        ["Kitchens", "Dashboard", "Discussions", "Data", "Search"],
         index=0,
         label_visibility="collapsed",
     )
@@ -1653,6 +1729,69 @@ def main():
             st.error("Access restricted. Your name or email is not on the authorized list.")
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
             st.stop()
+
+    # Kitchens: Country → Facility → Kitchen dropdown view
+    if section == "Kitchens":
+        st.title("Browse Kitchens")
+        st.caption("Select **Country**, then **Facility**, then **Kitchen** to filter the data.")
+        rows, tab_id, account_col, kitchen_col = _get_hierarchy_data()
+        if not rows:
+            st.info("No hierarchy data yet. Use **Data** → **Refresh from Salesforce** to load SF Churn Data, SF Kitchen Data, or KSA Facility details.")
+            st.stop()
+        # Build unique values for cascading filters
+        countries: set[str] = set()
+        facilities_by_country: dict[str, set[str]] = {}
+        kitchens_by_facility: dict[tuple[str, str], set[str]] = {}
+        for r in rows:
+            c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col)
+            if c:
+                countries.add(c)
+                facilities_by_country.setdefault(c, set()).add(f or "—")
+                if f:
+                    facilities_by_country[c].discard("—")
+                key = (c, f or "—")
+                if k:
+                    kitchens_by_facility.setdefault(key, set()).add(k)
+        countries_sorted = sorted(countries)
+        country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
+        facilities_options = ["— All —"]
+        if country_sel and country_sel != "— All —":
+            facilities_options += sorted(facilities_by_country.get(country_sel, set()))
+        facility_sel = st.selectbox("Facility", facilities_options, key="h_facility")
+        kitchen_options = ["— All —"]
+        if country_sel and country_sel != "— All —" and facility_sel and facility_sel != "— All —":
+            key = (country_sel, facility_sel)
+            kitchen_options += sorted(kitchens_by_facility.get(key, set()))
+        elif country_sel and country_sel != "— All —":
+            # All kitchens in this country
+            all_k = set()
+            for (c, f), kset in kitchens_by_facility.items():
+                if c == country_sel:
+                    all_k.update(kset)
+            kitchen_options += sorted(all_k)
+        else:
+            all_k = set()
+            for kset in kitchens_by_facility.values():
+                all_k.update(kset)
+            kitchen_options += sorted(all_k)
+        kitchen_sel = st.selectbox("Kitchen", kitchen_options, key="h_kitchen")
+        # Filter rows
+        c_filter = country_sel if country_sel and country_sel != "— All —" else None
+        f_filter = facility_sel if facility_sel and facility_sel != "— All —" else None
+        k_filter = kitchen_sel if kitchen_sel and kitchen_sel != "— All —" else None
+        filtered = _hierarchy_filtered_rows(rows, account_col, kitchen_col, c_filter, f_filter, k_filter)
+        st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** row(s) from **{tab_id}**.")
+        if filtered:
+            cols = list(filtered[0].keys()) if filtered else []
+            st.dataframe(filtered, use_container_width=True, hide_index=True)
+            buf = io.StringIO()
+            w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(filtered)
+            st.download_button("Download filtered CSV", data=buf.getvalue(), file_name="kitchens_filtered.csv", mime="text/csv", key="dl_hierarchy")
+        else:
+            st.info("No rows match your selection. Try changing the filters.")
+        return
 
     # Dashboard: choose any tab → filter → download report
     if section == "Dashboard":

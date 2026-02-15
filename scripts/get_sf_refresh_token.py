@@ -37,7 +37,12 @@ def main():
     print(f"redirect_uri: {REDIRECT_URI}\n")
     auth_url = (
         f"{LOGIN_HOST}/services/oauth2/authorize?"
-        + urllib.parse.urlencode({"response_type": "code", "client_id": CONSUMER_KEY, "redirect_uri": REDIRECT_URI})
+        + urllib.parse.urlencode({
+            "response_type": "code",
+            "client_id": CONSUMER_KEY,
+            "redirect_uri": REDIRECT_URI,
+            "prompt": "consent",  # Force consent screen so Salesforce returns refresh_token
+        })
     )
     print("Step 1: Open this URL in your browser and log in:\n")
     print(auth_url)
