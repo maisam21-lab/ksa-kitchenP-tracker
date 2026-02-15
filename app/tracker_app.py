@@ -300,12 +300,23 @@ SUPERUSER_REPORTS = [
 ]
 # Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE", "BHR" ↔ "Bahrain")
 COUNTRY_ALIASES = {
-    "uae": ["united arab emirates", "uae", "ae"],
+    "uae": ["united arab emirates", "uae", "ae", "u.a.e"],
     "sa": ["saudi arabia", "sa", "ksa"],
     "kw": ["kuwait", "kwt", "kw"],
-    "bh": ["bahrain", "bh", "bhr"],
+    "bh": ["bahrain", "bh", "bhr", "bah"],
     "qa": ["qatar", "qa", "qat"],
 }
+
+
+def _country_in_selected(row_country: str, selected_countries: list[str]) -> bool:
+    """True if row's _Country matches any of the selected countries (using aliases)."""
+    rc = (row_country or "").strip()
+    if not rc:
+        return False
+    for sel in selected_countries or []:
+        if _country_matches(rc, sel):
+            return True
+    return False
 # Column names to try (case-insensitive). Supports SA, UAE, Kuwait, Bahrain, Qatar.
 HIERARCHY_COUNTRY_CANDIDATES = ["Country", "Country Name", "Account.Country", "country"]
 HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "account name"]
@@ -1231,7 +1242,11 @@ def _get_combined_kitchens_dataset() -> tuple[list[dict], list[str], dict]:
         for r in rows:
             c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
             row = dict(r)
-            row["_Account"] = str(r.get(account_col, "") or "").strip() if account_col else ""
+            acct = str(r.get(account_col, "") or "").strip() if account_col else ""
+            row["_Account"] = acct
+            # Fallback: if country empty but Account has "X - Y - Z", use first part
+            if not c and acct and " - " in acct:
+                c = acct.split(" - ")[0].strip()
             row["_Country"] = c
             row["_Facility"] = f
             row["_Kitchen"] = k
@@ -2065,7 +2080,7 @@ def main():
             fac_set = set()
             if country_sel:
                 for c, fset in facilities_by_country.items():
-                    if any(_country_matches(c, sel) for sel in country_sel):
+                    if _country_in_selected(c, country_sel):
                         fac_set.update(fset)
             else:
                 for fset in facilities_by_country.values():
@@ -2081,11 +2096,11 @@ def main():
             k_set = set()
             if country_sel and facility_sel:
                 for (c, f), kset in kitchens_by_facility.items():
-                    if any(_country_matches(c, sel) for sel in country_sel) and f in facility_sel:
+                    if _country_in_selected(c, country_sel) and f in facility_sel:
                         k_set.update(kset)
             elif country_sel:
                 for (c, f), kset in kitchens_by_facility.items():
-                    if any(_country_matches(c, sel) for sel in country_sel):
+                    if _country_in_selected(c, country_sel):
                         k_set.update(kset)
             elif facility_sel:
                 for (c, f), kset in kitchens_by_facility.items():
@@ -2110,7 +2125,7 @@ def main():
         if c_filters or f_filters or k_filters:
             filtered = [
                 r for r in filtered
-                if (not c_filters or any(_country_matches(r.get("_Country", ""), c) for c in c_filters))
+                if (not c_filters or _country_in_selected(r.get("_Country", ""), c_filters))
                 and (not f_filters or r.get("_Facility", "") in f_filters)
                 and (not k_filters or r.get("_Kitchen", "") in k_filters)
             ]
@@ -2179,7 +2194,14 @@ def main():
             w.writerows(out_rows)
             st.download_button("Download filtered CSV", data=buf.getvalue(), file_name="kitchens_filtered.csv", mime="text/csv", key="dl_hierarchy")
         else:
+            # Diagnostic: show what values exist in the data so user can see why filters return nothing
+            countries_in_data = sorted({str(r.get("_Country", "")).strip() for r in rows if r.get("_Country")})
+            sources_in_data = sorted({str(r.get("_Source", "")).strip() for r in rows if r.get("_Source")})
             st.info("No rows match your filters. Try changing Country, Facility, or search.")
+            with st.expander("What's in your data?", expanded=True):
+                st.caption("**Countries in data:** " + (", ".join(c for c in countries_in_data if c) or "(none)"))
+                st.caption("**Sources/tabs:** " + (", ".join(sources_in_data) or "(none)"))
+                st.caption("If the country you selected isn't listed above, that country has no data yet. Add it to your source (Sheet/SF) or clear filters to see all rows.")
         return
 
     # Super-user reports: Facility Sell Price Multipliers, Area Data, etc. — all countries
