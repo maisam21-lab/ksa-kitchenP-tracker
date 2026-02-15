@@ -270,9 +270,9 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details"]
-# Column names (case-insensitive match) or keys. For "Account.Name" = "SA - RUH - Sweidi", we parse: country=1st segment, facility=2nd+3rd.
-HIERARCHY_ACCOUNT_COL = "Account.Name"  # or "Account Name" — parsed as "X - Y - Z" → country=X, facility=Y - Z
-HIERARCHY_KITCHEN_COL = "Kitchen_Number__c.Name"  # or "Name", "Kitchen" — the kitchen identifier
+# Column names to try (case-insensitive). Excel/Report headers: "Account Name", "Kitchen Number Name". API: "Account.Name", "Kitchen_Number__c.Name".
+HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "Account Name", "account name"]
+HIERARCHY_KITCHEN_CANDIDATES = ["Kitchen Number Name", "Kitchen_Number__c.Name", "Kitchen Number ID 18", "Kitchen", "Name"]
 
 # Generic tab data: any sheet tab (SF Kitchen Data, Area Data, etc.) — store rows as JSON per row
 TABLE_GENERIC_TAB = """
@@ -1002,8 +1002,8 @@ def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None]:
         if not rows:
             continue
         r0 = rows[0]
-        account_col = _find_col(r0, HIERARCHY_ACCOUNT_COL, "Account.Name", "Account Name", "account.name")
-        kitchen_col = _find_col(r0, HIERARCHY_KITCHEN_COL, "Kitchen_Number__c.Name", "Kitchen Name", "Name", "Kitchen")
+        account_col = _find_col(r0, *HIERARCHY_ACCOUNT_CANDIDATES)
+        kitchen_col = _find_col(r0, *HIERARCHY_KITCHEN_CANDIDATES)
         return (rows, tab_id, account_col, kitchen_col)
     return ([], "", None, None)
 
@@ -1738,6 +1738,10 @@ def main():
         if not rows:
             st.info("No hierarchy data yet. Use **Data** → **Refresh from Salesforce** to load SF Churn Data, SF Kitchen Data, or KSA Facility details.")
             st.stop()
+        # Show all headers (columns) from the current data source
+        with st.expander("Column reference (all headers in this view)", expanded=True):
+            headers = list(rows[0].keys()) if rows else []
+            st.write(", ".join(f"`{h}`" for h in headers))
         # Build unique values for cascading filters
         countries: set[str] = set()
         facilities_by_country: dict[str, set[str]] = {}
