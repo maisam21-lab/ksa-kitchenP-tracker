@@ -9,7 +9,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -724,6 +724,27 @@ def _humanize_ago(iso_ts: str) -> str:
         return f"{w} week{'s' if w > 1 else ''} ago"
     except Exception:
         return "—"
+
+
+def _auto_refresh_enabled() -> bool:
+    """True if auto-refresh every N minutes is enabled (AUTO_REFRESH_ENABLED in secrets/env)."""
+    try:
+        v = st.secrets.get("AUTO_REFRESH_ENABLED") or os.environ.get("AUTO_REFRESH_ENABLED", "")
+    except Exception:
+        v = os.environ.get("AUTO_REFRESH_ENABLED", "")
+    return str(v).strip().lower() in ("1", "true", "yes")
+
+
+def _auto_refresh_minutes() -> int:
+    """Minutes between auto-refreshes (AUTO_REFRESH_MINUTES, default 15)."""
+    try:
+        v = st.secrets.get("AUTO_REFRESH_MINUTES") or os.environ.get("AUTO_REFRESH_MINUTES", "15")
+    except Exception:
+        v = os.environ.get("AUTO_REFRESH_MINUTES", "15")
+    try:
+        return max(1, int(v))
+    except (ValueError, TypeError):
+        return 15
 
 
 def _get_developer_key() -> str:
@@ -1621,6 +1642,32 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide")
     init_db()
 
+    # Auto-refresh: every 15 mins (or AUTO_REFRESH_MINUTES), when enabled
+    if _auto_refresh_enabled() and hasattr(st, "fragment"):
+        interval_mins = _auto_refresh_minutes()
+
+        @st.fragment(run_every=timedelta(minutes=min(5, interval_mins)))
+        def _auto_refresh_fragment():
+            refreshed_at, _ = get_last_data_refresh()
+            if refreshed_at:
+                try:
+                    ts = datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
+                    if (datetime.now(timezone.utc) - ts).total_seconds() < interval_mins * 60:
+                        return
+                except Exception:
+                    return
+            try:
+                ok, _ = _refresh_from_salesforce()
+                if not ok:
+                    ok, _ = _refresh_from_online_sheet()
+                if ok:
+                    st.session_state["goto_data_after_refresh"] = True
+                    _rerun()
+            except Exception:
+                pass
+
+        _auto_refresh_fragment()
+
     # Pre-fill name/email from URL so users can bookmark and avoid typing each time
     prefilled = (st.query_params.get("email") or st.query_params.get("name") or st.query_params.get("user") or "").strip()
     if prefilled:
@@ -2277,7 +2324,7 @@ def main():
                             st.error(msg)
                 with col2:
                     st.markdown("**Salesforce API (real-time)** — Refresh token or username/password + sf_tab_queries.")
-                    st.caption("Fallback: use **Refresh from online sheet** if SF auth is not set up or SF fails.")
+                    st.caption("If SF auth isn’t set up yet, use **Refresh from online sheet** — it’s synced from Salesforce every 4 hours.")
                     if st.button("Refresh from Salesforce", key="btn_salesforce"):
                         with st.spinner("Loading from Salesforce…"):
                             ok, msg = _refresh_from_salesforce()
