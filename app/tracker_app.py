@@ -257,13 +257,21 @@ CREATE TABLE IF NOT EXISTS ksa_auto_refresh_execution_log (
 EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
-HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details"]
+HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details", "Price Multipliers", "Area Data"]
 # Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
 SF_COUNTRIES = ["UAE", "BH", "KW", "SA", "QA"]
-# Tabs regular users can see (kitchen-focused). Super users see all tabs (incl. Price Multipliers, Area Data, etc.)
-KITCHEN_ONLY_TABS = ["SF Kitchen Data", "SF Churn Data", "KSA Facility details", "Sellable No Status", "All no status kitchens"]
-# Column names to try (case-insensitive). Excel/Report headers: "Account Name", "Kitchen Number Name". API: "Account.Name", "Kitchen_Number__c.Name".
-HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "Account Name", "account name"]
+# Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE")
+COUNTRY_ALIASES = {
+    "uae": ["united arab emirates", "uae", "ae"],
+    "sa": ["saudi arabia", "sa", "ksa"],
+    "kw": ["kuwait", "kwt", "kw"],
+    "bh": ["bahrain", "bh"],
+    "qa": ["qatar", "qa"],
+}
+# Column names to try (case-insensitive). Supports SA, UAE, Kuwait, Bahrain, Qatar.
+HIERARCHY_COUNTRY_CANDIDATES = ["Country", "Country Name", "Account.Country", "country"]
+HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "account name"]
+HIERARCHY_FACILITY_CANDIDATES = ["Facility", "Facility Name", "Account Name", "Account.Name"]
 HIERARCHY_KITCHEN_CANDIDATES = ["Kitchen Number Name", "Kitchen_Number__c.Name", "Kitchen Number ID 18", "Kitchen", "Name"]
 
 # Generic tab data: any sheet tab (SF Kitchen Data, Area Data, etc.) — store rows as JSON per row
@@ -1071,26 +1079,53 @@ def _find_col(row: dict, *candidates: str) -> str | None:
     return None
 
 
-def _extract_hierarchy_from_row(row: dict, account_col: str | None, kitchen_col: str | None) -> tuple[str, str, str]:
-    """Extract (country, facility, kitchen) from a row. Returns ("", "", "") if missing."""
+def _extract_hierarchy_from_row(
+    row: dict,
+    account_col: str | None,
+    kitchen_col: str | None,
+    country_col: str | None = None,
+    facility_col: str | None = None,
+) -> tuple[str, str, str]:
+    """Extract (country, facility, kitchen) from a row. Supports SA, UAE, Kuwait, Bahrain, Qatar."""
     country, facility, kitchen = "", "", ""
+    # Prefer dedicated Country column (e.g. Price Multipliers: "Saudi Arabia", "UAE", "Kuwait")
+    if country_col and row.get(country_col):
+        country = str(row[country_col]).strip()
+    # Prefer dedicated Facility column
+    if facility_col and row.get(facility_col):
+        facility = str(row[facility_col]).strip()
+    # Fallback: parse from Account Name (e.g. "SA - RUH - Sweidi", "UAE - DXB - Bur Dubai")
     if account_col and row.get(account_col):
         parts = [p.strip() for p in str(row[account_col]).split(" - ") if p.strip()]
-        if len(parts) >= 1:
+        if not country and len(parts) >= 1:
             country = parts[0]
-        if len(parts) >= 2:
-            facility = " - ".join(parts[1:])
-        elif len(parts) == 1:
-            facility = parts[0]
+        if not facility:
+            if len(parts) >= 2:
+                facility = " - ".join(parts[1:])
+            elif len(parts) == 1:
+                facility = parts[0]
     if kitchen_col and row.get(kitchen_col):
         kitchen = str(row[kitchen_col]).strip()
     return (country, facility, kitchen)
 
 
-def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None]:
+def _country_matches(a: str, b: str) -> bool:
+    """True if a and b represent the same country (handles UAE/United Arab Emirates etc)."""
+    if not a or not b:
+        return a == b
+    ax, bx = a.strip().lower(), b.strip().lower()
+    if ax == bx:
+        return True
+    for canonical, aliases in COUNTRY_ALIASES.items():
+        if ax in aliases and bx in aliases:
+            return True
+    return False
+
+
+def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None, str | None, str | None]:
     """
     Get rows from first available hierarchy source tab.
-    Returns (rows, tab_id, account_col, kitchen_col).
+    Returns (rows, tab_id, account_col, kitchen_col, country_col, facility_col).
     """
     for tab_id in HIERARCHY_SOURCE_TABS:
         rows = list_generic_tab(tab_id)
@@ -1099,8 +1134,10 @@ def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None]:
         r0 = rows[0]
         account_col = _find_col(r0, *HIERARCHY_ACCOUNT_CANDIDATES)
         kitchen_col = _find_col(r0, *HIERARCHY_KITCHEN_CANDIDATES)
-        return (rows, tab_id, account_col, kitchen_col)
-    return ([], "", None, None)
+        country_col = _find_col(r0, *HIERARCHY_COUNTRY_CANDIDATES)
+        facility_col = _find_col(r0, *HIERARCHY_FACILITY_CANDIDATES)
+        return (rows, tab_id, account_col, kitchen_col, country_col, facility_col)
+    return ([], "", None, None, None, None)
 
 
 def _hierarchy_filtered_rows(
@@ -1110,15 +1147,16 @@ def _hierarchy_filtered_rows(
     country: str | None,
     facility: str | None,
     kitchen: str | None,
+    country_col: str | None = None,
+    facility_col: str | None = None,
 ) -> list[dict]:
     """Filter rows by selected country, facility, kitchen."""
-    out = rows
     if not country and not facility and not kitchen:
-        return out
+        return rows
     filtered = []
     for r in rows:
-        c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col)
-        if country and c != country:
+        c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
+        if country and not _country_matches(c, country):
             continue
         if facility and f != facility:
             continue
@@ -1642,31 +1680,47 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide")
     init_db()
 
-    # Auto-refresh: every 15 mins (or AUTO_REFRESH_MINUTES), when enabled
-    if _auto_refresh_enabled() and hasattr(st, "fragment"):
+    # Auto-refresh: on session start if stale + every 15 mins while open (when AUTO_REFRESH_ENABLED)
+    if _auto_refresh_enabled():
         interval_mins = _auto_refresh_minutes()
 
-        @st.fragment(run_every=timedelta(minutes=min(5, interval_mins)))
-        def _auto_refresh_fragment():
+        def _should_refresh() -> bool:
             refreshed_at, _ = get_last_data_refresh()
-            if refreshed_at:
-                try:
-                    ts = datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
-                    if (datetime.now(timezone.utc) - ts).total_seconds() < interval_mins * 60:
-                        return
-                except Exception:
-                    return
+            if not refreshed_at:
+                return True
+            try:
+                ts = datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
+                return (datetime.now(timezone.utc) - ts).total_seconds() >= interval_mins * 60
+            except Exception:
+                return True
+
+        def _do_refresh() -> bool:
             try:
                 ok, _ = _refresh_from_salesforce()
                 if not ok:
                     ok, _ = _refresh_from_online_sheet()
                 if ok:
                     st.session_state["goto_data_after_refresh"] = True
-                    _rerun()
+                    return True
             except Exception:
                 pass
+            return False
 
-        _auto_refresh_fragment()
+        # Refresh on session start if data is stale (handles app wake-up on Streamlit Cloud)
+        if not st.session_state.get("auto_refresh_done") and _should_refresh():
+            if _do_refresh():
+                _rerun()
+            st.session_state["auto_refresh_done"] = True
+
+        # Periodic refresh while app is open (every 5 mins)
+        if hasattr(st, "fragment"):
+
+            @st.fragment(run_every=timedelta(minutes=min(5, interval_mins)))
+            def _auto_refresh_fragment():
+                if _should_refresh() and _do_refresh():
+                    _rerun()
+
+            _auto_refresh_fragment()
 
     # Pre-fill name/email from URL so users can bookmark and avoid typing each time
     prefilled = (st.query_params.get("email") or st.query_params.get("name") or st.query_params.get("user") or "").strip()
@@ -1865,7 +1919,7 @@ def main():
     if section == "Kitchens":
         st.title("Browse Kitchens")
         st.caption("Select **Country**, then **Facility**, then **Kitchen** to filter the data.")
-        rows, tab_id, account_col, kitchen_col = _get_hierarchy_data()
+        rows, tab_id, account_col, kitchen_col, country_col, facility_col = _get_hierarchy_data()
         if not rows:
             st.info("No hierarchy data yet. Use **Data** → **Refresh from Salesforce** to load SF Churn Data, SF Kitchen Data, or KSA Facility details.")
             st.stop()
@@ -1873,12 +1927,12 @@ def main():
         with st.expander("Column reference (all headers in this view)", expanded=True):
             headers = list(rows[0].keys()) if rows else []
             st.write(", ".join(f"`{h}`" for h in headers))
-        # Build unique values for cascading filters
+        # Build unique values for cascading filters (SA, UAE, Kuwait, Bahrain, Qatar)
         countries: set[str] = set()
         facilities_by_country: dict[str, set[str]] = {}
         kitchens_by_facility: dict[tuple[str, str], set[str]] = {}
         for r in rows:
-            c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col)
+            c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
             if c:
                 countries.add(c)
                 facilities_by_country.setdefault(c, set()).add(f or "—")
@@ -1892,17 +1946,23 @@ def main():
         country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
         facilities_options = ["— All —"]
         if country_sel and country_sel != "— All —":
-            facilities_options += sorted(facilities_by_country.get(country_sel, set()))
+            fac_set = set()
+            for c, fset in facilities_by_country.items():
+                if _country_matches(c, country_sel):
+                    fac_set.update(fset)
+            facilities_options += sorted(fac_set)
         facility_sel = st.selectbox("Facility", facilities_options, key="h_facility")
         kitchen_options = ["— All —"]
         if country_sel and country_sel != "— All —" and facility_sel and facility_sel != "— All —":
-            key = (country_sel, facility_sel)
-            kitchen_options += sorted(kitchens_by_facility.get(key, set()))
+            k_set = set()
+            for (c, f), kset in kitchens_by_facility.items():
+                if _country_matches(c, country_sel) and f == facility_sel:
+                    k_set.update(kset)
+            kitchen_options += sorted(k_set)
         elif country_sel and country_sel != "— All —":
-            # All kitchens in this country
             all_k = set()
             for (c, f), kset in kitchens_by_facility.items():
-                if c == country_sel:
+                if _country_matches(c, country_sel):
                     all_k.update(kset)
             kitchen_options += sorted(all_k)
         else:
@@ -1915,7 +1975,7 @@ def main():
         c_filter = country_sel if country_sel and country_sel != "— All —" else None
         f_filter = facility_sel if facility_sel and facility_sel != "— All —" else None
         k_filter = kitchen_sel if kitchen_sel and kitchen_sel != "— All —" else None
-        filtered = _hierarchy_filtered_rows(rows, account_col, kitchen_col, c_filter, f_filter, k_filter)
+        filtered = _hierarchy_filtered_rows(rows, account_col, kitchen_col, c_filter, f_filter, k_filter, country_col, facility_col)
         st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** row(s) from **{tab_id}**.")
         if filtered:
             cols = list(filtered[0].keys()) if filtered else []
