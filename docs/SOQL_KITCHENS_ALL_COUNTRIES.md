@@ -41,16 +41,18 @@ SELECT Id, Name, Kitchen_Number_ID_18__c, Type__c, Category__c, Status__c, Kitch
 
 In `.streamlit/secrets.toml` (or Streamlit Cloud Secrets), add:
 
+**Option A — Use a Report ID (simplest, valid TOML):**
 ```toml
 [sf_tab_queries]
-"SF Kitchen Data" = "SELECT Id, Name, Kitchen_Number_ID_18__c, Type__c, Category__c, Status__c, Kitchen_Size_Sq_Meters__c, Hood_Size__c, Floor__c, MSRP__c, List_Price__c, Sell_Price__c, Account__r.Name, Account__r.Country__c, Account__r.Account_ID_18__c, Account__r.Floor_Price_Multiplier__c FROM Kitchen_Number__c WHERE Account__r.Country__c IN ('Saudi Arabia', 'UAE', 'Kuwait', 'Bahrain', 'Qatar') ORDER BY Account__r.Country__c, Account__r.Name, Name"
-```
-
-For TOML, keep the SOQL on one line and escape internal quotes if needed. Or use a Report ID instead if you already have a report:
-
-```toml
 "SF Kitchen Data" = "00O6T000006Y0l6UAC"
 ```
+
+**Option B — Use SF_TAB_QUERIES as JSON** (avoids TOML quoting issues with long SOQL):
+```toml
+SF_TAB_QUERIES = "{\"SF Kitchen Data\": \"SELECT Id, Name, Type__c, Status__c, Account__r.Name, Account__r.Country__c FROM Kitchen_Number__c WHERE Account__r.Country__c IN ('Saudi Arabia','UAE','Kuwait','Bahrain','Qatar') ORDER BY Account__r.Country__c, Account__r.Name, Name\"}"
+```
+
+If you get "Invalid format: please enter valid TOML", use Option A (Report ID) or Option B (JSON). Avoid special characters or smart quotes when pasting.
 
 ## 3. Adjust for your schema
 
