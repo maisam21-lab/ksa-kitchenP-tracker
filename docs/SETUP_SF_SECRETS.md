@@ -1,11 +1,30 @@
-# Setup Salesforce Secrets (fix "No SOQL or Report IDs configured")
+# Setup Salesforce Secrets — Include All Online Tracker Tabs
 
-Add these to your Streamlit secrets.
+To load **all** tabs from the online tracker (Inflation FPx, LF Comp, Pivot Table 10, Occupancy, etc.) into the kitchen tracker, add their Report IDs to `[sf_tab_queries]`.
 
-## Streamlit Cloud (share.streamlit.io)
+## Tabs in the Online Tracker
 
-1. Open your app → **Settings** (or **Manage app**) → **Secrets**
-2. Paste this (replace Report IDs with yours):
+| Tab | Add to sf_tab_queries |
+|-----|------------------------|
+| SF Kitchen Data | ✅ |
+| SF Churn Data | ✅ |
+| Sellable No Status | ✅ |
+| All no status kitchens | ✅ |
+| Price Multipliers | ✅ |
+| Area Data | ✅ |
+| Inflation FPx | Add Report ID when available |
+| LF Comp | Add Report ID when available |
+| Pivot Table 10 | Add Report ID when available |
+| Pivot Table 4 | Add Report ID when available |
+| Occupancy | Add Report ID when available |
+| KSA Facility details | Add Report ID when available |
+| UAE Facility details | Add Report ID when available |
+| Kuwait Facility details | Add Report ID when available |
+| Bahrain Facility details | Add Report ID when available |
+| Qatar Facility details | Add Report ID when available |
+| Qurtoba - Old, Jarir - Old, etc. | Add Report IDs when available |
+
+## Example: Full sf_tab_queries
 
 ```toml
 [sf_tab_queries]
@@ -15,28 +34,15 @@ Add these to your Streamlit secrets.
 "All no status kitchens" = "00O6T000006DPigUAG"
 "Price Multipliers" = "00OVO000003z2O92AI"
 "Area Data" = "00O6T000006Y0l6UAC"
+"Inflation FPx" = "00Oxxxxxxxxxxxxxx"
+"LF Comp" = "00Oxxxxxxxxxxxxxx"
+"Pivot Table 10" = "00Oxxxxxxxxxxxxxx"
+"Occupancy" = "00Oxxxxxxxxxxxxxx"
+"KSA Facility details" = "00Oxxxxxxxxxxxxxx"
 ```
 
-3. Add SF auth at the top (if not already):
+Replace `00Oxxxxxxxxxxxxxx` with your actual Salesforce Report IDs. Get them from Salesforce → Reports → open the report → copy the ID from the URL.
 
-```toml
-SF_INSTANCE_URL = "https://your-org.my.salesforce.com"
-SF_ACCESS_TOKEN = "your_token"
-```
+## Fallback: Refresh from Online Sheet
 
-Or use refresh token flow (see DEPLOY_SALESFORCE_REPORTS.md).
-
-4. **Save** → **Reboot app**
-
-## Local (.streamlit/secrets.toml)
-
-1. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml`
-2. Uncomment and fill:
-
-```toml
-[sf_tab_queries]
-"SF Kitchen Data" = "00O6T000006Y0l6UAC"
-```
-
-3. Add SF auth (SF_INSTANCE_URL, SF_ACCESS_TOKEN or refresh token)
-4. Restart the app
+Tabs that don't have SF Report IDs can still be loaded via **Refresh from online sheet**. The Sheet refresh loads **all** worksheets from the online tracker, including Inflation FPx, LF Comp, etc.
