@@ -260,6 +260,10 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens", "KSA Facility details", "Price Multipliers", "Area Data"]
 # Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
 SF_COUNTRIES = ["UAE", "Bahrain", "BH", "Kuwait", "KW", "Saudi Arabia", "SA", "Qatar", "QA"]
+# Tabs for regular users (kitchen-only). Super users see all tabs.
+KITCHEN_ONLY_TABS = ["SF Kitchen Data", "SF Churn Data", "KSA Facility details", "Sellable No Status", "All no status kitchens"]
+# 6 reports as sidebar functions for super users only (all countries). Facility Sell Price Multipliers, etc.
+SUPERUSER_REPORTS = ["Price Multipliers", "Area Data", "SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens"]
 # Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE")
 COUNTRY_ALIASES = {
     "uae": ["united arab emirates", "uae", "ae"],
@@ -1939,7 +1943,11 @@ def main():
                         st.error("Invalid key")
 
     st.sidebar.divider()
-    sections = ["Kitchens", "Dashboard", "Discussions", "Data", "Search"]
+    # Kitchens for everyone; 6 reports as sidebar functions for super users only
+    base_sections = ["Kitchens", "Dashboard", "Discussions", "Data", "Search"]
+    sections = base_sections
+    if is_super_user(current_user):
+        sections = ["Kitchens"] + SUPERUSER_REPORTS + ["Dashboard", "Discussions", "Data", "Search"]
     # After SF/Sheet refresh, switch to Data so user sees the refreshed tabs
     if st.session_state.pop("goto_data_after_refresh", False):
         st.session_state["sidebar_section"] = "Data"
@@ -2069,6 +2077,13 @@ def main():
             st.download_button("Download filtered CSV", data=buf.getvalue(), file_name="kitchens_filtered.csv", mime="text/csv", key="dl_hierarchy")
         else:
             st.info("No rows match your filters. Try changing Country, Facility, or search.")
+        return
+
+    # Super-user reports: Facility Sell Price Multipliers, Area Data, etc. — all countries
+    if section in SUPERUSER_REPORTS:
+        st.title(section)
+        st.caption(f"Report data for all countries (SA, UAE, Kuwait, Bahrain, Qatar). Filter by any column.")
+        _render_generic_tab(section, key_suffix=section.replace(" ", "_"), is_developer=is_developer)
         return
 
     # Dashboard: choose any tab → filter → download report
