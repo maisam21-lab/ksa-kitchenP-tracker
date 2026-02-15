@@ -1760,33 +1760,18 @@ def main():
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
-    # Kitchen status: freshness from last SF/Sheet refresh
+    # Last refresh
     refreshed_at, refresh_source = get_last_data_refresh()
     if refreshed_at:
         ago = _humanize_ago(refreshed_at)
         source_label = "SF" if (refresh_source or "").startswith("salesforce") else "Sheet"
-        # Sizzling: &lt; 24h (hot off the line), Needs prep: &gt;= 24h
-        try:
-            ts = datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
-            delta_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
-            pulse_status = "Sizzling" if delta_h < 24 else "Needs prep"
-        except Exception:
-            pulse_status = "On the line"
         st.sidebar.metric(
-            "Kitchen status",
-            pulse_status,
-            delta=f"{ago} ({source_label})",
-            help="How recent the data is. Refreshed via Data → Refresh from Salesforce or Google Sheet.",
+            "Last refresh",
+            f"{ago} ({source_label})",
+            help="Refreshed via Data → Refresh from Salesforce or Google Sheet.",
         )
     else:
-        updated_today = get_records_updated_today_count()
-        pulse_status = "On the line" if updated_today > 0 else "Standing by"
-        st.sidebar.metric(
-            "Kitchen status",
-            pulse_status,
-            delta="No refresh yet",
-            help="Refresh data from Data → Refresh from Salesforce or Google Sheet to see freshness.",
-        )
+        st.sidebar.metric("Last refresh", "—", help="Refresh data from Data section.")
     # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
     current_user = (st.session_state.get("user_display_name") or "").strip()
