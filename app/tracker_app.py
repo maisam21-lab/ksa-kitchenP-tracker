@@ -270,16 +270,6 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details"]
-# All Middle East countries (names and common codes) — merged with data-derived countries in dropdown
-MIDDLE_EAST_COUNTRIES = [
-    "Bahrain", "BH", "Cyprus", "CY", "Egypt", "EG",
-    "Iran", "IR", "Iraq", "IQ", "Israel", "IL",
-    "Jordan", "JO", "Kuwait", "KW", "Lebanon", "LB",
-    "Oman", "OM", "Palestine", "PS", "Qatar", "QA",
-    "Saudi Arabia", "SA", "KSA", "Syria", "SY",
-    "Turkey", "TR", "United Arab Emirates", "UAE", "AE",
-    "Yemen", "YE",
-]
 # Column names to try (case-insensitive). Excel/Report headers: "Account Name", "Kitchen Number Name". API: "Account.Name", "Kitchen_Number__c.Name".
 HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "Account Name", "account name"]
 HIERARCHY_KITCHEN_CANDIDATES = ["Kitchen Number Name", "Kitchen_Number__c.Name", "Kitchen Number ID 18", "Kitchen", "Name"]
@@ -1721,10 +1711,16 @@ def main():
                         st.error("Invalid key")
 
     st.sidebar.divider()
+    sections = ["Kitchens", "Dashboard", "Discussions", "Data", "Search"]
+    # After SF/Sheet refresh, switch to Data so user sees the refreshed tabs
+    if st.session_state.pop("goto_data_after_refresh", False):
+        st.session_state["sidebar_section"] = "Data"
+    default_idx = sections.index(st.session_state.get("sidebar_section", "Kitchens")) if st.session_state.get("sidebar_section") in sections else 0
     section = st.sidebar.radio(
         "Section",
-        ["Kitchens", "Dashboard", "Discussions", "Data", "Search"],
-        index=0,
+        sections,
+        index=default_idx,
+        key="sidebar_section",
         label_visibility="collapsed",
     )
 
@@ -1766,8 +1762,6 @@ def main():
                 key = (c, f or "—")
                 if k:
                     kitchens_by_facility.setdefault(key, set()).add(k)
-        # Merge with all Middle East countries so dropdown shows full region
-        countries.update(MIDDLE_EAST_COUNTRIES)
         countries_sorted = sorted(countries)
         country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
         facilities_options = ["— All —"]
@@ -2185,6 +2179,7 @@ def main():
                         with st.spinner("Loading from Google Sheet…"):
                             ok, msg = _refresh_from_online_sheet()
                         if ok:
+                            st.session_state["goto_data_after_refresh"] = True
                             st.success(msg)
                             _rerun()
                         else:
@@ -2196,6 +2191,7 @@ def main():
                         with st.spinner("Loading from Salesforce…"):
                             ok, msg = _refresh_from_salesforce()
                         if ok:
+                            st.session_state["goto_data_after_refresh"] = True
                             st.success(msg)
                             _rerun()
                         else:
