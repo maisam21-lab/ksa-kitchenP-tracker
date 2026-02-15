@@ -258,6 +258,8 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens", "KSA Facility details", "Price Multipliers", "Area Data"]
+# Kitchens tab: kitchen-level data only (excludes Price Multipliers, Area Data, KSA Facility details)
+KITCHENS_SOURCE_TABS = ["SF Kitchen Data", "SF Churn Data", "Sellable No Status", "All no status kitchens"]
 # Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
 SF_COUNTRIES = ["UAE", "Bahrain", "BH", "Kuwait", "KW", "Saudi Arabia", "SA", "Qatar", "QA"]
 # Tabs for regular users (kitchen-only). Super users see all tabs.
@@ -1149,15 +1151,14 @@ def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None, str 
 
 def _get_combined_kitchens_dataset() -> tuple[list[dict], list[str], dict]:
     """
-    Build a unified Kitchens dataset by combining rows from all hierarchy source tabs.
-    Returns (rows, all_columns, col_map) where col_map has account_col, kitchen_col, country_col, facility_col
-    for filtering. Each row gets _Country, _Facility, _Kitchen, _Source for consistent filtering.
+    Build a unified Kitchens dataset from kitchen-level tabs only (SF Kitchen Data, Churn, Sellable/No Status).
+    Returns (rows, all_columns, col_map). Each row gets _Country, _Facility, _Kitchen, _Source.
     """
     all_rows: list[dict] = []
     all_keys: set[str] = set()
     col_map = {}
 
-    for tab_id in HIERARCHY_SOURCE_TABS:
+    for tab_id in KITCHENS_SOURCE_TABS:
         rows = list_generic_tab(tab_id)
         if not rows:
             continue
@@ -1965,18 +1966,14 @@ def main():
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
             st.stop()
 
-    # Kitchens: unified dataset from all sources, filter by Country/Facility/Kitchen + any column
+    # Kitchens: raw kitchen data only (SF Kitchen Data, Churn, Sellable/No Status)
     if section == "Kitchens":
-        st.title("Browse Kitchens")
-        st.caption("Unified kitchen data from all sources. Filter by Country, Facility, Kitchen, or any column.")
+        st.title("Kitchens")
+        st.caption("Raw kitchen data. Filter by Country, Facility, Kitchen, or search.")
         rows, columns, col_map = _get_combined_kitchens_dataset()
         if not rows:
             st.info("No kitchen data yet. Data auto-refreshes every 15 mins. Developers can trigger a refresh in **Data** → Refresh from Salesforce or Google Sheet.")
             st.stop()
-
-        # Column reference: all headers in the unified dataset
-        with st.expander("Column reference (all headers)", expanded=True):
-            st.write(", ".join(f"`{h}`" for h in columns))
 
         # Build hierarchy values from _Country, _Facility, _Kitchen
         countries: set[str] = set()
@@ -2057,7 +2054,7 @@ def main():
                         t = col_val.strip().lower()
                         filtered = [r for r in filtered if t in str(r.get(chosen_col, "") or "").lower()]
 
-        st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** row(s) from combined dataset.")
+        st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** kitchen row(s).")
         if filtered:
             # Order columns for display
             display_cols = [c for c in columns if c in (filtered[0].keys() if filtered else [])]
