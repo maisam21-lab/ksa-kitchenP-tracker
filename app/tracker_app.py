@@ -298,13 +298,13 @@ SUPERUSER_REPORTS = [
     "Price Multipliers", "Area Data", "SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens",
     "KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details",
 ]
-# Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE")
+# Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE", "BHR" ↔ "Bahrain")
 COUNTRY_ALIASES = {
     "uae": ["united arab emirates", "uae", "ae"],
     "sa": ["saudi arabia", "sa", "ksa"],
     "kw": ["kuwait", "kwt", "kw"],
-    "bh": ["bahrain", "bh"],
-    "qa": ["qatar", "qa"],
+    "bh": ["bahrain", "bh", "bhr"],
+    "qa": ["qatar", "qa", "qat"],
 }
 # Column names to try (case-insensitive). Supports SA, UAE, Kuwait, Bahrain, Qatar.
 HIERARCHY_COUNTRY_CANDIDATES = ["Country", "Country Name", "Account.Country", "country"]
@@ -2051,46 +2051,69 @@ def main():
         countries.update(SF_COUNTRIES)
         countries_sorted = sorted(countries)
 
-        # Filters: Country, Facility, Kitchen + search + column filter
+        # Filters: Country, Facility, Kitchen (multi-select) + search + column filter
         f1, f2, f3 = st.columns(3)
         with f1:
-            country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
+            country_sel = st.multiselect(
+                "Country",
+                options=countries_sorted,
+                default=[],
+                key="h_country",
+                help="Select one or more countries. Empty = all.",
+            )
         with f2:
             fac_set = set()
-            if country_sel and country_sel != "— All —":
+            if country_sel:
                 for c, fset in facilities_by_country.items():
-                    if _country_matches(c, country_sel):
+                    if any(_country_matches(c, sel) for sel in country_sel):
                         fac_set.update(fset)
             else:
-                fac_set = set()
                 for fset in facilities_by_country.values():
                     fac_set.update(fset)
-            facility_sel = st.selectbox("Facility", ["— All —"] + sorted(fac_set), key="h_facility")
+            facility_sel = st.multiselect(
+                "Facility",
+                options=sorted(fac_set),
+                default=[],
+                key="h_facility",
+                help="Select one or more facilities. Empty = all.",
+            )
         with f3:
             k_set = set()
-            if country_sel and country_sel != "— All —" and facility_sel and facility_sel != "— All —":
+            if country_sel and facility_sel:
                 for (c, f), kset in kitchens_by_facility.items():
-                    if _country_matches(c, country_sel) and f == facility_sel:
+                    if any(_country_matches(c, sel) for sel in country_sel) and f in facility_sel:
                         k_set.update(kset)
-            elif country_sel and country_sel != "— All —":
+            elif country_sel:
                 for (c, f), kset in kitchens_by_facility.items():
-                    if _country_matches(c, country_sel):
+                    if any(_country_matches(c, sel) for sel in country_sel):
+                        k_set.update(kset)
+            elif facility_sel:
+                for (c, f), kset in kitchens_by_facility.items():
+                    if f in facility_sel:
                         k_set.update(kset)
             else:
                 for kset in kitchens_by_facility.values():
                     k_set.update(kset)
-            kitchen_sel = st.selectbox("Kitchen", ["— All —"] + sorted(k_set), key="h_kitchen")
+            kitchen_sel = st.multiselect(
+                "Kitchen",
+                options=sorted(k_set),
+                default=[],
+                key="h_kitchen",
+                help="Select one or more kitchens. Empty = all.",
+            )
 
-        # Filter by hierarchy
-        c_filter = country_sel if country_sel and country_sel != "— All —" else None
-        f_filter = facility_sel if facility_sel and facility_sel != "— All —" else None
-        k_filter = kitchen_sel if kitchen_sel and kitchen_sel != "— All —" else None
+        # Filter by hierarchy (multi-select: row matches if any selected value matches)
+        c_filters = list(country_sel) if country_sel else []
+        f_filters = list(facility_sel) if facility_sel else []
+        k_filters = list(kitchen_sel) if kitchen_sel else []
         filtered = rows
-        if c_filter or f_filter or k_filter:
-            filtered = [r for r in filtered if
-                (not c_filter or _country_matches(r.get("_Country", ""), c_filter)) and
-                (not f_filter or r.get("_Facility", "") == f_filter) and
-                (not k_filter or r.get("_Kitchen", "") == k_filter)]
+        if c_filters or f_filters or k_filters:
+            filtered = [
+                r for r in filtered
+                if (not c_filters or any(_country_matches(r.get("_Country", ""), c) for c in c_filters))
+                and (not f_filters or r.get("_Facility", "") in f_filters)
+                and (not k_filters or r.get("_Kitchen", "") in k_filters)
+            ]
 
         # Search across all columns
         search_all = st.text_input("Search in all columns", key="h_search", placeholder="Filter by any value…")
