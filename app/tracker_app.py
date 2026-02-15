@@ -270,6 +270,8 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
 # Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details"]
+# Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
+SF_COUNTRIES = ["UAE", "BH", "KW", "SA", "QA"]
 # Column names to try (case-insensitive). Excel/Report headers: "Account Name", "Kitchen Number Name". API: "Account.Name", "Kitchen_Number__c.Name".
 HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "Account Name", "account name"]
 HIERARCHY_KITCHEN_CANDIDATES = ["Kitchen Number Name", "Kitchen_Number__c.Name", "Kitchen Number ID 18", "Kitchen", "Name"]
@@ -1762,6 +1764,7 @@ def main():
                 key = (c, f or "—")
                 if k:
                     kitchens_by_facility.setdefault(key, set()).add(k)
+        countries.update(SF_COUNTRIES)
         countries_sorted = sorted(countries)
         country_sel = st.selectbox("Country", ["— All —"] + countries_sorted, key="h_country")
         facilities_options = ["— All —"]
