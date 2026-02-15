@@ -1627,8 +1627,8 @@ def _refresh_from_salesforce():
     tab_queries = _get_salesforce_tab_queries()
     if not tab_queries:
         return False, (
-            "No SOQL or Report IDs configured. In Streamlit secrets add [sf_tab_queries] (or SF_TAB_QUERIES) with e.g. "
-            '"SF Kitchen Data" = "SELECT Id, Name FROM YourObject__c" or "SF Kitchen Data" = "00O1234567890AbC" (Report ID).'
+            "No SOQL or Report IDs configured. In Streamlit secrets add [sf_tab_queries] with Report IDs, e.g. "
+            '"SF Kitchen Data" = "00O6T000006Y0l6UAC". See docs/SETUP_SF_SECRETS.md for setup.'
         )
     loaded = []
     errors = []
