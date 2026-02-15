@@ -260,6 +260,18 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens", "KSA Facility details", "Price Multipliers", "Area Data"]
 # Kitchens tab: kitchen-level data only (excludes Price Multipliers, Area Data, KSA Facility details)
 KITCHENS_SOURCE_TABS = ["SF Kitchen Data", "SF Churn Data", "Sellable No Status", "All no status kitchens"]
+# Preferred column order for Kitchens display (matches SF-style grouped table)
+KITCHENS_DISPLAY_ORDER = [
+    ("Type", ["Kitchen_Number__c.Type__c", "Type", "type"]),
+    ("List Price", ["Kitchen_Number__c.MSRP__c", "Kitchen_Number__c.List_Price__c", "List Price", "MSRP", "MSRP__c"]),
+    ("Kitchen Number Name", ["Kitchen_Number__c.Name", "Kitchen Number Name", "Kitchen Number ID 18", "Kitchen"]),
+    ("Status", ["Kitchen_Number__c.Status__c", "Status", "status"]),
+    ("Churn Date", ["Opportunity.Churn_Date__c", "Churn Date", "Churn_Date__c", "Churn"]),
+    ("Size", ["Kitchen_Number__c.Kitchen_Size_Sq_Meters__c", "Kitchen Size", "Size", "Kitchen_Size__c"]),
+    ("Hood Size", ["Kitchen_Number__c.Hood_Size__c", "Hood Size", "Hood_Size__c"]),
+    ("Floor", ["Kitchen_Number__c.Floor__c", "Floor", "floor"]),
+    ("Opportunity Name", ["Opportunity.Name", "Opportunity Name", "Opportunity_Name__c"]),
+]
 # Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
 SF_COUNTRIES = ["UAE", "Bahrain", "BH", "Kuwait", "KW", "Saudi Arabia", "SA", "Qatar", "QA"]
 # Tabs for regular users (kitchen-only). Super users see all tabs.
@@ -1086,6 +1098,30 @@ def _find_col(row: dict, *candidates: str) -> str | None:
             if c0 in k or k in c0:
                 return keys_lower[k]
     return None
+
+
+def _kitchens_display_columns(rows: list[dict], all_columns: list[str]) -> list[tuple[str, str]]:
+    """Resolve (display_name, actual_col) for Kitchens table. Type, List Price, Kitchen Name, etc. first."""
+    if not rows:
+        return []
+    r0 = rows[0]
+    keys_lower = {str(k).strip().lower(): k for k in r0.keys()}
+    result: list[tuple[str, str]] = []
+    used: set[str] = set()
+    for display_name, candidates in KITCHENS_DISPLAY_ORDER:
+        found = _find_col(r0, *candidates)
+        if found and found not in used:
+            result.append((display_name, found))
+            used.add(found)
+    meta = ["_Country", "_Facility", "_Kitchen", "_Source"]
+    for m in meta:
+        if m in r0 and m not in used:
+            result.append((m, m))
+            used.add(m)
+    for col in all_columns:
+        if col not in used:
+            result.append((col, col))
+    return result
 
 
 def _extract_hierarchy_from_row(
@@ -2056,12 +2092,43 @@ def main():
 
         st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** kitchen row(s).")
         if filtered:
-            # Order columns for display
-            display_cols = [c for c in columns if c in (filtered[0].keys() if filtered else [])]
-            out_rows = [{k: r.get(k, "") for k in display_cols} for r in filtered]
-            st.dataframe(out_rows, use_container_width=True, hide_index=True)
+            # Preferred column order: Type, List Price, Kitchen Name, Status, Churn Date, Size, Hood Size, Floor, Opportunity Name
+            col_specs = _kitchens_display_columns(filtered, columns)
+            display_names = [dn for dn, _ in col_specs]
+            actual_cols = [ac for _, ac in col_specs]
+            out_rows = [{dn: r.get(ac, "") for dn, ac in col_specs} for r in filtered]
+            # Sort by Type, then List Price (matching SF-style grouped view)
+            type_col = "Type" if "Type" in display_names else None
+            price_col = "List Price" if "List Price" in display_names else None
+            if type_col or price_col:
+                try:
+                    df = pd.DataFrame(out_rows)
+                    sort_cols = [c for c in [type_col, price_col] if c and c in df.columns]
+                    if sort_cols:
+                        df = df.sort_values(sort_cols, na_position="last")
+                    else:
+                        df = pd.DataFrame(out_rows)
+                except Exception:
+                    df = pd.DataFrame(out_rows)
+            else:
+                df = pd.DataFrame(out_rows)
+            # Style: alternating row colors (green, red, yellow), red highlight for blank Opportunity Name
+            opp_col = "Opportunity Name" if "Opportunity Name" in df.columns else None
+
+            def _row_style(row):
+                i = row.name
+                base = ["background-color: #e8f5e9", "background-color: #ffebee", "background-color: #fffde7"][i % 3]
+                return [base] * len(row)
+
+            styled = df.style.apply(_row_style, axis=1)
+            if opp_col and opp_col in df.columns:
+                styled = styled.map(
+                    lambda v: "background-color: #ffcdd2" if (v is None or str(v).strip() in ("", "(blank)")) else "",
+                    subset=[opp_col],
+                )
+            st.dataframe(styled, use_container_width=True, hide_index=True)
             buf = io.StringIO()
-            w = csv.DictWriter(buf, fieldnames=display_cols, extrasaction="ignore")
+            w = csv.DictWriter(buf, fieldnames=display_names, extrasaction="ignore")
             w.writeheader()
             w.writerows(out_rows)
             st.download_button("Download filtered CSV", data=buf.getvalue(), file_name="kitchens_filtered.csv", mime="text/csv", key="dl_hierarchy")
