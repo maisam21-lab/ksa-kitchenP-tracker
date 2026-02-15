@@ -1871,20 +1871,10 @@ def main():
         st.sidebar.metric(
             "Last refresh",
             f"{ago} ({source_label})",
-            help="Refreshed via Data → Refresh from Salesforce or Google Sheet.",
+            help="Auto-refreshes every 15 mins from Salesforce (or Google Sheet fallback).",
         )
     else:
-        st.sidebar.metric("Last refresh", "—", help="Refresh data from Data section.")
-    if st.sidebar.button("Refresh data", key="sidebar_refresh", help="Pull latest from Salesforce or Google Sheet"):
-        with st.spinner("Refreshing…"):
-            ok, msg = _refresh_from_salesforce()
-            if not ok:
-                ok, msg = _refresh_from_online_sheet()
-            if ok:
-                st.session_state["goto_data_after_refresh"] = True
-                st.rerun()
-            else:
-                st.sidebar.error(msg[:100] if msg else "Refresh failed")
+        st.sidebar.metric("Last refresh", "—", help="Data auto-refreshes every 15 mins when the app is open.")
     # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
     current_user = (st.session_state.get("user_display_name") or "").strip()
@@ -1981,7 +1971,7 @@ def main():
         st.caption("Unified kitchen data from all sources. Filter by Country, Facility, Kitchen, or any column.")
         rows, columns, col_map = _get_combined_kitchens_dataset()
         if not rows:
-            st.info("No kitchen data yet. Use **Refresh data** in the sidebar or **Data** → **Refresh from Salesforce** to load SF Churn Data, SF Kitchen Data, Price Multipliers, etc.")
+            st.info("No kitchen data yet. Data auto-refreshes every 15 mins. Developers can trigger a refresh in **Data** → Refresh from Salesforce or Google Sheet.")
             st.stop()
 
         # Column reference: all headers in the unified dataset
