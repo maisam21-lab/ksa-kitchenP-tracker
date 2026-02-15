@@ -1743,6 +1743,9 @@ def main():
         /* Metrics / captions: dark grey */
         [data-testid="stMetricValue"] { color: #1E293B !important; font-weight: 600 !important; }
         [data-testid="stMetricLabel"] { color: #64748B !important; }
+        /* Sidebar metric: smaller font */
+        section[data-testid="stSidebar"] [data-testid="stMetricValue"],
+        section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         .stCaption { color: #64748B !important; }
         div[data-testid="stVerticalBlock"] > div { padding-top: 0.25rem; }
         </style>
