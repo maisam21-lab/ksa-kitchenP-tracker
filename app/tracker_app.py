@@ -1827,8 +1827,8 @@ def main():
                 pass
             return False
 
-        # Refresh on session start if data is stale (handles app wake-up on Streamlit Cloud)
-        if not st.session_state.get("auto_refresh_done") and _should_refresh():
+        # Refresh on any session start (app wake-up, new user, Streamlit Cloud cold start)
+        if not st.session_state.get("auto_refresh_done"):
             if _do_refresh():
                 _rerun()
             st.session_state["auto_refresh_done"] = True
