@@ -9,9 +9,3 @@ venv/
 
 # Your own product (local SQLite from tracker app)
 app/data/*.db
-
-# Avoid committing cache or duplicate repo
-__pycache__/
-*.pyc
-ksa-kitchenp-tracker/
-streamlit
