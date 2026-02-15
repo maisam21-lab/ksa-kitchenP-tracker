@@ -2509,11 +2509,20 @@ def main():
                     """)
         else:
             st.info("Refresh is available only to developers. Unlock **Developer access** in the sidebar.")
+        # Tabbed view enabled only when data loaded from online sheet (not Salesforce)
+        _, refresh_source = get_last_data_refresh()
+        from_online_sheet = (refresh_source or "").strip().lower().startswith("google_sheet")
+        if not from_online_sheet:
+            st.info(
+                "The tabbed data view (SF Kitchen Data, Sellable No Status, etc.) is available only when data is loaded from the **online Google Sheet**. "
+                "Use **Refresh from online sheet** above to enable it."
+            )
+            st.caption("Data refreshed from Salesforce does not use this view.")
         # Regular users: kitchen tabs only. Super users: all tabs (Price Multipliers, Area Data, etc.)
-        all_tab_ids = _visible_data_tab_ids(current_user)
+        all_tab_ids = _visible_data_tab_ids(current_user) if from_online_sheet else []
         if not is_super_user(current_user) and all_tab_ids:
             st.caption("You’re viewing kitchen data. Super users see additional tabs (Price Multipliers, Area Data, Execution Log, etc.).")
-        if not all_tab_ids:
+        if not all_tab_ids and from_online_sheet:
             st.info("No data tabs available for your role. Kitchen users see SF Kitchen Data, Churn, Facility details, Sellable/No Status. Super users see all tabs.")
             st.caption("Add SUPER_USER_IDS in secrets to grant full access (e.g. SUPER_USER_IDS = \"email@company.com, other@company.com\").")
         else:
