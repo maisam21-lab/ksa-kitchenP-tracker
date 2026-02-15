@@ -1760,29 +1760,29 @@ def main():
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
-    # Data pulse: freshness from last SF/Sheet refresh
+    # Kitchen status: freshness from last SF/Sheet refresh
     refreshed_at, refresh_source = get_last_data_refresh()
     if refreshed_at:
         ago = _humanize_ago(refreshed_at)
         source_label = "SF" if (refresh_source or "").startswith("salesforce") else "Sheet"
-        # Fresh: &lt; 24h, Stale: &gt;= 24h
+        # Sizzling: &lt; 24h (hot off the line), Needs prep: &gt;= 24h
         try:
             ts = datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
             delta_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
-            pulse_status = "Fresh" if delta_h < 24 else "Stale"
+            pulse_status = "Sizzling" if delta_h < 24 else "Needs prep"
         except Exception:
-            pulse_status = "Live"
+            pulse_status = "On the line"
         st.sidebar.metric(
-            "Data pulse",
+            "Kitchen status",
             pulse_status,
             delta=f"{ago} ({source_label})",
             help="How recent the data is. Refreshed via Data → Refresh from Salesforce or Google Sheet.",
         )
     else:
         updated_today = get_records_updated_today_count()
-        pulse_status = "Live" if updated_today > 0 else "Idle"
+        pulse_status = "On the line" if updated_today > 0 else "Standing by"
         st.sidebar.metric(
-            "Data pulse",
+            "Kitchen status",
             pulse_status,
             delta="No refresh yet",
             help="Refresh data from Data → Refresh from Salesforce or Google Sheet to see freshness.",
