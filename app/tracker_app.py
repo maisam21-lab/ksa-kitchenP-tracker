@@ -139,18 +139,8 @@ def _load_workbook_into_db(data: dict[str, list[dict]], progress_placeholder=Non
         if tab_id is None:
             tab_id = ws_title
         if tab_id == "Auto Refresh Execution Log":
-            with get_conn() as c:
-                c.execute("DELETE FROM ksa_auto_refresh_execution_log")
-            for r in rows:
-                insert_exec_log({
-                    "refresh_time": _row_key(r, "Refresh Time", "refresh_time") or datetime.now().strftime("%m/%d/%Y %H:%M"),
-                    "sheet": _row_key(r, "Sheet", "sheet"),
-                    "operation": _row_key(r, "Operation", "operation"),
-                    "status": _row_key(r, "Status", "status"),
-                    "user": _row_key(r, "User", "user"),
-                })
-            loaded.append(f"{tab_id} ({len(rows)} rows)")
-        elif _is_main_tracker_tab(tab_id):
+            continue  # Section removed; skip loading
+        if _is_main_tracker_tab(tab_id):
             for r in rows:
                 row = _normalize_gsheet_row(r)
                 rid = (row.get("record_id") or "").strip()
@@ -193,7 +183,6 @@ def _is_main_tracker_tab(tab_id: str) -> bool:
 
 # Short descriptions for tab tooltips (hover); Tracker is not shown as a tab (moved to Dashboard)
 TAB_DESCRIPTIONS = {
-    "Auto Refresh Execution Log": "Log of auto-refresh runs and sheet operations. View or add rows.",
     "SF Kitchen Data": "SF Kitchen dataset. View, filter, and download.",
     "Sellable No Status": "Sellable no-status data. View and filter.",
     "All no status kitchens": "All no-status kitchens. View and filter.",
@@ -218,7 +207,6 @@ TAB_DESCRIPTIONS = {
 # Sheet tab names shown in the app; last 7 also loaded via Trino
 # Tracker data is no longer a Data tab; users customize their view on Dashboard
 SHEET_TAB_IDS = [
-    "Auto Refresh Execution Log",
     "SF Kitchen Data",
     "Sellable No Status",
     "All no status kitchens",
@@ -272,6 +260,8 @@ EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 HIERARCHY_SOURCE_TABS = ["SF Churn Data", "SF Kitchen Data", "KSA Facility details"]
 # Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
 SF_COUNTRIES = ["UAE", "BH", "KW", "SA", "QA"]
+# Tabs regular users can see (kitchen-focused). Super users see all tabs (incl. Price Multipliers, Area Data, etc.)
+KITCHEN_ONLY_TABS = ["SF Kitchen Data", "SF Churn Data", "KSA Facility details", "Sellable No Status", "All no status kitchens"]
 # Column names to try (case-insensitive). Excel/Report headers: "Account Name", "Kitchen Number Name". API: "Account.Name", "Kitchen_Number__c.Name".
 HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "Account Name", "account name"]
 HIERARCHY_KITCHEN_CANDIDATES = ["Kitchen Number Name", "Kitchen_Number__c.Name", "Kitchen Number ID 18", "Kitchen", "Name"]
@@ -300,6 +290,15 @@ TABLE_TRAFFIC = """
 CREATE TABLE IF NOT EXISTS tracker_traffic (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     visited_at TEXT NOT NULL
+)
+"""
+
+TABLE_DATA_REFRESH_LOG = """
+CREATE TABLE IF NOT EXISTS data_refresh_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    refreshed_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    tabs_count INTEGER
 )
 """
 
@@ -395,6 +394,7 @@ def init_db():
         c.execute(TABLE_GENERIC_TAB)
         c.execute(TABLE_FEEDBACK)
         c.execute(TABLE_TRAFFIC)
+        c.execute(TABLE_DATA_REFRESH_LOG)
         c.execute(TABLE_RECORD_COMMENTS)
         c.execute(TABLE_RECORD_ACTIVITY)
         c.execute(TABLE_TRACKER_TEMPLATES)
@@ -506,6 +506,36 @@ def is_user_allowed(identifier: str) -> bool:
                 allowed.add(s)
 
     return id_ in allowed
+
+
+def _super_user_ids() -> set[str]:
+    """IDs (emails/names) from SUPER_USER_IDS secrets/env, lowercased. Super users see all Data tabs."""
+    try:
+        raw = st.secrets.get("SUPER_USER_IDS") or os.environ.get("SUPER_USER_IDS", "")
+    except Exception:
+        raw = os.environ.get("SUPER_USER_IDS", "")
+    ids: set[str] = set()
+    for part in str(raw).split(","):
+        s = part.strip()
+        if s:
+            ids.add(s.lower())
+    return ids
+
+
+def is_super_user(identifier: str) -> bool:
+    """True if user can see all tabs (Price Multipliers, Area Data, etc.). Developers are super users."""
+    if _is_developer():
+        return True
+    id_ = (identifier or "").strip().lower()
+    return id_ in _super_user_ids()
+
+
+def _visible_data_tab_ids(user_identifier: str) -> list[str]:
+    """Tab IDs to show in Data section: kitchen-only for regular users, all for super users."""
+    all_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
+    if is_super_user(user_identifier):
+        return all_ids
+    return [t for t in all_ids if t in KITCHEN_ONLY_TABS]
 
 
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
@@ -646,6 +676,54 @@ def get_records_updated_today_count() -> int:
         )
         row = r.fetchone()
         return row["n"] if row else 0
+
+
+def log_data_refresh(source: str, tabs_count: int = 0) -> None:
+    """Log a successful SF or Sheet refresh for freshness tracking."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_conn() as c:
+        c.execute(
+            "INSERT INTO data_refresh_log (refreshed_at, source, tabs_count) VALUES (?, ?, ?)",
+            (now, source.strip().lower()[:50], tabs_count),
+        )
+
+
+def get_last_data_refresh() -> tuple[str | None, str | None]:
+    """(refreshed_at_iso, source) of most recent refresh, or (None, None)."""
+    with get_conn() as c:
+        r = c.execute(
+            "SELECT refreshed_at, source FROM data_refresh_log ORDER BY id DESC LIMIT 1"
+        )
+        row = r.fetchone()
+        if row:
+            return (row["refreshed_at"], row["source"] or "unknown")
+        return (None, None)
+
+
+def _humanize_ago(iso_ts: str) -> str:
+    """Humanized 'X mins ago', '2h ago', '3 days ago'."""
+    try:
+        ts = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = now - ts
+        secs = int(delta.total_seconds())
+        if secs < 0:
+            return "just now"
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            m = secs // 60
+            return f"{m}m ago"
+        if secs < 86400:
+            h = secs // 3600
+            return f"{h}h ago"
+        if secs < 604800:
+            d = secs // 86400
+            return f"{d} day{'s' if d > 1 else ''} ago"
+        w = secs // 604800
+        return f"{w} week{'s' if w > 1 else ''} ago"
+    except Exception:
+        return "—"
 
 
 def _get_developer_key() -> str:
@@ -865,10 +943,10 @@ def export_csv_generic(rows: list[dict]) -> str:
     return buf.getvalue()
 
 
-def _dashboard_sources() -> list[tuple[str, str]]:
-    """(display_name, source_id). source_id is 'main_tracker', 'exec_log', or tab_id."""
-    out = [("Main tracker (kitchen data)", "main_tracker"), ("Execution Log", "exec_log")]
-    for tab_id in SHEET_TAB_IDS[2:] + list_extra_tab_ids():
+def _dashboard_sources(user_identifier: str) -> list[tuple[str, str]]:
+    """(display_name, source_id). Filtered by role: regular users see kitchen tabs only."""
+    out = [("Main tracker (kitchen data)", "main_tracker")]
+    for tab_id in _visible_data_tab_ids(user_identifier):
         out.append((tab_id, tab_id))
     return out
 
@@ -936,12 +1014,6 @@ def _search_all_tabs(term: str) -> dict:
     matches = [r for r in rows if any(q in str(v).lower() for v in (r or {}).values() if v is not None)]
     if matches:
         out[MAIN_TRACKER_TAB_ID] = matches
-
-    # Auto Refresh Execution Log
-    log_rows = list_exec_log()
-    log_matches = [dict(r) for r in log_rows if any(q in str(v).lower() for v in (r or {}).values() if v is not None)]
-    if log_matches:
-        out["Auto Refresh Execution Log"] = log_matches
 
     # Generic tabs (fixed list + any extra from loaded workbooks)
     for tab_id in SHEET_TAB_IDS[2:] + list_extra_tab_ids():
@@ -1396,6 +1468,7 @@ def _refresh_from_salesforce():
         except Exception as e:
             errors.append(f"{tab_id}: {e}")
     if loaded and not errors:
+        log_data_refresh("salesforce", len(loaded))
         return True, "Real-time Salesforce: " + "; ".join(loaded)
     if errors:
         return False, "Salesforce: " + "; ".join(errors)
@@ -1473,18 +1546,8 @@ def _refresh_from_online_sheet():
         if tab_id is None:
             tab_id = ws_title
         if tab_id == "Auto Refresh Execution Log":
-            with get_conn() as c:
-                c.execute("DELETE FROM ksa_auto_refresh_execution_log")
-            for r in rows:
-                insert_exec_log({
-                    "refresh_time": _row_key(r, "Refresh Time", "refresh_time") or datetime.now().strftime("%m/%d/%Y %H:%M"),
-                    "sheet": _row_key(r, "Sheet", "sheet"),
-                    "operation": _row_key(r, "Operation", "operation"),
-                    "status": _row_key(r, "Status", "status"),
-                    "user": _row_key(r, "User", "user"),
-                })
-            loaded.append(f"{tab_id} ({len(rows)} rows)")
-        elif _is_main_tracker_tab(tab_id):
+            continue  # Section removed; skip loading
+        if _is_main_tracker_tab(tab_id):
             for r in rows:
                 row = _normalize_gsheet_row(r)
                 rid = (row.get("record_id") or "").strip()
@@ -1497,6 +1560,8 @@ def _refresh_from_online_sheet():
         else:
             save_generic_tab(tab_id, rows)
             loaded.append(f"{tab_id} ({len(rows)} rows)")
+    if loaded:
+        log_data_refresh("google_sheet", len(loaded))
     return True, "Loaded: " + "; ".join(loaded) if loaded else "No data in sheet."
 
 
@@ -1648,10 +1713,33 @@ def main():
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
-    updated_today = get_records_updated_today_count()
-    # Data pulse: status only (no exact count) — cooler label, less info leakage
-    pulse_status = "Live" if updated_today > 0 else "Idle"
-    st.sidebar.metric("Data pulse", pulse_status, help="Activity in the last 24h — status only, no counts shown")
+    # Data pulse: freshness from last SF/Sheet refresh
+    refreshed_at, refresh_source = get_last_data_refresh()
+    if refreshed_at:
+        ago = _humanize_ago(refreshed_at)
+        source_label = "SF" if (refresh_source or "").startswith("salesforce") else "Sheet"
+        # Fresh: &lt; 24h, Stale: &gt;= 24h
+        try:
+            ts = datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
+            delta_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+            pulse_status = "Fresh" if delta_h < 24 else "Stale"
+        except Exception:
+            pulse_status = "Live"
+        st.sidebar.metric(
+            "Data pulse",
+            pulse_status,
+            delta=f"{ago} ({source_label})",
+            help="How recent the data is. Refreshed via Data → Refresh from Salesforce or Google Sheet.",
+        )
+    else:
+        updated_today = get_records_updated_today_count()
+        pulse_status = "Live" if updated_today > 0 else "Idle"
+        st.sidebar.metric(
+            "Data pulse",
+            pulse_status,
+            delta="No refresh yet",
+            help="Refresh data from Data → Refresh from Salesforce or Google Sheet to see freshness.",
+        )
     # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
     current_user = (st.session_state.get("user_display_name") or "").strip()
@@ -1820,7 +1908,7 @@ def main():
             - **Customize your data view:** Filter the main data by date, site, region, and metric; save and load named views. The Tracker tab has been removed; use this section to build your own views.
             To edit or add data, use **Data** in the sidebar.’            """)
         st.caption("Pick **any data source** (main tracker, Execution Log, or any Data tab), filter, and **download your report** as CSV.")
-        sources = _dashboard_sources()
+        sources = _dashboard_sources(current_user)
         source_options = [s[0] for s in sources]
         source_ids = {s[0]: s[1] for s in sources}
         chosen_label = st.selectbox(
@@ -2170,14 +2258,14 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         if is_developer:
-            with st.expander("Refresh data (Google Sheet & Salesforce only)", expanded=True):
+            with st.expander("Refresh data (Google Sheet & Salesforce)", expanded=True):
                 st.caption(
-                    "**Google Sheet** = same data as the online sheet (refreshed every 4 hours via your Salesforce connector). "
-                    "**Salesforce** = **real-time** data straight from the SF API — use this when you need up-to-the-minute numbers."
+                    "**Salesforce** = real-time data from the SF API. "
+                    "**Google Sheet** = fallback when SF isn't configured or unavailable — same data, synced every 4 hours from Salesforce."
                 )
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.markdown("**Google Sheet API** — service account JSON (share the sheet with its email).")
+                    st.markdown("**Google Sheet API (fallback)** — service account JSON (share the sheet with its email).")
                     if st.button("Refresh from online sheet", key="btn_gsheet"):
                         with st.spinner("Loading from Google Sheet…"):
                             ok, msg = _refresh_from_online_sheet()
@@ -2189,7 +2277,7 @@ def main():
                             st.error(msg)
                 with col2:
                     st.markdown("**Salesforce API (real-time)** — Refresh token or username/password + sf_tab_queries.")
-                    st.caption("If SF auth isn’t set up yet, use **Refresh from online sheet** — it’s synced from Salesforce every 4 hours.")
+                    st.caption("Fallback: use **Refresh from online sheet** if SF auth is not set up or SF fails.")
                     if st.button("Refresh from Salesforce", key="btn_salesforce"):
                         with st.spinner("Loading from Salesforce…"):
                             ok, msg = _refresh_from_salesforce()
@@ -2229,79 +2317,25 @@ def main():
                     """)
         else:
             st.info("Refresh is available only to developers. Unlock **Developer access** in the sidebar.")
-        # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
-        all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
-        sheet_tabs = st.tabs(all_tab_ids)
-        # Tab tooltips: descriptions shown on hover
-        tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
-        st.markdown(
-            f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
-            'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
-            'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
-            unsafe_allow_html=True,
-        )
-
-        for tab_index, tab_id in enumerate(all_tab_ids):
-            with sheet_tabs[tab_index]:
-                if tab_id == "Auto Refresh Execution Log":
-                    sub_list, sub_add = st.tabs(["List", "Add row"])
-                    with sub_list:
-                        rows_log = list_exec_log()
-                        if not rows_log:
-                            st.info("No rows yet." + (" Use **Add row** to add one." if is_developer else ""))
-                        else:
-                            st.markdown(
-                                '<div style="background: linear-gradient(90deg, #F0FDFA 0%, #F8FAFC 100%); border-left: 4px solid #0F766E; '
-                                'padding: 10px 14px; margin-bottom: 12px; border-radius: 0 8px 8px 0; font-weight: 600; color: #134E4A;">'
-                                "Filter by column</div>",
-                                unsafe_allow_html=True,
-                            )
-                            exec_cols = ["Refresh Time", "Sheet", "Operation", "Status", "User"]
-                            exec_keys = ["refresh_time", "sheet", "operation", "status", "user"]
-                            uniq = lambda k: sorted(set(r.get(k) for r in rows_log if r.get(k)))
-                            fcols = st.columns(5)
-                            filters_exec = {}
-                            for i, (label, key) in enumerate(zip(exec_cols, exec_keys)):
-                                with fcols[i]:
-                                    st.markdown(f'<span style="font-size: 0.85rem; font-weight: 600; color: #475569;">{label}</span>', unsafe_allow_html=True)
-                                    if key in ("sheet", "status", "user"):
-                                        opts = uniq(key)
-                                        filters_exec[key] = st.multiselect(label, opts, key=f"exec_f_{key}", placeholder="All", label_visibility="collapsed")
-                                    else:
-                                        filters_exec[key] = st.text_input(label, key=f"exec_f_{key}", placeholder="Search…", label_visibility="collapsed")
-                            rows_shown = rows_log
-                            for key in exec_keys:
-                                val = filters_exec.get(key)
-                                if key in ("sheet", "status", "user") and val:
-                                    rows_shown = [r for r in rows_shown if r.get(key) in val]
-                                elif key in ("refresh_time", "operation") and val and str(val).strip():
-                                    term = str(val).strip().lower()
-                                    rows_shown = [r for r in rows_shown if term in str(r.get(key) or "").lower()]
-                            st.caption(f"Showing **{len(rows_shown)}** of **{len(rows_log)}** row(s).")
-                            st.divider()
-                            st.dataframe(
-                                [{"Refresh Time": r["refresh_time"], "Sheet": r["sheet"], "Operation": r["operation"], "Status": r["status"], "User": r["user"]} for r in rows_shown],
-                                use_container_width=True,
-                                hide_index=True,
-                            )
-                    with sub_add:
-                        if not is_developer:
-                            st.info("Only developers can add rows here. Unlock **Developer access** in the sidebar.")
-                        else:
-                            with st.form("exec_log_form"):
-                                refresh_time = st.text_input("Refresh Time *", value=datetime.now().strftime("%m/%d/%Y %H:%M"))
-                                sheet = st.text_input("Sheet *", placeholder="e.g. Price Multipliers, SF Kitchen Data")
-                                operation = st.text_input("Operation *", placeholder="e.g. Report Id: 000V0000003z 2092AI")
-                                status = st.text_input("Status *", value="Success")
-                                user = st.text_input("User *", placeholder="email@cloudkitchens.com")
-                                if st.form_submit_button("Add"):
-                                    if refresh_time and sheet and operation and status and user:
-                                        insert_exec_log({"refresh_time": refresh_time, "sheet": sheet, "operation": operation, "status": status, "user": user})
-                                        st.success("Added.")
-                                        _rerun()
-                                    else:
-                                        st.error("Fill all required fields.")
-                else:
+        # Regular users: kitchen tabs only. Super users: all tabs (Price Multipliers, Area Data, etc.)
+        all_tab_ids = _visible_data_tab_ids(current_user)
+        if not is_super_user(current_user) and all_tab_ids:
+            st.caption("You’re viewing kitchen data. Super users see additional tabs (Price Multipliers, Area Data, Execution Log, etc.).")
+        if not all_tab_ids:
+            st.info("No data tabs available for your role. Kitchen users see SF Kitchen Data, Churn, Facility details, Sellable/No Status. Super users see all tabs.")
+            st.caption("Add SUPER_USER_IDS in secrets to grant full access (e.g. SUPER_USER_IDS = \"email@company.com, other@company.com\").")
+        else:
+            sheet_tabs = st.tabs(all_tab_ids)
+            # Tab tooltips: descriptions shown on hover
+            tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
+            st.markdown(
+                f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
+                'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
+                'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
+                unsafe_allow_html=True,
+            )
+            for tab_index, tab_id in enumerate(all_tab_ids):
+                with sheet_tabs[tab_index]:
                     _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
 
 if __name__ == "__main__":
