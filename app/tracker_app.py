@@ -9,7 +9,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -139,18 +139,8 @@ def _load_workbook_into_db(data: dict[str, list[dict]], progress_placeholder=Non
         if tab_id is None:
             tab_id = ws_title
         if tab_id == "Auto Refresh Execution Log":
-            with get_conn() as c:
-                c.execute("DELETE FROM ksa_auto_refresh_execution_log")
-            for r in rows:
-                insert_exec_log({
-                    "refresh_time": _row_key(r, "Refresh Time", "refresh_time") or datetime.now().strftime("%m/%d/%Y %H:%M"),
-                    "sheet": _row_key(r, "Sheet", "sheet"),
-                    "operation": _row_key(r, "Operation", "operation"),
-                    "status": _row_key(r, "Status", "status"),
-                    "user": _row_key(r, "User", "user"),
-                })
-            loaded.append(f"{tab_id} ({len(rows)} rows)")
-        elif _is_main_tracker_tab(tab_id):
+            continue  # Section removed; skip loading
+        if _is_main_tracker_tab(tab_id):
             for r in rows:
                 row = _normalize_gsheet_row(r)
                 rid = (row.get("record_id") or "").strip()
@@ -193,7 +183,6 @@ def _is_main_tracker_tab(tab_id: str) -> bool:
 
 # Short descriptions for tab tooltips (hover); Tracker is not shown as a tab (moved to Dashboard)
 TAB_DESCRIPTIONS = {
-    "Auto Refresh Execution Log": "Log of auto-refresh runs and sheet operations. View or add rows.",
     "SF Kitchen Data": "SF Kitchen dataset. View, filter, and download.",
     "Sellable No Status": "Sellable no-status data. View and filter.",
     "All no status kitchens": "All no-status kitchens. View and filter.",
@@ -202,6 +191,10 @@ TAB_DESCRIPTIONS = {
     "Area Data": "Area data. View and filter.",
     "SF Churn Data": "SF Churn data. View and filter.",
     "KSA Facility details": "KSA facility details. View and filter.",
+    "UAE Facility details": "UAE facility details. View and filter.",
+    "Kuwait Facility details": "Kuwait facility details. View and filter.",
+    "Bahrain Facility details": "Bahrain facility details. View and filter.",
+    "Qatar Facility details": "Qatar facility details. View and filter.",
     "Inflation FPx": "Inflation FPx data. View and filter.",
     "Price Multipliers": "Price multipliers. View and filter.",
     "Occupancy": "Occupancy data. View and filter.",
@@ -218,7 +211,6 @@ TAB_DESCRIPTIONS = {
 # Sheet tab names shown in the app; last 7 also loaded via Trino
 # Tracker data is no longer a Data tab; users customize their view on Dashboard
 SHEET_TAB_IDS = [
-    "Auto Refresh Execution Log",
     "SF Kitchen Data",
     "Sellable No Status",
     "All no status kitchens",
@@ -227,6 +219,10 @@ SHEET_TAB_IDS = [
     "Area Data",
     "SF Churn Data",
     "KSA Facility details",
+    "UAE Facility details",
+    "Kuwait Facility details",
+    "Bahrain Facility details",
+    "Qatar Facility details",
     "Inflation FPx",
     "Price Multipliers",
     "Occupancy",
@@ -268,6 +264,65 @@ CREATE TABLE IF NOT EXISTS ksa_auto_refresh_execution_log (
 """
 EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
+# Hierarchy view: Country → Facility → Kitchen dropdowns. Source tab + column mapping.
+HIERARCHY_SOURCE_TABS = [
+    "SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens",
+    "KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details",
+    "Price Multipliers", "Area Data",
+]
+# Kitchens tab: kitchen-level + facility details (Account-Facility-Kitchen for all countries, same as SA)
+KITCHENS_SOURCE_TABS = ["SF Kitchen Data", "SF Churn Data", "Sellable No Status", "All no status kitchens"]
+# Facility details tabs per country — same structure as KSA for UAE, Kuwait, Bahrain, Qatar
+FACILITY_DETAILS_TABS = ["KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details"]
+# Preferred column order for Kitchens display (matches SF-style grouped table)
+KITCHENS_DISPLAY_ORDER = [
+    ("Type", ["Kitchen_Number__c.Type__c", "Type", "type"]),
+    ("List Price", ["Kitchen_Number__c.MSRP__c", "Kitchen_Number__c.List_Price__c", "List Price", "MSRP", "MSRP__c"]),
+    ("Kitchen Number Name", ["Kitchen_Number__c.Name", "Kitchen Number Name", "Kitchen Number ID 18", "Kitchen"]),
+    ("Status", ["Kitchen_Number__c.Status__c", "Status", "status"]),
+    ("Churn Date", ["Opportunity.Churn_Date__c", "Churn Date", "Churn_Date__c", "Churn"]),
+    ("Size", ["Kitchen_Number__c.Kitchen_Size_Sq_Meters__c", "Kitchen Size", "Size", "Kitchen_Size__c"]),
+    ("Hood Size", ["Kitchen_Number__c.Hood_Size__c", "Hood Size", "Hood_Size__c"]),
+    ("Floor", ["Kitchen_Number__c.Floor__c", "Floor", "floor"]),
+    ("Opportunity Name", ["Opportunity.Name", "Opportunity Name", "Opportunity_Name__c"]),
+]
+# Countries in Salesforce (UAE, Bahrain, Kuwait, Saudi Arabia, Qatar) — merged with data-derived countries
+SF_COUNTRIES = ["UAE", "Bahrain", "BH", "Kuwait", "KW", "Saudi Arabia", "SA", "Qatar", "QA"]
+# Tabs for regular users (kitchen-only). Super users see all tabs.
+KITCHEN_ONLY_TABS = [
+    "SF Kitchen Data", "SF Churn Data", "Sellable No Status", "All no status kitchens",
+    "KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details",
+]
+# 6 reports as sidebar functions for super users only (all countries). Facility Sell Price Multipliers, etc.
+SUPERUSER_REPORTS = [
+    "Price Multipliers", "Area Data", "SF Churn Data", "SF Kitchen Data", "Sellable No Status", "All no status kitchens",
+    "KSA Facility details", "UAE Facility details", "Kuwait Facility details", "Bahrain Facility details", "Qatar Facility details",
+]
+# Country name aliases: normalize for matching (e.g. "United Arab Emirates" ↔ "UAE", "BHR" ↔ "Bahrain")
+COUNTRY_ALIASES = {
+    "uae": ["united arab emirates", "uae", "ae", "u.a.e"],
+    "sa": ["saudi arabia", "sa", "ksa"],
+    "kw": ["kuwait", "kwt", "kw"],
+    "bh": ["bahrain", "bh", "bhr", "bah"],
+    "qa": ["qatar", "qa", "qat"],
+}
+
+
+def _country_in_selected(row_country: str, selected_countries: list[str]) -> bool:
+    """True if row's _Country matches any of the selected countries (using aliases)."""
+    rc = (row_country or "").strip()
+    if not rc:
+        return False
+    for sel in selected_countries or []:
+        if _country_matches(rc, sel):
+            return True
+    return False
+# Column names to try (case-insensitive). Supports SA, UAE, Kuwait, Bahrain, Qatar.
+HIERARCHY_COUNTRY_CANDIDATES = ["Country", "Country Name", "Account.Country", "country"]
+HIERARCHY_ACCOUNT_CANDIDATES = ["Account Name", "Account.Name", "account name"]
+HIERARCHY_FACILITY_CANDIDATES = ["Facility", "Facility Name", "Account Name", "Account.Name"]
+HIERARCHY_KITCHEN_CANDIDATES = ["Kitchen Number Name", "Kitchen_Number__c.Name", "Kitchen Number ID 18", "Kitchen", "Name"]
+
 # Generic tab data: any sheet tab (SF Kitchen Data, Area Data, etc.) — store rows as JSON per row
 TABLE_GENERIC_TAB = """
 CREATE TABLE IF NOT EXISTS generic_tab_data (
@@ -292,6 +347,15 @@ TABLE_TRAFFIC = """
 CREATE TABLE IF NOT EXISTS tracker_traffic (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     visited_at TEXT NOT NULL
+)
+"""
+
+TABLE_DATA_REFRESH_LOG = """
+CREATE TABLE IF NOT EXISTS data_refresh_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    refreshed_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    tabs_count INTEGER
 )
 """
 
@@ -387,6 +451,7 @@ def init_db():
         c.execute(TABLE_GENERIC_TAB)
         c.execute(TABLE_FEEDBACK)
         c.execute(TABLE_TRAFFIC)
+        c.execute(TABLE_DATA_REFRESH_LOG)
         c.execute(TABLE_RECORD_COMMENTS)
         c.execute(TABLE_RECORD_ACTIVITY)
         c.execute(TABLE_TRACKER_TEMPLATES)
@@ -498,6 +563,36 @@ def is_user_allowed(identifier: str) -> bool:
                 allowed.add(s)
 
     return id_ in allowed
+
+
+def _super_user_ids() -> set[str]:
+    """IDs (emails/names) from SUPER_USER_IDS secrets/env, lowercased. Super users see all Data tabs."""
+    try:
+        raw = st.secrets.get("SUPER_USER_IDS") or os.environ.get("SUPER_USER_IDS", "")
+    except Exception:
+        raw = os.environ.get("SUPER_USER_IDS", "")
+    ids: set[str] = set()
+    for part in str(raw).split(","):
+        s = part.strip()
+        if s:
+            ids.add(s.lower())
+    return ids
+
+
+def is_super_user(identifier: str) -> bool:
+    """True if user can see all tabs (Price Multipliers, Area Data, etc.). Developers are super users."""
+    if _is_developer():
+        return True
+    id_ = (identifier or "").strip().lower()
+    return id_ in _super_user_ids()
+
+
+def _visible_data_tab_ids(user_identifier: str) -> list[str]:
+    """Tab IDs to show in Data section: kitchen-only for regular users, all for super users."""
+    all_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
+    if is_super_user(user_identifier):
+        return all_ids
+    return [t for t in all_ids if t in KITCHEN_ONLY_TABS]
 
 
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
@@ -638,6 +733,78 @@ def get_records_updated_today_count() -> int:
         )
         row = r.fetchone()
         return row["n"] if row else 0
+
+
+def log_data_refresh(source: str, tabs_count: int = 0) -> None:
+    """Log a successful SF or Sheet refresh for freshness tracking."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_conn() as c:
+        c.execute(
+            "INSERT INTO data_refresh_log (refreshed_at, source, tabs_count) VALUES (?, ?, ?)",
+            (now, source.strip().lower()[:50], tabs_count),
+        )
+
+
+def get_last_data_refresh() -> tuple[str | None, str | None]:
+    """(refreshed_at_iso, source) of most recent refresh, or (None, None)."""
+    with get_conn() as c:
+        r = c.execute(
+            "SELECT refreshed_at, source FROM data_refresh_log ORDER BY id DESC LIMIT 1"
+        )
+        row = r.fetchone()
+        if row:
+            return (row["refreshed_at"], row["source"] or "unknown")
+        return (None, None)
+
+
+def _humanize_ago(iso_ts: str) -> str:
+    """Humanized 'X mins ago', '2h ago', '3 days ago'."""
+    try:
+        ts = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = now - ts
+        secs = int(delta.total_seconds())
+        if secs < 0:
+            return "just now"
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            m = secs // 60
+            return f"{m}m ago"
+        if secs < 86400:
+            h = secs // 3600
+            return f"{h}h ago"
+        if secs < 604800:
+            d = secs // 86400
+            return f"{d} day{'s' if d > 1 else ''} ago"
+        w = secs // 604800
+        return f"{w} week{'s' if w > 1 else ''} ago"
+    except Exception:
+        return "—"
+
+
+def _auto_refresh_enabled() -> bool:
+    """True if auto-refresh every N minutes is enabled. Defaults to True (no manual refresh needed). Set AUTO_REFRESH_ENABLED = false to disable."""
+    try:
+        v = st.secrets.get("AUTO_REFRESH_ENABLED") or os.environ.get("AUTO_REFRESH_ENABLED", "")
+    except Exception:
+        v = os.environ.get("AUTO_REFRESH_ENABLED", "")
+    s = str(v).strip().lower()
+    if not s:
+        return True  # Default: enabled, refresh SF data every 15 mins without manual intervention
+    return s in ("1", "true", "yes")
+
+
+def _auto_refresh_minutes() -> int:
+    """Minutes between auto-refreshes (AUTO_REFRESH_MINUTES, default 15)."""
+    try:
+        v = st.secrets.get("AUTO_REFRESH_MINUTES") or os.environ.get("AUTO_REFRESH_MINUTES", "15")
+    except Exception:
+        v = os.environ.get("AUTO_REFRESH_MINUTES", "15")
+    try:
+        return max(1, int(v))
+    except (ValueError, TypeError):
+        return 15
 
 
 def _get_developer_key() -> str:
@@ -857,10 +1024,10 @@ def export_csv_generic(rows: list[dict]) -> str:
     return buf.getvalue()
 
 
-def _dashboard_sources() -> list[tuple[str, str]]:
-    """(display_name, source_id). source_id is 'main_tracker', 'exec_log', or tab_id."""
-    out = [("Main tracker (kitchen data)", "main_tracker"), ("Execution Log", "exec_log")]
-    for tab_id in SHEET_TAB_IDS[2:] + list_extra_tab_ids():
+def _dashboard_sources(user_identifier: str) -> list[tuple[str, str]]:
+    """(display_name, source_id). Filtered by role: regular users see kitchen tabs only."""
+    out = [("Main tracker (kitchen data)", "main_tracker")]
+    for tab_id in _visible_data_tab_ids(user_identifier):
         out.append((tab_id, tab_id))
     return out
 
@@ -929,12 +1096,6 @@ def _search_all_tabs(term: str) -> dict:
     if matches:
         out[MAIN_TRACKER_TAB_ID] = matches
 
-    # Auto Refresh Execution Log
-    log_rows = list_exec_log()
-    log_matches = [dict(r) for r in log_rows if any(q in str(v).lower() for v in (r or {}).values() if v is not None)]
-    if log_matches:
-        out["Auto Refresh Execution Log"] = log_matches
-
     # Generic tabs (fixed list + any extra from loaded workbooks)
     for tab_id in SHEET_TAB_IDS[2:] + list_extra_tab_ids():
         rows = list_generic_tab(tab_id)
@@ -955,6 +1116,175 @@ def save_generic_tab(tab_id, rows):
                 "INSERT INTO generic_tab_data (tab_id, row_index, data) VALUES (?, ?, ?)",
                 (tab_id, i, json.dumps(row, ensure_ascii=False)),
             )
+
+
+def _find_col(row: dict, *candidates: str) -> str | None:
+    """Return first matching column key (case-insensitive) from row, or None."""
+    keys_lower = {str(k).strip().lower(): k for k in (row or {}).keys()}
+    for c in candidates:
+        c0 = (c or "").strip().lower()
+        if c0 in keys_lower:
+            return keys_lower[c0]
+        for k in keys_lower:
+            if c0 in k or k in c0:
+                return keys_lower[k]
+    return None
+
+
+def _kitchens_display_columns(rows: list[dict], all_columns: list[str]) -> list[tuple[str, str]]:
+    """Resolve (display_name, actual_col) for Kitchens table. Type, List Price, Kitchen Name, etc. first."""
+    if not rows:
+        return []
+    r0 = rows[0]
+    keys_lower = {str(k).strip().lower(): k for k in r0.keys()}
+    result: list[tuple[str, str]] = []
+    used: set[str] = set()
+    for display_name, candidates in KITCHENS_DISPLAY_ORDER:
+        found = _find_col(r0, *candidates)
+        if found and found not in used:
+            result.append((display_name, found))
+            used.add(found)
+    meta = ["_Account", "_Country", "_Facility", "_Kitchen", "_Source"]
+    for m in meta:
+        if m in r0 and m not in used:
+            result.append((m, m))
+            used.add(m)
+    for col in all_columns:
+        if col not in used:
+            result.append((col, col))
+    return result
+
+
+def _extract_hierarchy_from_row(
+    row: dict,
+    account_col: str | None,
+    kitchen_col: str | None,
+    country_col: str | None = None,
+    facility_col: str | None = None,
+) -> tuple[str, str, str]:
+    """Extract (country, facility, kitchen) from a row. Supports SA, UAE, Kuwait, Bahrain, Qatar."""
+    country, facility, kitchen = "", "", ""
+    # Prefer dedicated Country column (e.g. Price Multipliers: "Saudi Arabia", "UAE", "Kuwait")
+    if country_col and row.get(country_col):
+        country = str(row[country_col]).strip()
+    # Prefer dedicated Facility column
+    if facility_col and row.get(facility_col):
+        facility = str(row[facility_col]).strip()
+    # Fallback: parse from Account Name (e.g. "SA - RUH - Sweidi", "UAE - DXB - Bur Dubai")
+    if account_col and row.get(account_col):
+        parts = [p.strip() for p in str(row[account_col]).split(" - ") if p.strip()]
+        if not country and len(parts) >= 1:
+            country = parts[0]
+        if not facility:
+            if len(parts) >= 2:
+                facility = " - ".join(parts[1:])
+            elif len(parts) == 1:
+                facility = parts[0]
+    if kitchen_col and row.get(kitchen_col):
+        kitchen = str(row[kitchen_col]).strip()
+    return (country, facility, kitchen)
+
+
+def _country_matches(a: str, b: str) -> bool:
+    """True if a and b represent the same country (handles UAE/United Arab Emirates etc)."""
+    if not a or not b:
+        return a == b
+    ax, bx = a.strip().lower(), b.strip().lower()
+    if ax == bx:
+        return True
+    for canonical, aliases in COUNTRY_ALIASES.items():
+        if ax in aliases and bx in aliases:
+            return True
+    return False
+
+
+def _get_hierarchy_data() -> tuple[list[dict], str, str | None, str | None, str | None, str | None]:
+    """
+    Get rows from first available hierarchy source tab.
+    Returns (rows, tab_id, account_col, kitchen_col, country_col, facility_col).
+    """
+    for tab_id in HIERARCHY_SOURCE_TABS:
+        rows = list_generic_tab(tab_id)
+        if not rows:
+            continue
+        r0 = rows[0]
+        account_col = _find_col(r0, *HIERARCHY_ACCOUNT_CANDIDATES)
+        kitchen_col = _find_col(r0, *HIERARCHY_KITCHEN_CANDIDATES)
+        country_col = _find_col(r0, *HIERARCHY_COUNTRY_CANDIDATES)
+        facility_col = _find_col(r0, *HIERARCHY_FACILITY_CANDIDATES)
+        return (rows, tab_id, account_col, kitchen_col, country_col, facility_col)
+    return ([], "", None, None, None, None)
+
+
+def _get_combined_kitchens_dataset() -> tuple[list[dict], list[str], dict]:
+    """
+    Build a unified Kitchens dataset: Account-Facility-Kitchen for all countries (same structure as SA).
+    Merges kitchen-level tabs (SF Kitchen Data, Churn, etc.) + facility details (KSA, UAE, Kuwait, Bahrain, Qatar).
+    Returns (rows, all_columns, col_map). Each row gets _Account, _Country, _Facility, _Kitchen, _Source.
+    """
+    all_rows: list[dict] = []
+    all_keys: set[str] = set()
+    col_map = {}
+
+    tabs_to_merge = list(KITCHENS_SOURCE_TABS) + list(FACILITY_DETAILS_TABS)
+    for tab_id in tabs_to_merge:
+        rows = list_generic_tab(tab_id)
+        if not rows:
+            continue
+        r0 = rows[0]
+        account_col = _find_col(r0, *HIERARCHY_ACCOUNT_CANDIDATES)
+        kitchen_col = _find_col(r0, *HIERARCHY_KITCHEN_CANDIDATES)
+        country_col = _find_col(r0, *HIERARCHY_COUNTRY_CANDIDATES)
+        facility_col = _find_col(r0, *HIERARCHY_FACILITY_CANDIDATES)
+        if not col_map:
+            col_map = {"account_col": account_col, "kitchen_col": kitchen_col, "country_col": country_col, "facility_col": facility_col}
+
+        for r in rows:
+            c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
+            row = dict(r)
+            acct = str(r.get(account_col, "") or "").strip() if account_col else ""
+            row["_Account"] = acct
+            # Fallback: if country empty but Account has "X - Y - Z", use first part
+            if not c and acct and " - " in acct:
+                c = acct.split(" - ")[0].strip()
+            row["_Country"] = c
+            row["_Facility"] = f
+            row["_Kitchen"] = k
+            row["_Source"] = tab_id
+            all_rows.append(row)
+            all_keys.update(row.keys())
+
+    # Ensure consistent columns: _Account, _Country, _Facility, _Kitchen, _Source first, then rest
+    meta = ["_Account", "_Source", "_Country", "_Facility", "_Kitchen"]
+    others = sorted(k for k in all_keys if k not in meta)
+    columns = meta + others
+    return (all_rows, columns, col_map)
+
+
+def _hierarchy_filtered_rows(
+    rows: list[dict],
+    account_col: str | None,
+    kitchen_col: str | None,
+    country: str | None,
+    facility: str | None,
+    kitchen: str | None,
+    country_col: str | None = None,
+    facility_col: str | None = None,
+) -> list[dict]:
+    """Filter rows by selected country, facility, kitchen."""
+    if not country and not facility and not kitchen:
+        return rows
+    filtered = []
+    for r in rows:
+        c, f, k = _extract_hierarchy_from_row(r, account_col, kitchen_col, country_col, facility_col)
+        if country and not _country_matches(c, country):
+            continue
+        if facility and f != facility:
+            continue
+        if kitchen and k != kitchen:
+            continue
+        filtered.append(r)
+    return filtered
 
 
 def _get_google_credentials_path():
@@ -985,14 +1315,50 @@ def _get_google_credentials_path():
     return None
 
 
+def _salesforce_token_from_refresh(
+    consumer_key: str,
+    consumer_secret: str,
+    refresh_token: str,
+    use_sandbox: bool = False,
+) -> tuple[dict | None, str | None]:
+    """Get access_token and instance_url via OAuth refresh_token flow. No username/password."""
+    login_host = "https://test.salesforce.com" if use_sandbox else "https://login.salesforce.com"
+    url = f"{login_host}/services/oauth2/token"
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": consumer_key,
+        "client_secret": consumer_secret,
+        "refresh_token": refresh_token,
+    }
+    try:
+        resp = requests.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
+        if resp.ok:
+            out = resp.json()
+            base = (out.get("instance_url") or "").rstrip("/")
+            token = out.get("access_token")
+            if base and token:
+                return ({"base_url": base, "token": token}, None)
+            return (None, "Salesforce returned no instance_url or access_token.")
+        try:
+            err = resp.json()
+            msg = err.get("error_description") or err.get("error") or resp.text or f"HTTP {resp.status_code}"
+        except Exception:
+            msg = resp.text or f"HTTP {resp.status_code}"
+        return (None, f"Salesforce OAuth: {msg}")
+    except requests.RequestException as e:
+        return (None, f"Network error: {e}")
+    except Exception as e:
+        return (None, str(e))
+
+
 def _salesforce_token_from_password(
     consumer_key: str,
     consumer_secret: str,
     username: str,
     password: str,
     use_sandbox: bool = False,
-) -> dict | None:
-    """Get access_token and instance_url via OAuth password flow. Returns {"base_url": ..., "token": ...} or None."""
+) -> tuple[dict | None, str | None]:
+    """Get access_token and instance_url via OAuth password flow. Returns (config, None) on success or (None, error_message) on failure."""
     login_host = "https://test.salesforce.com" if use_sandbox else "https://login.salesforce.com"
     url = f"{login_host}/services/oauth2/token"
     data = {
@@ -1004,43 +1370,95 @@ def _salesforce_token_from_password(
     }
     try:
         resp = requests.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
-        resp.raise_for_status()
-        out = resp.json()
-        base = (out.get("instance_url") or "").rstrip("/")
-        token = out.get("access_token")
-        if base and token:
-            return {"base_url": base, "token": token}
-    except Exception:
+        if resp.ok:
+            out = resp.json()
+            base = (out.get("instance_url") or "").rstrip("/")
+            token = out.get("access_token")
+            if base and token:
+                return ({"base_url": base, "token": token}, None)
+            return (None, "Salesforce returned no instance_url or access_token.")
+        # Capture Salesforce error for debugging
+        try:
+            err = resp.json()
+            msg = err.get("error_description") or err.get("error") or resp.text or f"HTTP {resp.status_code}"
+        except Exception:
+            msg = resp.text or f"HTTP {resp.status_code}"
+        return (None, f"Salesforce OAuth: {msg}")
+    except requests.RequestException as e:
+        return (None, f"Network error: {e}")
+    except Exception as e:
+        return (None, str(e))
+
+
+def _get_from_obj(obj, key: str):
+    """Get value from obj (dict or Streamlit secret section)."""
+    if obj is None:
+        return None
+    try:
+        if hasattr(obj, "get"):
+            v = obj.get(key)
+            if v is not None:
+                return v
+        if hasattr(obj, "__getitem__"):
+            return obj[key]
+    except (KeyError, TypeError):
         pass
-    return None
+    try:
+        return getattr(obj, key, None) or getattr(obj, key.lower(), None)
+    except Exception:
+        return None
+
+
+def _sf_secret(secrets: dict, section, *key_variants: str) -> str:
+    """Get first non-empty value from env, then section, then secrets, trying each key variant."""
+    for key in key_variants:
+        val = os.environ.get(key) or _get_from_obj(section, key) or secrets.get(key)
+        if val and str(val).strip():
+            return str(val).strip()
+    # Fallback: SF_* keys may have been pasted under [gsheet_service_account] by mistake
+    gsheet = secrets.get("gsheet_service_account") if isinstance(secrets, dict) else None
+    if gsheet:
+        for key in key_variants:
+            val = _get_from_obj(gsheet, key)
+            if val and str(val).strip():
+                return str(val).strip()
+    return ""
 
 
 def _get_salesforce_config() -> dict | None:
     """Salesforce connection: use SF_ACCESS_TOKEN + SF_INSTANCE_URL, or Consumer Key/Secret + Username/Password."""
     try:
-        secrets = getattr(st, "secrets", None) or {}
-        base_url = os.environ.get("SF_INSTANCE_URL") or secrets.get("SF_INSTANCE_URL")
-        token = os.environ.get("SF_ACCESS_TOKEN") or secrets.get("SF_ACCESS_TOKEN")
+        raw = getattr(st, "secrets", None)
+        try:
+            secrets = dict(raw) if raw else {}
+        except Exception:
+            secrets = {}
+        section = None
+        try:
+            section = secrets.get("salesforce") or (getattr(raw, "salesforce", None) if raw else None)
+        except Exception:
+            pass
 
+        base_url = _sf_secret(secrets, section, "SF_INSTANCE_URL", "sf_instance_url")
+        token = _sf_secret(secrets, section, "SF_ACCESS_TOKEN", "sf_access_token")
         if base_url and token:
-            return {"base_url": str(base_url).rstrip("/"), "token": str(token)}
+            return {"base_url": base_url.rstrip("/"), "token": token}
 
-        # Password flow: Consumer Key + Secret + Username + Password (password = user password + security token if required)
-        consumer_key = os.environ.get("SF_CONSUMER_KEY") or secrets.get("SF_CONSUMER_KEY")
-        consumer_secret = os.environ.get("SF_CONSUMER_SECRET") or secrets.get("SF_CONSUMER_SECRET")
-        username = os.environ.get("SF_USERNAME") or secrets.get("SF_USERNAME")
-        password = (os.environ.get("SF_PASSWORD") or secrets.get("SF_PASSWORD") or "").strip()
-        security_token = (os.environ.get("SF_SECURITY_TOKEN") or secrets.get("SF_SECURITY_TOKEN") or "").strip()
-        if security_token:
-            password = password + security_token
-        use_sandbox = str(os.environ.get("SF_USE_SANDBOX") or secrets.get("SF_USE_SANDBOX") or "").strip().lower() in ("1", "true", "yes")
+        consumer_key = _sf_secret(secrets, section, "SF_CONSUMER_KEY", "sf_consumer_key")
+        consumer_secret = _sf_secret(secrets, section, "SF_CONSUMER_SECRET", "sf_consumer_secret")
+        refresh_token = _sf_secret(secrets, section, "SF_REFRESH_TOKEN", "sf_refresh_token")
+        use_sandbox_raw = _sf_secret(secrets, section, "SF_USE_SANDBOX", "sf_use_sandbox") or ""
+        use_sandbox = use_sandbox_raw.lower() in ("1", "true", "yes")
 
-        if consumer_key and consumer_secret and username and password:
+        # Option 1: Refresh token (no username/password)
+        if consumer_key and consumer_secret and refresh_token:
             cache_key = "sf_api_config_cache"
             cache = st.session_state.get(cache_key)
             if isinstance(cache, dict) and cache.get("expires_at") and datetime.now(timezone.utc).timestamp() < cache.get("expires_at", 0):
                 return {"base_url": cache["base_url"], "token": cache["token"]}
-            cfg = _salesforce_token_from_password(consumer_key, consumer_secret, username, password, use_sandbox)
+            cfg, err = _salesforce_token_from_refresh(consumer_key, consumer_secret, refresh_token, use_sandbox)
+            if err:
+                st.session_state["sf_last_auth_error"] = err
             if cfg:
                 st.session_state[cache_key] = {
                     "base_url": cfg["base_url"],
@@ -1048,8 +1466,54 @@ def _get_salesforce_config() -> dict | None:
                     "expires_at": datetime.now(timezone.utc).timestamp() + 5400,
                 }
                 return cfg
-    except Exception:
-        pass
+
+        # Option 2: Username + password
+        username = _sf_secret(secrets, section, "SF_USERNAME", "sf_username")
+        password = _sf_secret(secrets, section, "SF_PASSWORD", "sf_password")
+        security_token = _sf_secret(secrets, section, "SF_SECURITY_TOKEN", "sf_security_token")
+        if security_token:
+            password = password + security_token
+
+        if not (consumer_key and consumer_secret and (refresh_token or (username and password))):
+            parts = []
+            if not consumer_key:
+                parts.append("SF_CONSUMER_KEY")
+            if not consumer_secret:
+                parts.append("SF_CONSUMER_SECRET")
+            if not refresh_token and not username:
+                parts.append("SF_REFRESH_TOKEN (or SF_USERNAME + SF_PASSWORD)")
+            elif not refresh_token and not password:
+                parts.append("SF_PASSWORD")
+            try:
+                top = list(secrets.keys())[:25] if isinstance(secrets, dict) else []
+                sec = list(section.keys())[:25] if hasattr(section, "keys") else []
+                seen = f" Top-level keys: {', '.join(str(k) for k in top)}."
+                if sec:
+                    seen += f" Under [salesforce]: {', '.join(str(k) for k in sec)}."
+            except Exception:
+                seen = ""
+            st.session_state["sf_last_auth_error"] = (
+                f"Missing in secrets: {', '.join(parts)}."
+                f"{seen} Use SF_REFRESH_TOKEN (no username/password) or SF_USERNAME + SF_PASSWORD. Save, then Reboot."
+            )
+
+        if consumer_key and consumer_secret and username and password:
+            cache_key = "sf_api_config_cache"
+            cache = st.session_state.get(cache_key)
+            if isinstance(cache, dict) and cache.get("expires_at") and datetime.now(timezone.utc).timestamp() < cache.get("expires_at", 0):
+                return {"base_url": cache["base_url"], "token": cache["token"]}
+            cfg, err = _salesforce_token_from_password(consumer_key, consumer_secret, username, password, use_sandbox)
+            if err:
+                st.session_state["sf_last_auth_error"] = err
+            if cfg:
+                st.session_state[cache_key] = {
+                    "base_url": cfg["base_url"],
+                    "token": cfg["token"],
+                    "expires_at": datetime.now(timezone.utc).timestamp() + 5400,
+                }
+                return cfg
+    except Exception as e:
+        st.session_state["sf_last_auth_error"] = str(e)
     return None
 
 
@@ -1069,42 +1533,113 @@ def _salesforce_query(soql: str, config: dict) -> list[dict]:
     return cleaned
 
 
+def _is_report_id(value: str) -> bool:
+    """True if value looks like a Salesforce Report ID (00O... 15 or 18 chars)."""
+    if not value or not isinstance(value, str):
+        return False
+    s = value.strip()
+    return len(s) in (15, 18) and s.startswith("00O") and s[3:].replace("_", "").isalnum()
+
+
+def _salesforce_report_data(report_id: str, config: dict) -> list[dict]:
+    """Fetch report by ID via Analytics REST API; return list of row dicts (column label -> value)."""
+    url = f"{config['base_url']}/services/data/v59.0/analytics/reports/{report_id.strip()}"
+    headers = {"Authorization": f"Bearer {config['token']}", "Content-Type": "application/json"}
+    resp = requests.get(url, headers=headers, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    # Column labels (detailColumns or reportMetadata.detailColumns)
+    detail_cols = data.get("reportMetadata", {}).get("detailColumns") or data.get("detailColumns") or []
+    if isinstance(detail_cols, list) and detail_cols:
+        cols = [c.get("label") or c.get("name") or str(c) if isinstance(c, dict) else str(c) for c in detail_cols]
+    else:
+        cols = []
+    # Rows from factMap (tabular: T!T, summary: 0!T, or first key with "rows")
+    fact_map = data.get("factMap") or {}
+    rows_data = []
+    for key in ("T!T", "0!T", "T!F"):
+        if key in fact_map and isinstance(fact_map[key], dict):
+            rows_data = fact_map[key].get("rows") or fact_map[key].get("data") or []
+            break
+    if not rows_data and fact_map:
+        for v in fact_map.values():
+            if isinstance(v, dict) and (v.get("rows") or v.get("data")):
+                rows_data = v.get("rows") or v.get("data")
+                break
+    out = []
+    for r in rows_data:
+        cells = r.get("dataCells") or r.get("cells") or r.get("cell") or []
+        if not isinstance(cells, list):
+            continue
+        row = {}
+        for i, cell in enumerate(cells):
+            label = cols[i] if i < len(cols) else f"Column{i}"
+            if isinstance(cell, dict):
+                row[label] = cell.get("label") if cell.get("label") is not None else cell.get("value")
+            else:
+                row[label] = cell
+        if row:
+            out.append(row)
+    return out
+
+
 def _get_salesforce_tab_queries() -> dict[str, str]:
-    """Tab name → SOQL. From secrets [sf_tab_queries] or env SF_TAB_QUERIES (JSON)."""
+    """Tab name → SOQL. From secrets [sf_tab_queries], or SF_TAB_QUERIES (JSON string), or env."""
+    out: dict[str, str] = {}
     try:
-        # Streamlit secrets: [sf_tab_queries] with keys like "SF Kitchen Data" = "SELECT ..."
-        sq = getattr(st, "secrets", None) and st.secrets.get("sf_tab_queries")
-        if isinstance(sq, dict):
-            return {k: str(v).strip() for k, v in sq.items() if v}
-        raw = os.environ.get("SF_TAB_QUERIES", "")
-        if raw and raw.strip():
-            return json.loads(raw)
-    except (json.JSONDecodeError, TypeError, Exception):
+        raw_secrets = getattr(st, "secrets", None)
+        if raw_secrets is not None:
+            # 1) Section [sf_tab_queries] — Streamlit may expose as non-dict; normalize to dict
+            sq = raw_secrets.get("sf_tab_queries") if hasattr(raw_secrets, "get") else None
+            if sq is not None:
+                try:
+                    d = dict(sq) if not isinstance(sq, dict) else sq
+                    out = {str(k).strip(): str(v).strip() for k, v in d.items() if v}
+                except (TypeError, AttributeError):
+                    pass
+            # 2) Top-level key SF_TAB_QUERIES = "{\"Tab\": \"SOQL\"}" (JSON string)
+            if not out:
+                json_str = raw_secrets.get("SF_TAB_QUERIES") if hasattr(raw_secrets, "get") else None
+                if isinstance(json_str, str) and json_str.strip():
+                    out = {k: str(v).strip() for k, v in json.loads(json_str).items() if v}
+        # 3) Environment variable (e.g. in CI or Streamlit env)
+        if not out:
+            raw = os.environ.get("SF_TAB_QUERIES", "")
+            if raw and raw.strip():
+                out = {k: str(v).strip() for k, v in json.loads(raw).items() if v}
+    except (json.JSONDecodeError, TypeError, KeyError, Exception):
         pass
-    return {}
+    return out
 
 
 def _refresh_from_salesforce():
     """Pull real-time data from Salesforce API and load into Data tabs. Returns (success, message)."""
     config = _get_salesforce_config()
     if not config:
+        err = st.session_state.pop("sf_last_auth_error", None)
+        if err:
+            return False, err
         return False, (
-            "Salesforce not configured. Use either (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, "
-            "or (2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD (and SF_SECURITY_TOKEN if required)."
+            "Salesforce not configured. Use (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, "
+            "or (2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_REFRESH_TOKEN (no username/password), "
+            "or (3) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD."
         )
     tab_queries = _get_salesforce_tab_queries()
     if not tab_queries:
         return False, (
-            "No SOQL configured. In Streamlit secrets add [sf_tab_queries] with e.g. "
-            '"SF Kitchen Data" = "SELECT Id, Name FROM YourObject__c", or set SF_TAB_QUERIES JSON in env.'
+            "No SOQL or Report IDs configured. In Streamlit secrets add [sf_tab_queries] with Report IDs, e.g. "
+            '"SF Kitchen Data" = "00O6T000006Y0l6UAC". See docs/SETUP_SF_SECRETS.md for setup.'
         )
     loaded = []
     errors = []
-    for tab_id, soql in tab_queries.items():
-        if not soql:
+    for tab_id, soql_or_report_id in tab_queries.items():
+        if not soql_or_report_id:
             continue
         try:
-            rows = _salesforce_query(soql, config)
+            if _is_report_id(soql_or_report_id):
+                rows = _salesforce_report_data(soql_or_report_id, config)
+            else:
+                rows = _salesforce_query(soql_or_report_id, config)
             if rows:
                 save_generic_tab(tab_id, rows)
                 loaded.append(f"{tab_id} ({len(rows)} rows)")
@@ -1113,6 +1648,7 @@ def _refresh_from_salesforce():
         except Exception as e:
             errors.append(f"{tab_id}: {e}")
     if loaded and not errors:
+        log_data_refresh("salesforce", len(loaded))
         return True, "Real-time Salesforce: " + "; ".join(loaded)
     if errors:
         return False, "Salesforce: " + "; ".join(errors)
@@ -1190,18 +1726,8 @@ def _refresh_from_online_sheet():
         if tab_id is None:
             tab_id = ws_title
         if tab_id == "Auto Refresh Execution Log":
-            with get_conn() as c:
-                c.execute("DELETE FROM ksa_auto_refresh_execution_log")
-            for r in rows:
-                insert_exec_log({
-                    "refresh_time": _row_key(r, "Refresh Time", "refresh_time") or datetime.now().strftime("%m/%d/%Y %H:%M"),
-                    "sheet": _row_key(r, "Sheet", "sheet"),
-                    "operation": _row_key(r, "Operation", "operation"),
-                    "status": _row_key(r, "Status", "status"),
-                    "user": _row_key(r, "User", "user"),
-                })
-            loaded.append(f"{tab_id} ({len(rows)} rows)")
-        elif _is_main_tracker_tab(tab_id):
+            continue  # Section removed; skip loading
+        if _is_main_tracker_tab(tab_id):
             for r in rows:
                 row = _normalize_gsheet_row(r)
                 rid = (row.get("record_id") or "").strip()
@@ -1214,72 +1740,9 @@ def _refresh_from_online_sheet():
         else:
             save_generic_tab(tab_id, rows)
             loaded.append(f"{tab_id} ({len(rows)} rows)")
+    if loaded:
+        log_data_refresh("google_sheet", len(loaded))
     return True, "Loaded: " + "; ".join(loaded) if loaded else "No data in sheet."
-
-
-# When a row has any of these (Account.Country__c, Account__r.Country__c, Country__c, Country, County),
-# that value is shown in the "Account Country" column on the Kitchens tab. Case-insensitive match.
-_COUNTRY_HEADERS = (
-    "account.country__c",
-    "account__r.country__c",
-    "country__c",
-    "country",
-    "county",
-    "account country",
-    "account country__c",
-    "account_country__c",
-    "billingcountry",
-)
-_ACCOUNT_NAME_HEADERS = (
-    "account.name", "account__r.name", "account name", "account_name",
-)
-_COUNTRY_FROM_PREFIX = {
-    "sa": "Saudi Arabia", "ksa": "Saudi Arabia", "ksa ": "Saudi Arabia",
-    "uae": "UAE", "kwt": "Kuwait", "bhr": "Bahrain", "qat": "Qatar",
-}
-
-
-def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
-    """Ensure each row has 'Account Country'; derive from existing country field or Account name. For SF Kitchen Data."""
-    if not rows:
-        return rows
-    first = rows[0]
-    keys_lower = {str(k).strip().lower(): k for k in first.keys()}
-    country_key = None
-    for h in _COUNTRY_HEADERS:
-        if h in keys_lower:
-            country_key = keys_lower[h]
-            break
-    account_name_key = None
-    for h in _ACCOUNT_NAME_HEADERS:
-        if h in keys_lower:
-            account_name_key = keys_lower[h]
-            break
-    out = []
-    for r in rows:
-        row = dict(r)
-        if country_key and (row.get(country_key) or "").strip():
-            row["Account Country"] = str(row.get(country_key, "")).strip()
-        elif account_name_key:
-            name = str(row.get(account_name_key, "") or "").strip()
-            if " - " in name:
-                prefix = name.split(" - ")[0].strip().lower()
-                row["Account Country"] = _COUNTRY_FROM_PREFIX.get(prefix, prefix.upper() if prefix else "")
-            else:
-                row["Account Country"] = row.get("Account Country", "")
-        else:
-            row["Account Country"] = row.get("Account Country", "")
-        out.append(row)
-    return out
-
-
-def _kitchens_column_order(cols: list[str]) -> list[str]:
-    """Put 'Account Country' near the start for Kitchens/SF Kitchen Data."""
-    cols = list(cols)
-    if "Account Country" in cols:
-        cols.remove("Account Country")
-        return ["Account Country"] + cols
-    return cols
 
 
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False):
@@ -1288,13 +1751,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False):
     if not rows:
         st.info("No data yet. Use **Refresh from online sheet** or **Refresh from Salesforce** above to load data.")
         return
-    # For SF Kitchen Data, ensure Account Country is present and column order puts it first
-    if tab_id == "SF Kitchen Data":
-        rows = _ensure_account_country_in_kitchens(rows)
-    cols = list(rows[0].keys()) if rows else []
-    if tab_id == "SF Kitchen Data":
-        cols = _kitchens_column_order(cols)
     # Cleaner filtering: one search box + optional single-column filter in expander
+    cols = list(rows[0].keys()) if rows else []
     search_all = st.text_input(
         "Search in all columns",
         key=f"f_{key_suffix}_search",
@@ -1343,19 +1801,52 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide")
     init_db()
 
+    # Auto-refresh: on session start if stale + every 15 mins while open (when AUTO_REFRESH_ENABLED)
+    if _auto_refresh_enabled():
+        interval_mins = _auto_refresh_minutes()
+
+        def _should_refresh() -> bool:
+            refreshed_at, _ = get_last_data_refresh()
+            if not refreshed_at:
+                return True
+            try:
+                ts = datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))
+                return (datetime.now(timezone.utc) - ts).total_seconds() >= interval_mins * 60
+            except Exception:
+                return True
+
+        def _do_refresh() -> bool:
+            try:
+                ok, _ = _refresh_from_salesforce()
+                if not ok:
+                    ok, _ = _refresh_from_online_sheet()
+                if ok:
+                    st.session_state["goto_data_after_refresh"] = True
+                    return True
+            except Exception:
+                pass
+            return False
+
+        # Refresh on any session start (app wake-up, new user, Streamlit Cloud cold start)
+        if not st.session_state.get("auto_refresh_done"):
+            if _do_refresh():
+                _rerun()
+            st.session_state["auto_refresh_done"] = True
+
+        # Periodic refresh while app is open (every 5 mins)
+        if hasattr(st, "fragment"):
+
+            @st.fragment(run_every=timedelta(minutes=min(5, interval_mins)))
+            def _auto_refresh_fragment():
+                if _should_refresh() and _do_refresh():
+                    _rerun()
+
+            _auto_refresh_fragment()
+
     # Pre-fill name/email from URL so users can bookmark and avoid typing each time
     prefilled = (st.query_params.get("email") or st.query_params.get("name") or st.query_params.get("user") or "").strip()
     if prefilled:
         st.session_state["user_display_name"] = prefilled
-
-    # One-time refresh on session start (SF or sheet). Must set flag BEFORE _rerun() to avoid infinite rerun loop.
-    if not st.session_state.get("auto_refresh_done"):
-        st.session_state["auto_refresh_done"] = True
-        ok, _ = _refresh_from_salesforce()
-        if not ok:
-            ok, _ = _refresh_from_online_sheet()
-        if ok:
-            _rerun()
 
     # KitchenPark-style theme: light header, teal hero + CTAs (match KitchenPark site)
     st.markdown("""
@@ -1427,6 +1918,9 @@ def main():
         /* Metrics / captions: dark grey */
         [data-testid="stMetricValue"] { color: #1E293B !important; font-weight: 600 !important; }
         [data-testid="stMetricLabel"] { color: #64748B !important; }
+        /* Sidebar metric: smaller font */
+        section[data-testid="stSidebar"] [data-testid="stMetricValue"],
+        section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         .stCaption { color: #64748B !important; }
         div[data-testid="stVerticalBlock"] > div { padding-top: 0.25rem; }
         </style>
@@ -1444,10 +1938,18 @@ def main():
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
-    updated_today = get_records_updated_today_count()
-    # Data pulse: status only (no exact count) — cooler label, less info leakage
-    pulse_status = "Live" if updated_today > 0 else "Idle"
-    st.sidebar.metric("Data pulse", pulse_status, help="Activity in the last 24h — status only, no counts shown")
+    # Last refresh + Refresh button
+    refreshed_at, refresh_source = get_last_data_refresh()
+    if refreshed_at:
+        ago = _humanize_ago(refreshed_at)
+        source_label = "SF" if (refresh_source or "").startswith("salesforce") else "Sheet"
+        st.sidebar.metric(
+            "Last refresh",
+            f"{ago} ({source_label})",
+            help="Auto-refreshes every 15 mins from Salesforce (or Google Sheet fallback).",
+        )
+    else:
+        st.sidebar.metric("Last refresh", "—", help="Data auto-refreshes every 15 mins when the app is open.")
     # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
     current_user = (st.session_state.get("user_display_name") or "").strip()
@@ -1509,10 +2011,20 @@ def main():
                         st.error("Invalid key")
 
     st.sidebar.divider()
+    # Kitchens for everyone; 6 reports as sidebar functions for super users only
+    base_sections = ["Kitchens", "Dashboard", "Discussions", "Data", "Search"]
+    sections = base_sections
+    if is_super_user(current_user):
+        sections = ["Kitchens"] + SUPERUSER_REPORTS + ["Dashboard", "Discussions", "Data", "Search"]
+    # After SF/Sheet refresh, switch to Data so user sees the refreshed tabs
+    if st.session_state.pop("goto_data_after_refresh", False):
+        st.session_state["sidebar_section"] = "Data"
+    default_idx = sections.index(st.session_state.get("sidebar_section", "Kitchens")) if st.session_state.get("sidebar_section") in sections else 0
     section = st.sidebar.radio(
         "Section",
-        ["Dashboard", "Discussions", "Data", "Search"],
-        index=0,
+        sections,
+        index=default_idx,
+        key="sidebar_section",
         label_visibility="collapsed",
     )
 
@@ -1528,6 +2040,177 @@ def main():
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
             st.stop()
 
+    # Kitchens: raw kitchen data only (SF Kitchen Data, Churn, Sellable/No Status)
+    if section == "Kitchens":
+        st.title("Kitchens")
+        st.caption("Account, Facility, Kitchen data for all countries (SA, UAE, Kuwait, Bahrain, Qatar). Filter by Country, Facility, Kitchen, or search.")
+        rows, columns, col_map = _get_combined_kitchens_dataset()
+        if not rows:
+            st.info("No kitchen data yet. Data auto-refreshes every 15 mins. Developers can trigger a refresh in **Data** → Refresh from Salesforce or Google Sheet.")
+            st.stop()
+
+        # Build hierarchy values from _Country, _Facility, _Kitchen
+        countries: set[str] = set()
+        facilities_by_country: dict[str, set[str]] = {}
+        kitchens_by_facility: dict[tuple[str, str], set[str]] = {}
+        for r in rows:
+            c, f, k = r.get("_Country", ""), r.get("_Facility", ""), r.get("_Kitchen", "")
+            if c:
+                countries.add(c)
+                facilities_by_country.setdefault(c, set()).add(f or "—")
+                if f:
+                    facilities_by_country[c].discard("—")
+                key = (c, f or "—")
+                if k:
+                    kitchens_by_facility.setdefault(key, set()).add(k)
+        countries.update(SF_COUNTRIES)
+        countries_sorted = sorted(countries)
+
+        # Filters: Country, Facility, Kitchen (multi-select) + search + column filter
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            country_sel = st.multiselect(
+                "Country",
+                options=countries_sorted,
+                default=[],
+                key="h_country",
+                help="Select one or more countries. Empty = all.",
+            )
+        with f2:
+            fac_set = set()
+            if country_sel:
+                for c, fset in facilities_by_country.items():
+                    if _country_in_selected(c, country_sel):
+                        fac_set.update(fset)
+            else:
+                for fset in facilities_by_country.values():
+                    fac_set.update(fset)
+            facility_sel = st.multiselect(
+                "Facility",
+                options=sorted(fac_set),
+                default=[],
+                key="h_facility",
+                help="Select one or more facilities. Empty = all.",
+            )
+        with f3:
+            k_set = set()
+            if country_sel and facility_sel:
+                for (c, f), kset in kitchens_by_facility.items():
+                    if _country_in_selected(c, country_sel) and f in facility_sel:
+                        k_set.update(kset)
+            elif country_sel:
+                for (c, f), kset in kitchens_by_facility.items():
+                    if _country_in_selected(c, country_sel):
+                        k_set.update(kset)
+            elif facility_sel:
+                for (c, f), kset in kitchens_by_facility.items():
+                    if f in facility_sel:
+                        k_set.update(kset)
+            else:
+                for kset in kitchens_by_facility.values():
+                    k_set.update(kset)
+            kitchen_sel = st.multiselect(
+                "Kitchen",
+                options=sorted(k_set),
+                default=[],
+                key="h_kitchen",
+                help="Select one or more kitchens. Empty = all.",
+            )
+
+        # Filter by hierarchy (multi-select: row matches if any selected value matches)
+        c_filters = list(country_sel) if country_sel else []
+        f_filters = list(facility_sel) if facility_sel else []
+        k_filters = list(kitchen_sel) if kitchen_sel else []
+        filtered = rows
+        if c_filters or f_filters or k_filters:
+            filtered = [
+                r for r in filtered
+                if (not c_filters or _country_in_selected(r.get("_Country", ""), c_filters))
+                and (not f_filters or r.get("_Facility", "") in f_filters)
+                and (not k_filters or r.get("_Kitchen", "") in k_filters)
+            ]
+
+        # Search across all columns
+        search_all = st.text_input("Search in all columns", key="h_search", placeholder="Filter by any value…")
+        if (search_all or "").strip():
+            term = search_all.strip().lower()
+            filtered = [r for r in filtered if any(term in str(v).lower() for v in r.values() if v is not None)]
+
+        # Filter by one column (optional)
+        with st.expander("Filter by column", expanded=False):
+            chosen_col = st.selectbox("Column", ["— None —"] + columns, key="h_col_filter")
+            if chosen_col and chosen_col != "— None —":
+                uniq = sorted({str(r.get(chosen_col, "")).strip() for r in filtered if r.get(chosen_col) is not None})
+                if len(uniq) <= 80:
+                    col_val = st.selectbox("Value", ["— All —"] + uniq, key="h_col_val")
+                    if col_val and col_val != "— All —":
+                        filtered = [r for r in filtered if str(r.get(chosen_col, "")) == col_val]
+                else:
+                    col_val = st.text_input("Contains", key="h_col_val", placeholder="Type to filter…")
+                    if (col_val or "").strip():
+                        t = col_val.strip().lower()
+                        filtered = [r for r in filtered if t in str(r.get(chosen_col, "") or "").lower()]
+
+        st.caption(f"Showing **{len(filtered)}** of **{len(rows)}** kitchen row(s).")
+        if filtered:
+            # Preferred column order: Type, List Price, Kitchen Name, Status, Churn Date, Size, Hood Size, Floor, Opportunity Name
+            col_specs = _kitchens_display_columns(filtered, columns)
+            display_names = [dn for dn, _ in col_specs]
+            actual_cols = [ac for _, ac in col_specs]
+            out_rows = [{dn: r.get(ac, "") for dn, ac in col_specs} for r in filtered]
+            # Sort by Type, then List Price (matching SF-style grouped view)
+            type_col = "Type" if "Type" in display_names else None
+            price_col = "List Price" if "List Price" in display_names else None
+            if type_col or price_col:
+                try:
+                    df = pd.DataFrame(out_rows)
+                    sort_cols = [c for c in [type_col, price_col] if c and c in df.columns]
+                    if sort_cols:
+                        df = df.sort_values(sort_cols, na_position="last")
+                    else:
+                        df = pd.DataFrame(out_rows)
+                except Exception:
+                    df = pd.DataFrame(out_rows)
+            else:
+                df = pd.DataFrame(out_rows)
+            # Style: alternating row colors (green, red, yellow), red highlight for blank Opportunity Name
+            opp_col = "Opportunity Name" if "Opportunity Name" in df.columns else None
+
+            def _row_style(row):
+                i = row.name
+                base = ["background-color: #e8f5e9", "background-color: #ffebee", "background-color: #fffde7"][i % 3]
+                return [base] * len(row)
+
+            styled = df.style.apply(_row_style, axis=1)
+            if opp_col and opp_col in df.columns:
+                styled = styled.map(
+                    lambda v: "background-color: #ffcdd2" if (v is None or str(v).strip() in ("", "(blank)")) else "",
+                    subset=[opp_col],
+                )
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+            buf = io.StringIO()
+            w = csv.DictWriter(buf, fieldnames=display_names, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(out_rows)
+            st.download_button("Download filtered CSV", data=buf.getvalue(), file_name="kitchens_filtered.csv", mime="text/csv", key="dl_hierarchy")
+        else:
+            # Diagnostic: show what values exist in the data so user can see why filters return nothing
+            countries_in_data = sorted({str(r.get("_Country", "")).strip() for r in rows if r.get("_Country")})
+            sources_in_data = sorted({str(r.get("_Source", "")).strip() for r in rows if r.get("_Source")})
+            st.info("No rows match your filters. Try changing Country, Facility, or search.")
+            with st.expander("What's in your data?", expanded=True):
+                st.caption("**Countries in data:** " + (", ".join(c for c in countries_in_data if c) or "(none)"))
+                st.caption("**Sources/tabs:** " + (", ".join(sources_in_data) or "(none)"))
+                st.caption("If the country you selected isn't listed above, that country has no data yet. Add it to your source (Sheet/SF) or clear filters to see all rows.")
+        return
+
+    # Super-user reports: Facility Sell Price Multipliers, Area Data, etc. — all countries
+    if section in SUPERUSER_REPORTS:
+        st.title(section)
+        st.caption(f"Report data for all countries (SA, UAE, Kuwait, Bahrain, Qatar). Filter by any column.")
+        _render_generic_tab(section, key_suffix=section.replace(" ", "_"), is_developer=is_developer)
+        return
+
     # Dashboard: choose any tab → filter → download report
     if section == "Dashboard":
         st.title("Dashboard")
@@ -1542,7 +2225,7 @@ def main():
             - **Customize your data view:** Filter the main data by date, site, region, and metric; save and load named views. The Tracker tab has been removed; use this section to build your own views.
             To edit or add data, use **Data** in the sidebar.’            """)
         st.caption("Pick **any data source** (main tracker, Execution Log, or any Data tab), filter, and **download your report** as CSV.")
-        sources = _dashboard_sources()
+        sources = _dashboard_sources(current_user)
         source_options = [s[0] for s in sources]
         source_ids = {s[0]: s[1] for s in sources}
         chosen_label = st.selectbox(
@@ -1892,28 +2575,31 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         if is_developer:
-            with st.expander("Refresh data (Google Sheet & Salesforce only)", expanded=True):
+            with st.expander("Refresh data (Google Sheet & Salesforce)", expanded=True):
                 st.caption(
-                    "**Google Sheet** = same data as the online sheet (refreshed every 4 hours via your Salesforce connector). "
-                    "**Salesforce** = **real-time** data straight from the SF API — use this when you need up-to-the-minute numbers."
+                    "**Salesforce** = real-time data from the SF API. "
+                    "**Google Sheet** = fallback when SF isn't configured or unavailable — same data, synced every 4 hours from Salesforce."
                 )
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.markdown("**Google Sheet API** — service account JSON (share the sheet with its email).")
+                    st.markdown("**Google Sheet API (fallback)** — service account JSON (share the sheet with its email).")
                     if st.button("Refresh from online sheet", key="btn_gsheet"):
                         with st.spinner("Loading from Google Sheet…"):
                             ok, msg = _refresh_from_online_sheet()
                         if ok:
+                            st.session_state["goto_data_after_refresh"] = True
                             st.success(msg)
                             _rerun()
                         else:
                             st.error(msg)
                 with col2:
-                    st.markdown("**Salesforce API (real-time)** — Consumer Key/Secret + Username/Password, or Access Token; plus sf_tab_queries.")
+                    st.markdown("**Salesforce API (real-time)** — Refresh token or username/password + sf_tab_queries.")
+                    st.caption("If SF auth isn’t set up yet, use **Refresh from online sheet** — it’s synced from Salesforce every 4 hours.")
                     if st.button("Refresh from Salesforce", key="btn_salesforce"):
                         with st.spinner("Loading from Salesforce…"):
                             ok, msg = _refresh_from_salesforce()
                         if ok:
+                            st.session_state["goto_data_after_refresh"] = True
                             st.success(msg)
                             _rerun()
                         else:
@@ -1926,100 +2612,56 @@ def main():
                     - `SF_INSTANCE_URL` — e.g. `https://yourdomain.my.salesforce.com`  
                     - `SF_ACCESS_TOKEN` — token from your OAuth/Connected App flow  
 
-                    **Option B — Consumer Key + password (recommended)**  
+                    **Option B — Refresh token (no username/password)**  
                     - `SF_CONSUMER_KEY` — Connected App Consumer Key  
                     - `SF_CONSUMER_SECRET` — Connected App Consumer Secret  
-                    - `SF_USERNAME` — integration user username  
-                    - `SF_PASSWORD` — integration user password  
-                    - `SF_SECURITY_TOKEN` — (optional) append to password if your org requires it  
-                    - `SF_USE_SANDBOX` — set to `true` if the org is a sandbox  
+                    - `SF_REFRESH_TOKEN` — refresh token (get once via OAuth in browser or from admin)  
+                    - `SF_USE_SANDBOX` — set to `true` for sandbox  
 
-                    **Tab → SOQL (required for real-time data)**  
-                    - `sf_tab_queries` — map each tab name to a SOQL query, e.g.:
+                    **Option C — Username + password**  
+                    - `SF_CONSUMER_KEY`, `SF_CONSUMER_SECRET`, `SF_USERNAME`, `SF_PASSWORD`, optional `SF_SECURITY_TOKEN`, `SF_USE_SANDBOX`  
+
+                    **Tab → SOQL or Report ID (required for real-time data)**  
+                    - `sf_tab_queries` — map each tab name to a **SOQL** query or a **Report ID** (15/18 chars starting with `00O`). Use Report ID to run a report directly without writing SOQL.
 
                     ```toml
                     [sf_tab_queries]
                     "SF Kitchen Data" = "SELECT Id, Name, Region__c FROM YourObject__c"
-                    "SF Churn Data"   = "SELECT Id, Name, Churn_Date__c FROM Churn__c"
+                    "SF Churn Data"   = "00Oca000001AbCd"
                     ```
 
                     Tab names must match the Data tabs. Results replace that tab with **real-time** Salesforce data.
                     """)
         else:
             st.info("Refresh is available only to developers. Unlock **Developer access** in the sidebar.")
-        # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
-        all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
-        sheet_tabs = st.tabs(all_tab_ids)
-        # Tab tooltips: descriptions shown on hover
-        tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
-        st.markdown(
-            f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
-            'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
-            'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
-            unsafe_allow_html=True,
-        )
-
-        for tab_index, tab_id in enumerate(all_tab_ids):
-            with sheet_tabs[tab_index]:
-                if tab_id == "Auto Refresh Execution Log":
-                    sub_list, sub_add = st.tabs(["List", "Add row"])
-                    with sub_list:
-                        rows_log = list_exec_log()
-                        if not rows_log:
-                            st.info("No rows yet." + (" Use **Add row** to add one." if is_developer else ""))
-                        else:
-                            st.markdown(
-                                '<div style="background: linear-gradient(90deg, #F0FDFA 0%, #F8FAFC 100%); border-left: 4px solid #0F766E; '
-                                'padding: 10px 14px; margin-bottom: 12px; border-radius: 0 8px 8px 0; font-weight: 600; color: #134E4A;">'
-                                "Filter by column</div>",
-                                unsafe_allow_html=True,
-                            )
-                            exec_cols = ["Refresh Time", "Sheet", "Operation", "Status", "User"]
-                            exec_keys = ["refresh_time", "sheet", "operation", "status", "user"]
-                            uniq = lambda k: sorted(set(r.get(k) for r in rows_log if r.get(k)))
-                            fcols = st.columns(5)
-                            filters_exec = {}
-                            for i, (label, key) in enumerate(zip(exec_cols, exec_keys)):
-                                with fcols[i]:
-                                    st.markdown(f'<span style="font-size: 0.85rem; font-weight: 600; color: #475569;">{label}</span>', unsafe_allow_html=True)
-                                    if key in ("sheet", "status", "user"):
-                                        opts = uniq(key)
-                                        filters_exec[key] = st.multiselect(label, opts, key=f"exec_f_{key}", placeholder="All", label_visibility="collapsed")
-                                    else:
-                                        filters_exec[key] = st.text_input(label, key=f"exec_f_{key}", placeholder="Search…", label_visibility="collapsed")
-                            rows_shown = rows_log
-                            for key in exec_keys:
-                                val = filters_exec.get(key)
-                                if key in ("sheet", "status", "user") and val:
-                                    rows_shown = [r for r in rows_shown if r.get(key) in val]
-                                elif key in ("refresh_time", "operation") and val and str(val).strip():
-                                    term = str(val).strip().lower()
-                                    rows_shown = [r for r in rows_shown if term in str(r.get(key) or "").lower()]
-                            st.caption(f"Showing **{len(rows_shown)}** of **{len(rows_log)}** row(s).")
-                            st.divider()
-                            st.dataframe(
-                                [{"Refresh Time": r["refresh_time"], "Sheet": r["sheet"], "Operation": r["operation"], "Status": r["status"], "User": r["user"]} for r in rows_shown],
-                                use_container_width=True,
-                                hide_index=True,
-                            )
-                    with sub_add:
-                        if not is_developer:
-                            st.info("Only developers can add rows here. Unlock **Developer access** in the sidebar.")
-                        else:
-                            with st.form("exec_log_form"):
-                                refresh_time = st.text_input("Refresh Time *", value=datetime.now().strftime("%m/%d/%Y %H:%M"))
-                                sheet = st.text_input("Sheet *", placeholder="e.g. Price Multipliers, SF Kitchen Data")
-                                operation = st.text_input("Operation *", placeholder="e.g. Report Id: 000V0000003z 2092AI")
-                                status = st.text_input("Status *", value="Success")
-                                user = st.text_input("User *", placeholder="email@cloudkitchens.com")
-                                if st.form_submit_button("Add"):
-                                    if refresh_time and sheet and operation and status and user:
-                                        insert_exec_log({"refresh_time": refresh_time, "sheet": sheet, "operation": operation, "status": status, "user": user})
-                                        st.success("Added.")
-                                        _rerun()
-                                    else:
-                                        st.error("Fill all required fields.")
-                else:
+        # Tabbed view enabled only when data loaded from online sheet (not Salesforce)
+        _, refresh_source = get_last_data_refresh()
+        from_online_sheet = (refresh_source or "").strip().lower().startswith("google_sheet")
+        if not from_online_sheet:
+            st.info(
+                "The tabbed data view (SF Kitchen Data, Sellable No Status, etc.) is available only when data is loaded from the **online Google Sheet**. "
+                "Use **Refresh from online sheet** above to enable it."
+            )
+            st.caption("Data refreshed from Salesforce does not use this view.")
+        # Regular users: kitchen tabs only. Super users: all tabs (Price Multipliers, Area Data, etc.)
+        all_tab_ids = _visible_data_tab_ids(current_user) if from_online_sheet else []
+        if not is_super_user(current_user) and all_tab_ids:
+            st.caption("You’re viewing kitchen data. Super users see additional tabs (Price Multipliers, Area Data, Execution Log, etc.).")
+        if not all_tab_ids and from_online_sheet:
+            st.info("No data tabs available for your role. Kitchen users see SF Kitchen Data, Churn, Facility details, Sellable/No Status. Super users see all tabs.")
+            st.caption("Add SUPER_USER_IDS in secrets to grant full access (e.g. SUPER_USER_IDS = \"email@company.com, other@company.com\").")
+        elif all_tab_ids:
+            sheet_tabs = st.tabs(all_tab_ids)
+            # Tab tooltips: descriptions shown on hover
+            tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
+            st.markdown(
+                f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
+                'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
+                'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
+                unsafe_allow_html=True,
+            )
+            for tab_index, tab_id in enumerate(all_tab_ids):
+                with sheet_tabs[tab_index]:
                     _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
 
 if __name__ == "__main__":
