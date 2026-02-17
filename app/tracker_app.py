@@ -1018,8 +1018,8 @@ def _salesforce_token_from_password(
     return None
 
 
-def _get_salesforce_config() -> dict | None:
-    """Salesforce connection: use SF_ACCESS_TOKEN + SF_INSTANCE_URL, or Consumer Key/Secret + Username/Password."""
+def _get_salesforce_config(force_sandbox: bool | None = None) -> dict | None:
+    """Salesforce connection. force_sandbox: True = sandbox, False = prod, None = use SF_USE_SANDBOX from env/secrets."""
     try:
         secrets = getattr(st, "secrets", None) or {}
         base_url = os.environ.get("SF_INSTANCE_URL") or secrets.get("SF_INSTANCE_URL")
@@ -1036,10 +1036,13 @@ def _get_salesforce_config() -> dict | None:
         security_token = (os.environ.get("SF_SECURITY_TOKEN") or secrets.get("SF_SECURITY_TOKEN") or "").strip()
         if security_token:
             password = password + security_token
-        use_sandbox = str(os.environ.get("SF_USE_SANDBOX") or secrets.get("SF_USE_SANDBOX") or "").strip().lower() in ("1", "true", "yes")
+        if force_sandbox is not None:
+            use_sandbox = force_sandbox
+        else:
+            use_sandbox = str(os.environ.get("SF_USE_SANDBOX") or secrets.get("SF_USE_SANDBOX") or "").strip().lower() in ("1", "true", "yes")
 
         if consumer_key and consumer_secret and username and password:
-            cache_key = "sf_api_config_cache"
+            cache_key = f"sf_api_config_cache_{use_sandbox}"
             cache = st.session_state.get(cache_key)
             if isinstance(cache, dict) and cache.get("expires_at") and datetime.now(timezone.utc).timestamp() < cache.get("expires_at", 0):
                 return {"base_url": cache["base_url"], "token": cache["token"]}
@@ -1130,23 +1133,47 @@ def _get_salesforce_tab_queries() -> dict[str, str]:
 
 
 def _refresh_from_salesforce():
-    """Pull real-time data from Salesforce API and load into Data tabs. Returns (success, message)."""
-    config = _get_salesforce_config()
-    if not config:
-        return False, (
-            "Salesforce not configured. Use either (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, "
-            "or (2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD (and SF_SECURITY_TOKEN if required)."
-        )
+    """Pull data from Salesforce (or mock) and load into Data tabs. Provider: SFDC_PROVIDER=mock|sandbox|prod."""
+    import sfdc_providers as sfdc  # noqa: PLC0415
+
     tab_queries = _get_salesforce_tab_queries()
     if not tab_queries:
         return False, (
             "No SOQL or Report IDs configured. In Streamlit secrets add [sf_tab_queries] with e.g. "
-            '"SF Churn Data" = "00O6T000006Y5DiUAK" (Report ID) or "SELECT ..." (SOQL). See docs/SETUP_SF_SECRETS.md.'
+            '"Kitchens" = "00OVO00000PMnq92AD". See docs/SETUP_SF_SECRETS.md.'
         )
+    provider = sfdc.get_sfdc_provider()
+    KITCHENS_TAB = "Kitchens"
     loaded = []
     errors = []
-    # "SF Kitchen Data" in secrets maps to "Kitchens" tab (backward compat)
-    KITCHENS_TAB = "Kitchens"
+
+    # —— Mock provider: read from app/data/mock/{tab_slug}.json or .csv ——
+    if provider == "mock":
+        for tab_id, soql_or_report_id in tab_queries.items():
+            if not soql_or_report_id:
+                continue
+            save_to = KITCHENS_TAB if tab_id == "SF Kitchen Data" else tab_id
+            try:
+                rows = sfdc.mock_fetch_tab_data(tab_id, soql_or_report_id)
+                save_generic_tab(save_to, rows)
+                loaded.append(f"{save_to} ({len(rows)} rows)")
+            except Exception as e:
+                errors.append(f"{tab_id}: {e}")
+        if loaded and not errors:
+            return True, "Mock data: " + "; ".join(loaded)
+        if errors:
+            return False, "Mock: " + "; ".join(errors)
+        return False, "No mock data. Add JSON/CSV files in app/data/mock/ (e.g. Kitchens.json). See docs/SFDC_PROVIDERS.md."
+
+    # —— Sandbox / Prod: use Salesforce API (force_sandbox from provider) ——
+    force_sandbox = provider == "sandbox"
+    config = _get_salesforce_config(force_sandbox=force_sandbox)
+    if not config:
+        return False, (
+            "Salesforce not configured. Use (1) SF_INSTANCE_URL + SF_ACCESS_TOKEN, or "
+            "(2) SF_CONSUMER_KEY + SF_CONSUMER_SECRET + SF_USERNAME + SF_PASSWORD. "
+            f"Provider={provider}."
+        )
     for tab_id, soql_or_report_id in tab_queries.items():
         if not soql_or_report_id:
             continue
@@ -1165,14 +1192,14 @@ def _refresh_from_salesforce():
             if e.response is not None and e.response.status_code == 403 and _is_report_id(soql_or_report_id):
                 errors.append(
                     f"{tab_id}: 403 Forbidden — the API user cannot run this report. "
-                    "Grant 'Run Reports' (or 'View Reports') and report folder access to the integration user, or use SOQL instead of Report ID. See docs/SETUP_SF_SECRETS.md."
+                    "Grant 'Run Reports' and report folder access, or use SOQL. See docs/SETUP_SF_SECRETS.md."
                 )
             else:
                 errors.append(f"{tab_id}: {e}")
         except Exception as e:
             errors.append(f"{tab_id}: {e}")
     if loaded and not errors:
-        return True, "Real-time Salesforce: " + "; ".join(loaded)
+        return True, f"{provider.capitalize()} Salesforce: " + "; ".join(loaded)
     if errors:
         return False, "Salesforce: " + "; ".join(errors)
     return False, "No Salesforce data returned. Check SOQL or Report IDs in sf_tab_queries."
@@ -2024,6 +2051,12 @@ def main():
                         else:
                             st.error(msg)
                 with col2:
+                    try:
+                        import sfdc_providers as _sfdc
+                        _p = _sfdc.get_sfdc_provider()
+                        st.caption(f"**Data provider:** {_p} (set SFDC_PROVIDER=mock|sandbox|prod in secrets/env)")
+                    except Exception:
+                        st.caption("**Data provider:** prod (default)")
                     st.markdown("**Salesforce API (real-time)** — Consumer Key/Secret + Username/Password, or Access Token; plus sf_tab_queries.")
                     if st.button("Refresh from Salesforce", key="btn_salesforce"):
                         with st.spinner("Loading from Salesforce…"):

@@ -1,0 +1,14 @@
+---
+description: Always commit and push changes after making edits
+alwaysApply: true
+---
+
+# Auto Commit & Push
+
+After making code or config changes, **always commit and push** without waiting for the user to ask.
+
+1. Stage changes: `git add -A` (exclude files in .gitignore)
+2. Commit with a clear message summarizing what changed
+3. Push to the remote: `git push`
+
+Do not ask for confirmation—execute these steps automatically when edits are complete.
