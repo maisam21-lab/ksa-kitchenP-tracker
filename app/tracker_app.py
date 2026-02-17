@@ -198,6 +198,7 @@ def _is_main_tracker_tab(tab_id: str) -> bool:
 TAB_DESCRIPTIONS = {
     "Auto Refresh Execution Log": "Log of auto-refresh runs and sheet operations. View or add rows.",
     "Kitchens": "All kitchen details. View, filter, and download.",
+    "Master Kitchens list": "Master list of all kitchens. View, filter, and download.",
     "Sellable No Status": "Sellable no-status data. View and filter.",
     "All no status kitchens": "All no-status kitchens. View and filter.",
     "LF Comp": "LF Comp data. View and filter.",
@@ -223,6 +224,7 @@ TAB_DESCRIPTIONS = {
 SHEET_TAB_IDS = [
     "Auto Refresh Execution Log",
     "Kitchens",
+    "Master Kitchens list",
     "Sellable No Status",
     "All no status kitchens",
     "LF Comp",
@@ -1120,10 +1122,12 @@ def _salesforce_report_data(report_id: str, config: dict) -> list[dict]:
 def _get_salesforce_tab_queries() -> dict[str, str]:
     """Tab name → SOQL or Report ID (00O...). From secrets [sf_tab_queries] or env SF_TAB_QUERIES (JSON)."""
     try:
-        # Streamlit secrets: [sf_tab_queries] with keys like "SF Kitchen Data" = "SELECT ..."
+        # Streamlit secrets: [sf_tab_queries] with keys like "Kitchens" = "00O..."
         sq = getattr(st, "secrets", None) and st.secrets.get("sf_tab_queries")
         if isinstance(sq, dict):
-            return {k: str(v).strip() for k, v in sq.items() if v}
+            out = {k: str(v).strip() for k, v in sq.items() if v}
+            if out:
+                return out
         raw = os.environ.get("SF_TAB_QUERIES", "")
         if raw and raw.strip():
             return json.loads(raw)
@@ -1132,17 +1136,27 @@ def _get_salesforce_tab_queries() -> dict[str, str]:
     return {}
 
 
+def _default_mock_tab_queries() -> dict[str, str]:
+    """Default tabs to load when SFDC_PROVIDER=mock and [sf_tab_queries] is empty."""
+    return {
+        "Kitchens": "00OVO00000PMnq92AD",
+        "Master Kitchens list": "00OVO00000PMnq92AD",
+    }
+
+
 def _refresh_from_salesforce():
     """Pull data from Salesforce (or mock) and load into Data tabs. Provider: SFDC_PROVIDER=mock|sandbox|prod."""
     import sfdc_providers as sfdc  # noqa: PLC0415
 
+    provider = sfdc.get_sfdc_provider()
     tab_queries = _get_salesforce_tab_queries()
+    if not tab_queries and provider == "mock":
+        tab_queries = _default_mock_tab_queries()
     if not tab_queries:
         return False, (
             "No SOQL or Report IDs configured. In Streamlit secrets add [sf_tab_queries] with e.g. "
-            '"Kitchens" = "00OVO00000PMnq92AD". See docs/SETUP_SF_SECRETS.md.'
+            '"Kitchens" = "00OVO00000PMnq92AD", "Master Kitchens list" = "00OVO00000PMnq92AD". See docs/SETUP_SF_SECRETS.md.'
         )
-    provider = sfdc.get_sfdc_provider()
     KITCHENS_TAB = "Kitchens"
     loaded = []
     errors = []
@@ -1422,18 +1436,24 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False):
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if not rows and tab_id == "Kitchens":
         rows = list_generic_tab("SF Kitchen Data")
+    # Master Kitchens list: fallback to Kitchens if empty
+    if not rows and tab_id == "Master Kitchens list":
+        rows = list_generic_tab("Kitchens") or list_generic_tab("SF Kitchen Data")
     if not rows:
         st.info("No data yet. Use **Refresh from online sheet** or **Refresh from Salesforce** above to load data.")
         return
+    is_kitchens_tab = tab_id in ("Kitchens", "Master Kitchens list")
     if tab_id == "Kitchens":
         st.caption("**Main view:** All kitchens under accounts in all countries. Filter by **Account Country** or search in any column to navigate.")
+    if tab_id == "Master Kitchens list":
+        st.caption("**Master list:** All kitchens. Filter by **Account Country** or search in any column.")
     if tab_id == "SF Churn Data":
         st.caption("To match the live Kitchen Tracker columns, set **sf_tab_queries** → \"SF Churn Data\" to the **same Report ID** as the live churn report. See **docs/SETUP_SF_SECRETS.md**.")
-    # For Kitchens, ensure Account Country is present, apply display labels, and column order
-    if tab_id == "Kitchens":
+    # For Kitchens / Master Kitchens list: ensure Account Country, labels, column order
+    if is_kitchens_tab:
         rows = _ensure_account_country_in_kitchens(rows)
     cols = list(rows[0].keys()) if rows else []
-    if tab_id == "Kitchens":
+    if is_kitchens_tab:
         rows, cols = _apply_kitchen_labels(rows, cols)
         cols = _kitchens_column_order(cols)
     # Cleaner filtering: one search box + optional single-column filter in expander

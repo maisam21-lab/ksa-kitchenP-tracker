@@ -1,0 +1,47 @@
+[
+  {
+    "Account Name": "Test Account KSA",
+    "Type": "Standard",
+    "Category": "Full",
+    "Kitchen Number": "KN-001",
+    "Kitchen Number Name": "Kitchen 1",
+    "Status": "Active",
+    "Kitchen Size (Sq. Meters)": "25",
+    "Hood Size": "3",
+    "Floor Price": "10000",
+    "List Price": "12000",
+    "Activation Fee": "500",
+    "Floor": "1",
+    "Account Country": "Saudi Arabia"
+  },
+  {
+    "Account Name": "Test Account UAE",
+    "Type": "Standard",
+    "Category": "Full",
+    "Kitchen Number": "KN-002",
+    "Kitchen Number Name": "Kitchen 2",
+    "Status": "Active",
+    "Kitchen Size (Sq. Meters)": "30",
+    "Hood Size": "4",
+    "Floor Price": "15000",
+    "List Price": "18000",
+    "Activation Fee": "600",
+    "Floor": "2",
+    "Account Country": "UAE"
+  },
+  {
+    "Account Name": "Test Account Kuwait",
+    "Type": "Compact",
+    "Category": "Partial",
+    "Kitchen Number": "KN-003",
+    "Kitchen Number Name": "Kitchen 3",
+    "Status": "Churning",
+    "Kitchen Size (Sq. Meters)": "20",
+    "Hood Size": "2",
+    "Floor Price": "8000",
+    "List Price": "9500",
+    "Activation Fee": "400",
+    "Floor": "1",
+    "Account Country": "Kuwait"
+  }
+]

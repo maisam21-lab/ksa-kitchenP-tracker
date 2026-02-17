@@ -7,6 +7,7 @@ To load **all** tabs from the online tracker (Inflation FPx, LF Comp, Pivot Tabl
 | Tab | Add to sf_tab_queries |
 |-----|------------------------|
 | Kitchens | ✅ (main view; use "Kitchens" or "SF Kitchen Data" in sf_tab_queries) |
+| Master Kitchens list | ✅ (same report ID as Kitchens or a dedicated report) |
 | SF Churn Data | ✅ |
 | Sellable No Status | ✅ |
 | All no status kitchens | ✅ |
@@ -26,11 +27,12 @@ To load **all** tabs from the online tracker (Inflation FPx, LF Comp, Pivot Tabl
 
 ## Example: Full sf_tab_queries
 
-Use **Report IDs** when you have a report with all the right columns (no SOQL field-name mismatches across orgs). Example — SF Kitchen Data from your report:
+Use **Report IDs** when you have a report with all the right columns (no SOQL field-name mismatches across orgs). Example — Kitchens and Master Kitchens list from your report:
 
 ```toml
 [sf_tab_queries]
 "Kitchens" = "00OVO00000PMnq92AD"
+"Master Kitchens list" = "00OVO00000PMnq92AD"
 "SF Churn Data" = "00O6T000006Y5DiUAK"
 "Sellable No Status" = "00O6T000006DXT0UAO"
 "All no status kitchens" = "00O6T000006DPigUAG"
