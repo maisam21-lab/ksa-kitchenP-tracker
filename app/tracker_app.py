@@ -9,11 +9,40 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
 import streamlit as st
+
+try:
+    from app import auth
+except ImportError:
+    try:
+        import auth
+    except ImportError:
+        auth = None
+try:
+    from app import snapshot as snapshot_mod
+except ImportError:
+    try:
+        import snapshot as snapshot_mod
+    except ImportError:
+        snapshot_mod = None
+try:
+    from app import fx as fx_mod
+except ImportError:
+    try:
+        import fx as fx_mod
+    except ImportError:
+        fx_mod = None
+try:
+    from app import multipliers as multipliers_mod
+except ImportError:
+    try:
+        import multipliers as multipliers_mod
+    except ImportError:
+        multipliers_mod = None
 
 try:
     import pandas as pd
@@ -340,10 +369,68 @@ CREATE TABLE IF NOT EXISTS saved_views (
 """
 
 # Optional access control: only these users can use the app (when allowlist is enabled)
+# role: associate_viewer | manager_viewer | super_user (added by migration)
 TABLE_ALLOWED_USERS = """
 CREATE TABLE IF NOT EXISTS allowed_users (
     identifier TEXT NOT NULL PRIMARY KEY,
     added_at TEXT NOT NULL
+)
+"""
+
+# Daily kitchen snapshots for "what changed today" (Prompt 5)
+TABLE_KITCHEN_DAILY_SNAPSHOT = """
+CREATE TABLE IF NOT EXISTS kitchen_daily_snapshot (
+    snapshot_date TEXT NOT NULL,
+    kitchen_key TEXT NOT NULL,
+    facility TEXT,
+    kitchen_name TEXT,
+    status TEXT,
+    churn_date TEXT,
+    floor_price TEXT,
+    data_json TEXT,
+    PRIMARY KEY (snapshot_date, kitchen_key)
+)
+"""
+
+# Last refresh timestamps per source (Prompt 3)
+TABLE_REFRESH_METADATA = """
+CREATE TABLE IF NOT EXISTS refresh_metadata (
+    source TEXT NOT NULL PRIMARY KEY,
+    refreshed_at TEXT NOT NULL
+)
+"""
+
+# FX rates for Currency Converter (Prompt 7)
+TABLE_FX_RATES = """
+CREATE TABLE IF NOT EXISTS fx_rates (
+    from_currency TEXT NOT NULL,
+    to_currency TEXT NOT NULL,
+    rate REAL NOT NULL,
+    updated_at TEXT,
+    PRIMARY KEY (from_currency, to_currency)
+)
+"""
+
+# Facility multipliers for Price Multipliers tool (Prompt 9)
+TABLE_FACILITY_MULTIPLIERS = """
+CREATE TABLE IF NOT EXISTS facility_multipliers (
+    facility_id TEXT NOT NULL PRIMARY KEY,
+    facility_name TEXT,
+    current_multiplier REAL,
+    suggested_multiplier REAL,
+    updated_by TEXT,
+    updated_at TEXT
+)
+"""
+
+# Facility inflation model (optional future use, Prompt 8)
+TABLE_FACILITY_INFLATION = """
+CREATE TABLE IF NOT EXISTS facility_inflation_model (
+    facility_id TEXT NOT NULL PRIMARY KEY,
+    go_live_date TEXT,
+    inflation_index REAL,
+    recommended_multiplier REAL,
+    updated_at TEXT
 )
 """
 
@@ -385,6 +472,19 @@ def _ensure_discussions_parent_id():
             c.execute("ALTER TABLE app_discussions ADD COLUMN parent_id INTEGER NULL")
 
 
+def _ensure_allowed_users_role():
+    """Add role column to allowed_users if missing (RBAC migration)."""
+    with get_conn() as c:
+        try:
+            c.execute("SELECT role FROM allowed_users LIMIT 1")
+        except sqlite3.OperationalError:
+            c.execute("ALTER TABLE allowed_users ADD COLUMN role TEXT DEFAULT 'associate_viewer'")
+        try:
+            c.execute("UPDATE allowed_users SET role = 'associate_viewer' WHERE role IS NULL OR role = ''")
+        except sqlite3.OperationalError:
+            pass
+
+
 def init_db():
     with get_conn() as c:
         c.execute(TABLE)
@@ -398,8 +498,14 @@ def init_db():
         c.execute(TABLE_SAVED_VIEWS)
         c.execute(TABLE_ALLOWED_USERS)
         c.execute(TABLE_APP_DISCUSSIONS)
+        c.execute(TABLE_KITCHEN_DAILY_SNAPSHOT)
+        c.execute(TABLE_REFRESH_METADATA)
+        c.execute(TABLE_FX_RATES)
+        c.execute(TABLE_FACILITY_MULTIPLIERS)
+        c.execute(TABLE_FACILITY_INFLATION)
     _ensure_updated_at()
     _ensure_discussions_parent_id()
+    _ensure_allowed_users_role()
 
 
 def _get_allowlist_ids_from_config() -> list[str]:
@@ -441,22 +547,41 @@ def _allowlist_enabled() -> bool:
 
 
 def list_allowed_users():
-    """Return list of allowed identifiers (email or name)."""
+    """Return list of allowed identifiers with role: [{identifier, added_at, role}, ...]."""
     with get_conn() as c:
-        r = c.execute("SELECT identifier, added_at FROM allowed_users ORDER BY identifier")
-        return [dict(row) for row in r]
+        try:
+            r = c.execute("SELECT identifier, added_at, role FROM allowed_users ORDER BY identifier")
+        except sqlite3.OperationalError:
+            r = c.execute("SELECT identifier, added_at FROM allowed_users ORDER BY identifier")
+        rows = [dict(row) for row in r]
+    for row in rows:
+        if row.get("role") is None or (isinstance(row.get("role"), str) and not row.get("role").strip()):
+            row["role"] = "associate_viewer"
+    return rows
 
 
-def add_allowed_user(identifier: str) -> bool:
-    """Add an email or name to the allowlist. Returns True if added."""
+def add_allowed_user(identifier: str, role: str = "associate_viewer") -> bool:
+    """Add an email or name to the allowlist with optional role. Returns True if added."""
     id_ = (identifier or "").strip()
     if not id_:
         return False
+    role = (role or "associate_viewer").strip() or "associate_viewer"
+    if role not in ("associate_viewer", "manager_viewer", "super_user"):
+        role = "associate_viewer"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_conn() as c:
         try:
-            c.execute("INSERT INTO allowed_users (identifier, added_at) VALUES (?, ?)", (id_, now))
+            c.execute(
+                "INSERT INTO allowed_users (identifier, added_at, role) VALUES (?, ?, ?)",
+                (id_, now, role),
+            )
             return True
+        except sqlite3.OperationalError:
+            try:
+                c.execute("INSERT INTO allowed_users (identifier, added_at) VALUES (?, ?)", (id_, now))
+                return True
+            except sqlite3.IntegrityError:
+                return False
         except sqlite3.IntegrityError:
             return False  # already exists
 
@@ -503,6 +628,49 @@ def is_user_allowed(identifier: str) -> bool:
                 allowed.add(s)
 
     return id_ in allowed
+
+
+def _get_secrets_roles() -> dict:
+    """Return {identifier_lower: role} from secrets (e.g. [allowed_user_roles] or ALLOWED_USER_ROLES JSON)."""
+    out = {}
+    try:
+        raw = st.secrets.get("allowed_user_roles") or st.secrets.get("ALLOWED_USER_ROLES")
+    except Exception:
+        raw = os.environ.get("ALLOWED_USER_ROLES", "")
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            key = (str(k).strip() or "").lower()
+            if key and v:
+                out[key] = str(v).strip()
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    key = (str(k).strip() or "").lower()
+                    if key and v:
+                        out[key] = str(v).strip()
+        except json.JSONDecodeError:
+            pass
+    return out
+
+
+def set_last_refresh(source: str) -> None:
+    """Record last refresh timestamp for the given source (salesforce | gsheet)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO refresh_metadata (source, refreshed_at) VALUES (?, ?)",
+            (source, now),
+        )
+
+
+def get_last_refresh(source: str) -> str | None:
+    """Return last refresh timestamp for the given source, or None."""
+    with get_conn() as c:
+        r = c.execute("SELECT refreshed_at FROM refresh_metadata WHERE source = ?", (source,))
+        row = r.fetchone()
+        return row[0] if row else None
 
 
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
@@ -1241,6 +1409,9 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
     # Use service account from secrets when credentials_path is the sentinel
     if credentials_path == "__FROM_SECRETS__":
         info = dict(st.secrets["gsheet_service_account"])
+        # Google sometimes requires these; add if missing so "working before" configs keep working
+        info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+        info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
         creds = Credentials.from_service_account_info(info, scopes=scopes)
     else:
         creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
@@ -1277,11 +1448,19 @@ def _refresh_from_online_sheet():
     """Pull all tabs from the online sheet and load into app DB. Returns (success, message)."""
     creds_path = _get_google_credentials_path()
     if not creds_path:
-        return False, "No Google credentials. Add a service account JSON at scripts/credentials.json or set GOOGLE_APPLICATION_CREDENTIALS. Share the sheet with the service account email (Viewer)."
+        return False, (
+            "No Google credentials. "
+            "Streamlit Cloud: in Secrets add [gsheet_service_account] with your service account JSON. "
+            "Local: put the JSON at scripts/credentials.json or set GOOGLE_APPLICATION_CREDENTIALS. "
+            "Share the sheet with the service account email (Viewer). See docs/REFRESH_FROM_ONLINE_SHEET.md."
+        )
     try:
         data = _fetch_online_sheet(SHEET_ID, creds_path)
     except Exception as e:
-        return False, str(e)
+        err = str(e)
+        if "403" in err or "permission" in err.lower() or "Permission" in err:
+            err = err + " — Share the Google Sheet with the service account email (Viewer). See docs/REFRESH_FROM_ONLINE_SHEET.md."
+        return False, err
     loaded = []
     for ws_title, rows in data.items():
         if not rows:
@@ -1523,8 +1702,16 @@ def main():
     if not st.session_state.get("auto_refresh_done"):
         st.session_state["auto_refresh_done"] = True
         ok, _ = _refresh_from_salesforce()
-        if not ok:
+        if ok:
+            st.session_state["data_source"] = "salesforce"
+            st.session_state.pop("used_gsheet_fallback", None)
+            set_last_refresh("salesforce")
+        else:
             ok, _ = _refresh_from_online_sheet()
+            if ok:
+                st.session_state["data_source"] = "gsheet"
+                st.session_state["used_gsheet_fallback"] = True
+                set_last_refresh("gsheet")
         if ok:
             _rerun()
 
@@ -1680,13 +1867,6 @@ def main():
                         st.error("Invalid key")
 
     st.sidebar.divider()
-    section = st.sidebar.radio(
-        "Section",
-        ["Master Kitchens", "Dashboard", "Discussions", "Data", "Search"],
-        index=0,
-        label_visibility="collapsed",
-    )
-
     # Access control: if allowlist is enabled, only allowed users (or developers) can see content
     current_user = (st.session_state.get("user_display_name") or "").strip()
     if _allowlist_enabled() and not _is_developer():
@@ -1699,26 +1879,87 @@ def main():
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
             st.stop()
 
-    # Master Kitchens: filter and report on kitchen-detail tabs only
+    # RBAC: resolve role and build sidebar sections (Prompt 1 & 2)
+    if not _allowlist_enabled() or _is_developer():
+        user_role = "super_user"
+    elif auth:
+        user_role = auth.get_user_role(
+            current_user,
+            is_developer=_is_developer(),
+            list_allowed_with_roles=list_allowed_users,
+            allowlist_ids_from_secrets=_allowlist_ids_from_secrets,
+            secrets_roles=_get_secrets_roles(),
+        )
+        if user_role is None:
+            user_role = "associate_viewer"
+    else:
+        user_role = "super_user"
+    st.session_state["user_role"] = user_role
+
+    if user_role == "associate_viewer":
+        section_options = ["Master Kitchens"]
+    elif user_role == "manager_viewer":
+        section_options = ["Master Kitchens", "Live Dashboard"]
+    else:
+        section_options = [
+            "Master Kitchens", "Live Dashboard", "Discussions", "Data", "Search",
+            "Currency Converter", "Inflation Calculator", "Price Multipliers", "Admin / Data Health",
+        ]
+    section = st.sidebar.radio(
+        "Section",
+        section_options,
+        index=0,
+        label_visibility="collapsed",
+    )
+
+    # Master Kitchens: filter and report on kitchen-detail tabs only (Prompt 4: status pills, facility, last refresh)
     if section == "Master Kitchens":
         st.title("Master Kitchens")
+        # Last refresh (Prompt 3 & 4)
+        data_source = st.session_state.get("data_source") or "salesforce"
+        last_refresh = get_last_refresh(data_source)
+        st.caption(f"Last refresh: **{last_refresh or 'Never'}**" + (f" ({data_source})" if user_role in ("manager_viewer", "super_user") else ""))
+        if st.session_state.get("used_gsheet_fallback") and data_source == "gsheet":
+            st.warning("Salesforce unavailable; showing data from Google Sheet backup.")
         st.caption("Filter kitchen details and download your report. Data source is **Kitchens** or **Master Kitchens list**.")
+        # Data source selector only for manager and super_user (Prompt 3)
         sources = _master_kitchens_sources()
         source_options = [s[0] for s in sources]
         source_ids = {s[0]: s[1] for s in sources}
-        chosen_label = st.selectbox(
-            "Data source",
-            options=source_options,
-            key="master_source",
-            help="Kitchens or Master Kitchens list — kitchen details only.",
-        )
-        source_id = source_ids.get(chosen_label, "Kitchens")
+        if user_role in ("manager_viewer", "super_user"):
+            chosen_label = st.selectbox(
+                "Data source",
+                options=source_options,
+                key="master_source",
+                help="Kitchens or Master Kitchens list — kitchen details only.",
+            )
+            source_id = source_ids.get(chosen_label, "Kitchens")
+        else:
+            chosen_label = "Kitchens"
+            source_id = "Kitchens"
         rows = _dashboard_load_source(source_id)
         if not rows:
             st.info(f"No data in **{chosen_label}** yet. Use **Data** in the sidebar to refresh from Salesforce or the online sheet.")
         else:
             total = len(rows)
             is_tracker = source_id == "main_tracker"
+            # Status pills and facility filter for Kitchens / Master Kitchens list (Prompt 4)
+            def _row_status(r):
+                for k in ("Status", "Status__c", "status"):
+                    v = r.get(k)
+                    if v is not None and str(v).strip():
+                        return str(v).strip()
+                return ""
+            def _row_facility(r):
+                for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+                    v = r.get(k)
+                    if v is not None and str(v).strip():
+                        return str(v).strip()
+                return ""
+            if not is_tracker:
+                status_filter = st.radio("Status", ["All", "Vacant", "Churning", "Occupied", "Sold"], key="master_status_pill", horizontal=True)
+                facilities = sorted({_row_facility(r) for r in rows if _row_facility(r)})
+                facility_filter = st.selectbox("Facility", ["All"] + facilities, key="master_facility_filter")
             st.markdown("---")
             st.subheader("Refine your data")
             if st.session_state.pop("master_clear_filters", False):
@@ -1774,6 +2015,11 @@ def main():
                     with d2:
                         st.date_input("To report date", value=None, key="master_to_date")
             rows_filtered = rows
+            if not is_tracker:
+                if status_filter and status_filter != "All":
+                    rows_filtered = [r for r in rows_filtered if _row_status(r) == status_filter]
+                if facility_filter and facility_filter != "All":
+                    rows_filtered = [r for r in rows_filtered if _row_facility(r) == facility_filter]
             if is_tracker:
                 filters = {
                     "report_date": st.session_state.get("master_f_date_multi") or None,
@@ -1888,6 +2134,81 @@ def main():
                                 pass
                         except Exception:
                             pass
+
+    # Live Dashboard (Prompt 6): KPIs, trend, what changed today — manager_viewer and super_user only
+    elif section == "Live Dashboard":
+        st.title("Live Dashboard")
+        st.caption("Vacancy and churn metrics. Data from Kitchens.")
+        rows_kitchens = list_generic_tab("Kitchens") or list_generic_tab("Master Kitchens list") or []
+        if snapshot_mod:
+            today_str = date.today().isoformat()
+            if not snapshot_mod.snapshot_exists_for_date(today_str) and rows_kitchens:
+                snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
+        def _s(r):
+            for k in ("Status", "Status__c", "status"):
+                v = r.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            return ""
+        vacant = sum(1 for r in rows_kitchens if _s(r) == "Vacant")
+        churning = sum(1 for r in rows_kitchens if _s(r) == "Churning")
+        occupied = sum(1 for r in rows_kitchens if _s(r) == "Occupied")
+        sold = sum(1 for r in rows_kitchens if _s(r) == "Sold")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Vacant today", vacant)
+        with col2:
+            st.metric("Churning today", churning)
+        with col3:
+            st.metric("Occupied today", occupied)
+        with col4:
+            st.metric("Sold today", sold)
+        if snapshot_mod:
+            snapshots = snapshot_mod.load_snapshots(30)
+            yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+            yesterday_rows = [s for s in snapshots if s.get("snapshot_date") == yesterday_str]
+            today_snap = [s for s in snapshots if s.get("snapshot_date") == today_str]
+            changes = snapshot_mod.compute_daily_changes(today_snap if today_snap else rows_kitchens, yesterday_rows) if yesterday_rows else []
+            if yesterday_rows:
+                vac_y = sum(1 for s in yesterday_rows if (s.get("status") or "").strip() == "Vacant")
+                churn_y = sum(1 for s in yesterday_rows if (s.get("status") or "").strip() == "Churning")
+                st.caption(f"Change vs yesterday: Vacant **{vacant - vac_y:+d}**, Churning **{churning - churn_y:+d}**")
+            st.subheader("What changed today")
+            if not changes:
+                st.info("No status changes vs yesterday (or no yesterday snapshot).")
+            else:
+                if HAS_EXCEL:
+                    st.dataframe(pd.DataFrame(changes), use_container_width=True, hide_index=True)
+                else:
+                    for c in changes[:50]:
+                        st.write(c)
+                    if len(changes) > 50:
+                        st.caption(f"… and {len(changes) - 50} more.")
+            st.subheader("Trend (last 30 days)")
+            by_date = {}
+            for s in snapshots:
+                d = s.get("snapshot_date")
+                if not d:
+                    continue
+                by_date.setdefault(d, {"vacant": 0, "churning": 0})
+                if (s.get("status") or "").strip() == "Vacant":
+                    by_date[d]["vacant"] += 1
+                elif (s.get("status") or "").strip() == "Churning":
+                    by_date[d]["churning"] += 1
+            if by_date:
+                try:
+                    import plotly.graph_objects as go
+                    dates_sorted = sorted(by_date.keys())
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=[by_date[d]["vacant"] for d in dates_sorted], name="Vacant", mode="lines+markers"))
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=[by_date[d]["churning"] for d in dates_sorted], name="Churning", mode="lines+markers"))
+                    fig.update_layout(title="Vacant & Churning by day", xaxis_title="Date", yaxis_title="Count", height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception:
+                    st.caption("Chart requires plotly.")
+        else:
+            st.info("Snapshot module not loaded. Install app/snapshot.py for daily change tracking.")
+        return
 
     elif section == "Dashboard":
         st.title("Dashboard")
@@ -2024,6 +2345,8 @@ def main():
                         with st.spinner("Loading from Google Sheet…"):
                             ok, msg = _refresh_from_online_sheet()
                         if ok:
+                            st.session_state["data_source"] = "gsheet"
+                            set_last_refresh("gsheet")
                             st.success(msg)
                             _rerun()
                         else:
@@ -2040,6 +2363,9 @@ def main():
                         with st.spinner("Loading from Salesforce…"):
                             ok, msg = _refresh_from_salesforce()
                         if ok:
+                            st.session_state["data_source"] = "salesforce"
+                            st.session_state.pop("used_gsheet_fallback", None)
+                            set_last_refresh("salesforce")
                             st.success(msg)
                             _rerun()
                         else:
@@ -2074,80 +2400,197 @@ def main():
                     """)
         else:
             st.info("Refresh is available only to developers. Unlock **Developer access** in the sidebar.")
-        # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
-        all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
-        sheet_tabs = st.tabs(all_tab_ids)
-        # Tab tooltips: descriptions shown on hover
-        tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
-        st.markdown(
-            f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
-            'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
-            'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
-            unsafe_allow_html=True,
-        )
+        # When data is from GSheet only: show Master Kitchens (kitchens + account details) — no other tabs
+        data_source = st.session_state.get("data_source")
+        if data_source == "gsheet":
+            st.caption("Data from **online sheet**. Showing kitchens and account-related details only.")
+            _render_generic_tab("Kitchens", key_suffix="data_kitchens", is_developer=is_developer)
+        else:
+            # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
+            all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
+            sheet_tabs = st.tabs(all_tab_ids)
+            # Tab tooltips: descriptions shown on hover
+            tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
+            st.markdown(
+                f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
+                'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
+                'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
+                unsafe_allow_html=True,
+            )
 
-        for tab_index, tab_id in enumerate(all_tab_ids):
-            with sheet_tabs[tab_index]:
-                if tab_id == "Auto Refresh Execution Log":
-                    sub_list, sub_add = st.tabs(["List", "Add row"])
-                    with sub_list:
-                        rows_log = list_exec_log()
-                        if not rows_log:
-                            st.info("No rows yet." + (" Use **Add row** to add one." if is_developer else ""))
-                        else:
-                            st.markdown(
-                                '<div style="background: linear-gradient(90deg, #F0FDFA 0%, #F8FAFC 100%); border-left: 4px solid #0F766E; '
-                                'padding: 10px 14px; margin-bottom: 12px; border-radius: 0 8px 8px 0; font-weight: 600; color: #134E4A;">'
-                                "Filter by column</div>",
-                                unsafe_allow_html=True,
-                            )
-                            exec_cols = ["Refresh Time", "Sheet", "Operation", "Status", "User"]
-                            exec_keys = ["refresh_time", "sheet", "operation", "status", "user"]
-                            uniq = lambda k: sorted(set(r.get(k) for r in rows_log if r.get(k)))
-                            fcols = st.columns(5)
-                            filters_exec = {}
-                            for i, (label, key) in enumerate(zip(exec_cols, exec_keys)):
-                                with fcols[i]:
-                                    st.markdown(f'<span style="font-size: 0.85rem; font-weight: 600; color: #475569;">{label}</span>', unsafe_allow_html=True)
-                                    if key in ("sheet", "status", "user"):
-                                        opts = uniq(key)
-                                        filters_exec[key] = st.multiselect(label, opts, key=f"exec_f_{key}", placeholder="All", label_visibility="collapsed")
-                                    else:
-                                        filters_exec[key] = st.text_input(label, key=f"exec_f_{key}", placeholder="Search…", label_visibility="collapsed")
-                            rows_shown = rows_log
-                            for key in exec_keys:
-                                val = filters_exec.get(key)
-                                if key in ("sheet", "status", "user") and val:
-                                    rows_shown = [r for r in rows_shown if r.get(key) in val]
-                                elif key in ("refresh_time", "operation") and val and str(val).strip():
-                                    term = str(val).strip().lower()
-                                    rows_shown = [r for r in rows_shown if term in str(r.get(key) or "").lower()]
-                            st.caption(f"Showing **{len(rows_shown)}** of **{len(rows_log)}** row(s).")
-                            st.divider()
-                            st.dataframe(
-                                [{"Refresh Time": r["refresh_time"], "Sheet": r["sheet"], "Operation": r["operation"], "Status": r["status"], "User": r["user"]} for r in rows_shown],
-                                use_container_width=True,
-                                hide_index=True,
-                            )
-                    with sub_add:
-                        if not is_developer:
-                            st.info("Only developers can add rows here. Unlock **Developer access** in the sidebar.")
-                        else:
-                            with st.form("exec_log_form"):
-                                refresh_time = st.text_input("Refresh Time *", value=datetime.now().strftime("%m/%d/%Y %H:%M"))
-                                sheet = st.text_input("Sheet *", placeholder="e.g. Price Multipliers, SF Kitchen Data")
-                                operation = st.text_input("Operation *", placeholder="e.g. Report Id: 000V0000003z 2092AI")
-                                status = st.text_input("Status *", value="Success")
-                                user = st.text_input("User *", placeholder="email@cloudkitchens.com")
-                                if st.form_submit_button("Add"):
-                                    if refresh_time and sheet and operation and status and user:
-                                        insert_exec_log({"refresh_time": refresh_time, "sheet": sheet, "operation": operation, "status": status, "user": user})
-                                        st.success("Added.")
-                                        _rerun()
-                                    else:
-                                        st.error("Fill all required fields.")
-                else:
-                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
+            for tab_index, tab_id in enumerate(all_tab_ids):
+                with sheet_tabs[tab_index]:
+                    if tab_id == "Auto Refresh Execution Log":
+                        sub_list, sub_add = st.tabs(["List", "Add row"])
+                        with sub_list:
+                            rows_log = list_exec_log()
+                            if not rows_log:
+                                st.info("No rows yet." + (" Use **Add row** to add one." if is_developer else ""))
+                            else:
+                                st.markdown(
+                                    '<div style="background: linear-gradient(90deg, #F0FDFA 0%, #F8FAFC 100%); border-left: 4px solid #0F766E; '
+                                    'padding: 10px 14px; margin-bottom: 12px; border-radius: 0 8px 8px 0; font-weight: 600; color: #134E4A;">'
+                                    "Filter by column</div>",
+                                    unsafe_allow_html=True,
+                                )
+                                exec_cols = ["Refresh Time", "Sheet", "Operation", "Status", "User"]
+                                exec_keys = ["refresh_time", "sheet", "operation", "status", "user"]
+                                uniq = lambda k: sorted(set(r.get(k) for r in rows_log if r.get(k)))
+                                fcols = st.columns(5)
+                                filters_exec = {}
+                                for i, (label, key) in enumerate(zip(exec_cols, exec_keys)):
+                                    with fcols[i]:
+                                        st.markdown(f'<span style="font-size: 0.85rem; font-weight: 600; color: #475569;">{label}</span>', unsafe_allow_html=True)
+                                        if key in ("sheet", "status", "user"):
+                                            opts = uniq(key)
+                                            filters_exec[key] = st.multiselect(label, opts, key=f"exec_f_{key}", placeholder="All", label_visibility="collapsed")
+                                        else:
+                                            filters_exec[key] = st.text_input(label, key=f"exec_f_{key}", placeholder="Search…", label_visibility="collapsed")
+                                rows_shown = rows_log
+                                for key in exec_keys:
+                                    val = filters_exec.get(key)
+                                    if key in ("sheet", "status", "user") and val:
+                                        rows_shown = [r for r in rows_shown if r.get(key) in val]
+                                    elif key in ("refresh_time", "operation") and val and str(val).strip():
+                                        term = str(val).strip().lower()
+                                        rows_shown = [r for r in rows_shown if term in str(r.get(key) or "").lower()]
+                                st.caption(f"Showing **{len(rows_shown)}** of **{len(rows_log)}** row(s).")
+                                st.divider()
+                                st.dataframe(
+                                    [{"Refresh Time": r["refresh_time"], "Sheet": r["sheet"], "Operation": r["operation"], "Status": r["status"], "User": r["user"]} for r in rows_shown],
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+                        with sub_add:
+                            if not is_developer:
+                                st.info("Only developers can add rows here. Unlock **Developer access** in the sidebar.")
+                            else:
+                                with st.form("exec_log_form"):
+                                    refresh_time = st.text_input("Refresh Time *", value=datetime.now().strftime("%m/%d/%Y %H:%M"))
+                                    sheet = st.text_input("Sheet *", placeholder="e.g. Price Multipliers, SF Kitchen Data")
+                                    operation = st.text_input("Operation *", placeholder="e.g. Report Id: 000V0000003z 2092AI")
+                                    status = st.text_input("Status *", value="Success")
+                                    user = st.text_input("User *", placeholder="email@cloudkitchens.com")
+                                    if st.form_submit_button("Add"):
+                                        if refresh_time and sheet and operation and status and user:
+                                            insert_exec_log({"refresh_time": refresh_time, "sheet": sheet, "operation": operation, "status": status, "user": user})
+                                            st.success("Added.")
+                                            _rerun()
+                                        else:
+                                            st.error("Fill all required fields.")
+                    else:
+                        _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
+
+    # —— Super-user tools (Prompt 7, 8, 9) ——
+    if section == "Currency Converter":
+        st.title("Currency Converter")
+        st.caption("Convert amounts between SAR and USD. Rates stored in app.")
+        if fx_mod:
+            fx_mod.ensure_default_rates()
+            amount = st.number_input("Amount", value=1.0, min_value=0.0, step=0.01, key="fx_amount")
+            from_c = st.selectbox("From", ["SAR", "USD"], key="fx_from")
+            to_c = st.selectbox("To", ["SAR", "USD"], key="fx_to")
+            result = fx_mod.convert(amount, from_c, to_c)
+            if result is not None:
+                st.metric("Result", f"{result:,.2f} {to_c}")
+            else:
+                st.caption("Rate not found. Add rates in fx_rates table.")
+        else:
+            st.info("FX module not loaded (app/fx.py).")
+        return
+
+    if section == "Inflation Calculator":
+        st.title("Inflation Calculator")
+        st.caption("Recommendation only — does not write to pricing tables.")
+        go_live = st.date_input("Facility go-live date", value=None, key="infl_go_live")
+        base_price = st.number_input("Base price", value=1000.0, min_value=0.0, step=50.0, key="infl_base")
+        inflation_pct = st.number_input("Annual inflation %", value=3.0, min_value=0.0, max_value=20.0, step=0.5, key="infl_pct") / 100.0
+        if go_live:
+            years = (date.today() - go_live).days / 365.25
+            factor = (1 + inflation_pct) ** years
+            recommended = round(base_price * factor, 2)
+            st.metric("Years since go-live", f"{years:.1f}")
+            st.metric("Inflation factor", f"{factor:.2f}")
+            st.metric("Recommended adjusted price", f"{recommended:,.2f}")
+        else:
+            st.caption("Select go-live date to see recommendation.")
+        return
+
+    if section == "Price Multipliers":
+        st.title("Price Multipliers")
+        st.caption("By facility. Suggested multiplier editable (0.5–3.0).")
+        if multipliers_mod:
+            rows_m = multipliers_mod.list_multipliers()
+            if not rows_m:
+                st.info("No facility multipliers yet. Add rows in the table below or seed from Kitchens facilities.")
+                facility_id = st.text_input("Facility ID", key="pm_fid")
+                facility_name = st.text_input("Facility name", key="pm_fname")
+                current_m = st.number_input("Current multiplier", value=1.0, min_value=0.5, max_value=3.0, step=0.1, key="pm_cur")
+                suggested_m = st.number_input("Suggested multiplier", value=1.0, min_value=0.5, max_value=3.0, step=0.1, key="pm_sug")
+                if st.button("Add row", key="pm_add"):
+                    if multipliers_mod.upsert_multiplier(facility_id, facility_name, current_m, suggested_m, current_user):
+                        st.success("Added.")
+                        _rerun()
+                    else:
+                        st.error("Invalid (e.g. multiplier out of range).")
+            else:
+                if HAS_EXCEL:
+                    st.dataframe(pd.DataFrame(rows_m), use_container_width=True, hide_index=True)
+                for r in rows_m:
+                    with st.expander(f"{r.get('facility_id')} — {r.get('facility_name') or ''}"):
+                        sug = st.number_input("Suggested multiplier", value=float(r.get("suggested_multiplier") or 1.0), min_value=0.5, max_value=3.0, step=0.1, key=f"pm_edit_{r.get('facility_id')}")
+                        if st.button("Save", key=f"pm_save_{r.get('facility_id')}"):
+                            if multipliers_mod.upsert_multiplier(r["facility_id"], r.get("facility_name"), r.get("current_multiplier"), sug, current_user):
+                                st.success("Saved.")
+                                _rerun()
+                buf = io.StringIO()
+                w = csv.DictWriter(buf, fieldnames=["facility_id", "facility_name", "current_multiplier", "suggested_multiplier", "updated_by", "updated_at"], extrasaction="ignore")
+                w.writeheader()
+                w.writerows(rows_m)
+                st.download_button("Export CSV", data=buf.getvalue(), file_name="facility_multipliers.csv", mime="text/csv", key="pm_export")
+        else:
+            st.info("Multipliers module not loaded (app/multipliers.py).")
+        return
+
+    if section == "Admin / Data Health":
+        st.title("Admin / Data Health")
+        st.caption("Data source health and allowed list (read-only).")
+        st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
+        st.subheader("Data source health")
+        last_sf = get_last_refresh("salesforce")
+        last_gs = get_last_refresh("gsheet")
+        st.markdown(f"- Salesforce last refresh: **{last_sf or 'Never'}**")
+        st.markdown(f"- Google Sheet last refresh: **{last_gs or 'Never'}**")
+        if snapshot_mod:
+            today_str = date.today().isoformat()
+            snap_ok = snapshot_mod.snapshot_exists_for_date(today_str)
+            st.markdown(f"- Today's snapshot: **{'Written' if snap_ok else 'Not yet written'}**")
+        if st.button("Refresh from Salesforce", key="admin_refresh_sf"):
+            ok, msg = _refresh_from_salesforce()
+            if ok:
+                set_last_refresh("salesforce")
+                st.session_state["data_source"] = "salesforce"
+                st.success(msg)
+                _rerun()
+            else:
+                st.error(msg)
+        if st.button("Refresh from Google Sheet", key="admin_refresh_gs"):
+            ok, msg = _refresh_from_online_sheet()
+            if ok:
+                set_last_refresh("gsheet")
+                st.session_state["data_source"] = "gsheet"
+                st.success(msg)
+                _rerun()
+            else:
+                st.error(msg)
+        st.subheader("Allowed list (read-only)")
+        allowed = list_allowed_users()
+        if not allowed:
+            st.caption("No entries (or allowlist from secrets only).")
+        else:
+            for u in allowed:
+                st.markdown(f"- **{u.get('identifier')}** — {u.get('role') or 'associate_viewer'}")
+        return
 
 if __name__ == "__main__":
     main()
