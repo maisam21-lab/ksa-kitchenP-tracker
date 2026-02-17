@@ -1,8 +1,8 @@
 # SOQL: All Countries Kitchens Data
 
-Use these SOQL queries in `sf_tab_queries` to pull kitchen data for SA, UAE, Kuwait, Bahrain, and Qatar.
+Use these SOQL queries in `sf_tab_queries` to pull **all kitchens under accounts in all countries** with full details. Main objective: **navigate all kitchens in all countries with all related details** — see **docs/OBJECTIVE_AND_MAIN_QUERY.md**.
 
-## 1. SF Kitchen Data (all countries)
+## 1. SF Kitchen Data (all countries, all details — recommended)
 
 ```sql
 SELECT 
