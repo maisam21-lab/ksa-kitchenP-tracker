@@ -863,11 +863,20 @@ def export_csv_generic(rows: list[dict]) -> str:
 
 
 def _dashboard_sources() -> list[tuple[str, str]]:
-    """(display_name, source_id). source_id is 'main_tracker', 'exec_log', or tab_id."""
+    """(display_name, source_id). source_id is 'main_tracker', 'exec_log', or tab_id. All tabs."""
     out = [("Main tracker (kitchen data)", "main_tracker"), ("Execution Log", "exec_log")]
     for tab_id in SHEET_TAB_IDS[2:] + list_extra_tab_ids():
         out.append((tab_id, tab_id))
     return out
+
+
+def _master_kitchens_sources() -> list[tuple[str, str]]:
+    """(display_name, source_id). Only kitchen-detail tabs for Master Kitchens section."""
+    return [
+        ("Kitchens", "Kitchens"),
+        ("Master Kitchens list", "Master Kitchens list"),
+        ("Main tracker (kitchen data)", "main_tracker"),
+    ]
 
 
 def _dashboard_load_source(source_id: str) -> list[dict]:
@@ -1673,7 +1682,7 @@ def main():
     st.sidebar.divider()
     section = st.sidebar.radio(
         "Section",
-        ["Dashboard", "Discussions", "Data", "Search"],
+        ["Master Kitchens", "Dashboard", "Discussions", "Data", "Search"],
         index=0,
         label_visibility="collapsed",
     )
@@ -1690,106 +1699,93 @@ def main():
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
             st.stop()
 
-    # Dashboard: choose any tab → filter → download report
-    if section == "Dashboard":
-        st.title("Dashboard")
-        with st.expander("How this Dashboard works", expanded=False):
-            st.markdown("""
-            The **Dashboard** is a read-only overview of your main data (the **Data** section). It does not change any data.
-            - **Top row:** Four numbers — total records, number of sites, number of metrics, and last updated time.
-            - **Records by date:** Line chart of how many records exist per report date.
-            - **Top regions / Top metrics:** Bar charts of the most common regions and metric names.
-            - **Recent activity:** Last 15 changes (who created or updated which record).
-            - **Summary report:** Download an HTML file with the same overview and tables (by region, by metric).
-            - **Customize your data view:** Filter the main data by date, site, region, and metric; save and load named views. The Tracker tab has been removed; use this section to build your own views.
-            To edit or add data, use **Data** in the sidebar.’            """)
-        st.caption("Pick **any data source** (main tracker, Execution Log, or any Data tab), filter, and **download your report** as CSV.")
-        sources = _dashboard_sources()
+    # Master Kitchens: filter and report on kitchen-detail tabs only
+    if section == "Master Kitchens":
+        st.title("Master Kitchens")
+        st.caption("Filter kitchen details and download your report. Data source is **Kitchens** or **Master Kitchens list**.")
+        sources = _master_kitchens_sources()
         source_options = [s[0] for s in sources]
         source_ids = {s[0]: s[1] for s in sources}
         chosen_label = st.selectbox(
-            "Data source (any tab)",
+            "Data source",
             options=source_options,
-            key="dash_source",
-            help="Main tracker, Execution Log, or any Data tab — use this data for your report.",
+            key="master_source",
+            help="Kitchens or Master Kitchens list — kitchen details only.",
         )
-        source_id = source_ids.get(chosen_label, "main_tracker")
+        source_id = source_ids.get(chosen_label, "Kitchens")
         rows = _dashboard_load_source(source_id)
         if not rows:
-            st.info(f"No data in **{chosen_label}** yet. Use **Data** in the sidebar to import or add data.")
+            st.info(f"No data in **{chosen_label}** yet. Use **Data** in the sidebar to refresh from Salesforce or the online sheet.")
         else:
             total = len(rows)
             is_tracker = source_id == "main_tracker"
-            # —— Filters: clean card-style ——
             st.markdown("---")
             st.subheader("Refine your data")
-            if st.session_state.pop("dash_clear_filters", False):
-                for key in ("dash_f_date_multi", "dash_f_site_multi", "dash_f_region_multi", "dash_f_metric_multi", "dash_search", "dash_f_status_filter"):
-                    st.session_state[key] = [] if "multi" in key else ("" if key == "dash_search" else None)
-                st.session_state["dash_from_date"] = None
-                st.session_state["dash_to_date"] = None
+            if st.session_state.pop("master_clear_filters", False):
+                for key in ("master_f_date_multi", "master_f_site_multi", "master_f_region_multi", "master_f_metric_multi", "master_search", "master_f_status_filter"):
+                    st.session_state[key] = [] if "multi" in key else ("" if key == "master_search" else None)
+                st.session_state["master_from_date"] = None
+                st.session_state["master_to_date"] = None
                 _rerun()
-            view_id = st.session_state.pop("dash_apply_saved_view", None)
+            view_id = st.session_state.pop("master_apply_saved_view", None)
             if view_id is not None and is_tracker:
                 v = get_saved_view(view_id)
                 if v and isinstance(v.get("filters_json"), dict):
                     fj = v["filters_json"]
-                    st.session_state["dash_f_date_multi"] = fj.get("report_date") or []
-                    st.session_state["dash_f_site_multi"] = fj.get("site_id") or []
-                    st.session_state["dash_f_region_multi"] = fj.get("region") or []
-                    st.session_state["dash_f_metric_multi"] = fj.get("metric_name") or []
-                    st.session_state["dash_search"] = fj.get("search") or ""
+                    st.session_state["master_f_date_multi"] = fj.get("report_date") or []
+                    st.session_state["master_f_site_multi"] = fj.get("site_id") or []
+                    st.session_state["master_f_region_multi"] = fj.get("region") or []
+                    st.session_state["master_f_metric_multi"] = fj.get("metric_name") or []
+                    st.session_state["master_search"] = fj.get("search") or ""
                     _rerun()
-            search = st.text_input("Search in all columns", key="dash_search", placeholder="Type to filter rows by any column…")
+            search = st.text_input("Search in all columns", key="master_search", placeholder="Type to filter rows by any column…")
             if is_tracker:
                 no_status = [r for r in rows if not (r.get("status") or "").strip() or str(r.get("status") or "").strip().lower() in ("no status", "n/a", "na", "—", "-")]
                 if no_status:
                     st.caption(f"**{len(no_status)}** records with no or empty status. ")
-                    if st.button("Show only these", key="dash_show_no_status"):
-                        st.session_state["dash_f_status_filter"] = "no_status"
+                    if st.button("Show only these", key="master_show_no_status"):
+                        st.session_state["master_f_status_filter"] = "no_status"
                         _rerun()
                 uniq = lambda k: sorted(set(r.get(k) for r in rows if r.get(k)))
-                default_dates = [x for x in (st.session_state.get("dash_f_date_multi") or []) if x in uniq("report_date")]
-                default_sites = [x for x in (st.session_state.get("dash_f_site_multi") or []) if x in uniq("site_id")]
-                default_reg = [x for x in (st.session_state.get("dash_f_region_multi") or []) if x in uniq("region")]
-                default_met = [x for x in (st.session_state.get("dash_f_metric_multi") or []) if x in uniq("metric_name")]
+                default_dates = [x for x in (st.session_state.get("master_f_date_multi") or []) if x in uniq("report_date")]
+                default_sites = [x for x in (st.session_state.get("master_f_site_multi") or []) if x in uniq("site_id")]
+                default_reg = [x for x in (st.session_state.get("master_f_region_multi") or []) if x in uniq("region")]
+                default_met = [x for x in (st.session_state.get("master_f_metric_multi") or []) if x in uniq("metric_name")]
                 with st.expander("Filter by column (optional)", expanded=False):
                     c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
                     with c1:
-                        st.multiselect("Report date", uniq("report_date"), default=default_dates, key="dash_f_date_multi", placeholder="All", label_visibility="visible")
+                        st.multiselect("Report date", uniq("report_date"), default=default_dates, key="master_f_date_multi", placeholder="All", label_visibility="visible")
                     with c2:
-                        st.multiselect("Site", uniq("site_id"), default=default_sites, key="dash_f_site_multi", placeholder="All", label_visibility="visible")
+                        st.multiselect("Site", uniq("site_id"), default=default_sites, key="master_f_site_multi", placeholder="All", label_visibility="visible")
                     with c3:
-                        st.multiselect("Region", uniq("region"), default=default_reg, key="dash_f_region_multi", placeholder="All", label_visibility="visible")
+                        st.multiselect("Region", uniq("region"), default=default_reg, key="master_f_region_multi", placeholder="All", label_visibility="visible")
                     with c4:
-                        st.multiselect("Metric", uniq("metric_name"), default=default_met, key="dash_f_metric_multi", placeholder="All", label_visibility="visible")
+                        st.multiselect("Metric", uniq("metric_name"), default=default_met, key="master_f_metric_multi", placeholder="All", label_visibility="visible")
                     with c5:
                         st.write("")
                         st.write("")
-                        if st.button("Clear filters", key="dash_btn_clear"):
-                            st.session_state["dash_clear_filters"] = True
+                        if st.button("Clear filters", key="master_btn_clear"):
+                            st.session_state["master_clear_filters"] = True
                             _rerun()
-                    # Optional date range (report_date between From and To)
                     st.caption("Optional date range (filters by report date):")
                     d1, d2 = st.columns(2)
                     with d1:
-                        from_date = st.date_input("From report date", value=None, key="dash_from_date")
+                        st.date_input("From report date", value=None, key="master_from_date")
                     with d2:
-                        to_date = st.date_input("To report date", value=None, key="dash_to_date")
+                        st.date_input("To report date", value=None, key="master_to_date")
             rows_filtered = rows
             if is_tracker:
                 filters = {
-                    "report_date": st.session_state.get("dash_f_date_multi") or None,
-                    "site_id": st.session_state.get("dash_f_site_multi") or None,
-                    "region": st.session_state.get("dash_f_region_multi") or None,
-                    "metric_name": st.session_state.get("dash_f_metric_multi") or None,
+                    "report_date": st.session_state.get("master_f_date_multi") or None,
+                    "site_id": st.session_state.get("master_f_site_multi") or None,
+                    "region": st.session_state.get("master_f_region_multi") or None,
+                    "metric_name": st.session_state.get("master_f_metric_multi") or None,
                 }
                 rows_filtered = filter_rows(rows, {k: v for k, v in filters.items() if v})
-                if st.session_state.get("dash_f_status_filter") == "no_status":
+                if st.session_state.get("master_f_status_filter") == "no_status":
                     rows_filtered = [r for r in rows_filtered if not (r.get("status") or "").strip() or str(r.get("status") or "").strip().lower() in ("no status", "n/a", "na", "—", "-")]
-                # Optional date range (report_date)
-                from_date = st.session_state.get("dash_from_date")
-                to_date = st.session_state.get("dash_to_date")
+                from_date = st.session_state.get("master_from_date")
+                to_date = st.session_state.get("master_to_date")
                 if from_date or to_date:
                     def _parse_rd(s):
                         if not s:
@@ -1818,12 +1814,11 @@ def main():
             st.caption(f"**{len(rows_filtered)}** of **{total}** rows")
             if total > 0 and len(rows_filtered) == 0:
                 st.info("No rows match your filters. Try clearing or relaxing filters.")
-            # Column picker: choose which columns to show in the table
             if rows_filtered:
                 all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
-                default_show = st.session_state.get("dash_columns_show") or all_cols
+                default_show = st.session_state.get("master_columns_show") or all_cols
                 default_show = [c for c in default_show if c in all_cols] or all_cols
-                cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="dash_columns_show", placeholder="All columns")
+                cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="master_columns_show", placeholder="All columns")
                 if not cols_to_show:
                     cols_to_show = all_cols
             if HAS_EXCEL and rows_filtered:
@@ -1836,14 +1831,12 @@ def main():
                     st.caption(f"… and {len(rows_filtered) - 100} more.")
             if rows_filtered:
                 csv_data = export_csv(rows_filtered) if is_tracker else export_csv_generic(rows_filtered)
-                safe_name = (chosen_label or "report").replace(" ", "_")[:40]
-                st.download_button("Download my report (CSV)", data=csv_data, file_name=f"{safe_name}.csv", mime="text/csv", key="dash_dl_report_csv")
-
-            # —— Pivot view (like Excel pivot, interactive) ——
+                safe_name = (chosen_label or "master_kitchens").replace(" ", "_")[:40]
+                st.download_button("Download report (CSV)", data=csv_data, file_name=f"{safe_name}.csv", mime="text/csv", key="master_dl_report_csv")
             if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0:
                 st.markdown("---")
                 st.subheader("Pivot view")
-                st.caption("Slice your data by rows and columns, then view as a table or heatmap.")
+                st.caption("Slice your data by rows and columns.")
                 df = pd.DataFrame(rows_filtered)
                 cols = [c for c in df.columns if df[c].notna().any()]
                 if len(cols) < 2:
@@ -1856,9 +1849,9 @@ def main():
                     for c in numeric_cols:
                         agg_opts.append(f"Sum of {c}")
                         agg_opts.append(f"Mean of {c}")
-                    pv_row = st.selectbox("Rows", row_opts, key="pivot_row")
-                    pv_col = st.selectbox("Columns", col_opts, key="pivot_col")
-                    pv_agg = st.selectbox("Value", agg_opts, key="pivot_agg")
+                    pv_row = st.selectbox("Rows", row_opts, key="master_pivot_row")
+                    pv_col = st.selectbox("Columns", col_opts, key="master_pivot_col")
+                    pv_agg = st.selectbox("Value", agg_opts, key="master_pivot_agg")
                     if pv_row != "— None —" and pv_col != "— None —":
                         try:
                             if pv_agg == "Count":
@@ -1873,14 +1866,12 @@ def main():
                                     val_col = pv_agg.replace("Mean of ", "")
                                     pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, values=val_col, aggfunc="mean", fill_value=0)
                                 pivot = pivot.round(2)
-                                # Subtotals: row totals (right) and column total (bottom)
                                 pivot["Total"] = pivot.sum(axis=1)
                                 pivot.loc["Total", :] = pivot.sum(axis=0)
                             st.dataframe(pivot, use_container_width=True, hide_index=False)
-                            # Download current pivot as CSV
                             try:
                                 pivot_csv = pivot.to_csv()
-                                st.download_button("Download pivot (CSV)", data=pivot_csv, file_name="dashboard_pivot.csv", mime="text/csv", key="dash_dl_pivot_csv")
+                                st.download_button("Download pivot (CSV)", data=pivot_csv, file_name="master_kitchens_pivot.csv", mime="text/csv", key="master_dl_pivot_csv")
                             except Exception:
                                 pass
                             try:
@@ -1890,50 +1881,17 @@ def main():
                                     x=[str(x) for x in pivot.columns],
                                     y=[str(y) for y in pivot.index],
                                     colorscale="Teal",
-                                    text=[[f"{v:.0f}" if isinstance(v, (int, float)) else str(v) for v in row] for row in pivot.values],
-                                    texttemplate="%{text}",
-                                    textfont={"size": 11},
-                                    hovertemplate="%{y} × %{x}<br>Value: %{z}<extra></extra>",
                                 ))
-                                fig.update_layout(xaxis_title=pv_col, yaxis_title=pv_row, margin=dict(l=100, r=40, t=30, b=80), height=min(500, 200 + len(pivot) * 22))
+                                fig.update_layout(title="Pivot heatmap", xaxis_title="", yaxis_title="", height=400)
                                 st.plotly_chart(fig, use_container_width=True)
                             except Exception:
                                 pass
-                        except Exception as e:
-                            st.caption(f"Could not build pivot: {e}")
-            if is_tracker:
-                saved_views = list_saved_views()
-                view_opts = {"— None —": None}
-                for v in saved_views:
-                    view_opts[v["name"]] = v["id"]
-                with st.expander("Save / load view (main tracker only)", expanded=False):
-                    v1, v2, v3 = st.columns(3)
-                    with v1:
-                        chosen = st.selectbox("Load saved view", options=list(view_opts.keys()), key="dash_load_view")
-                        if st.button("Apply", key="dash_apply_view_btn") and chosen and view_opts.get(chosen):
-                            st.session_state["dash_apply_saved_view"] = view_opts[chosen]
-                            _rerun()
-                    with v2:
-                        save_name = st.text_input("Save current filters as", key="dash_saved_view_name", placeholder="e.g. Riyadh weekly")
-                    with v3:
-                        if st.button("Save view", key="dash_save_view_btn") and (save_name or "").strip():
-                            save_saved_view((save_name or "").strip(), {
-                                "report_date": st.session_state.get("dash_f_date_multi") or [],
-                                "site_id": st.session_state.get("dash_f_site_multi") or [],
-                                "region": st.session_state.get("dash_f_region_multi") or [],
-                                "metric_name": st.session_state.get("dash_f_metric_multi") or [],
-                                "search": st.session_state.get("dash_search") or "",
-                            })
-                            st.success("Saved.")
-                            _rerun()
+                        except Exception:
+                            pass
 
-            with st.expander("Recent activity", expanded=False):
-                recent = list_recent_activity_global(15)
-                if not recent:
-                    st.caption("No activity yet.")
-                else:
-                    for a in recent:
-                        st.caption(f"**{a.get('at', '')[:19]}** · {a.get('record_id', '')[:40]} · **{a.get('action', '')}** by {a.get('by_user') or '—'}")
+    elif section == "Dashboard":
+        st.title("Dashboard")
+        st.info("Dashboard (charts, summary, saved views) is coming later. Use **Master Kitchens** to filter and download kitchen details.")
         return
 
     # Search (all tabs)
