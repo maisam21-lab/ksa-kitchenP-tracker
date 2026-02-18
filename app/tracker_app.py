@@ -43,6 +43,13 @@ except ImportError:
         import multipliers as multipliers_mod
     except ImportError:
         multipliers_mod = None
+try:
+    from app import data_store as data_store_mod
+except ImportError:
+    try:
+        import data_store as data_store_mod
+    except ImportError:
+        data_store_mod = None
 
 try:
     import pandas as pd
@@ -1056,6 +1063,42 @@ def _dashboard_load_source(source_id: str) -> list[dict]:
     return list_generic_tab(source_id)
 
 
+def _get_superset_master_kitchens():
+    """
+    If data_store has master_kitchens_live, return (rows as list of dicts, metadata dict).
+    Else return (None, None). Used so Streamlit reads only from persisted store, never calls Superset live.
+    """
+    if not data_store_mod:
+        return None, None
+    try:
+        name = getattr(data_store_mod, "MASTER_KITCHENS_LIVE", "master_kitchens_live")
+        df = data_store_mod.read_dataset(name)
+        meta = data_store_mod.read_metadata(name)
+        if df is not None and not df.empty:
+            return df.to_dict("records"), meta
+    except Exception:
+        pass
+    return None, None
+
+
+def _superset_stale_warning(meta: dict) -> bool:
+    """True if last refresh is older than 30 minutes or status != success."""
+    if not meta:
+        return False
+    if (meta.get("status") or "").strip().lower() != "success":
+        return True
+    ts = meta.get("last_refresh_ts_utc") or ""
+    if not ts:
+        return False
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        age_min = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+        return age_min > 30
+    except Exception:
+        return False
+
+
 # —— Auto Refresh Execution Log ——
 def list_exec_log():
     with get_conn() as c:
@@ -1296,8 +1339,20 @@ def _salesforce_report_data(report_id: str, config: dict) -> list[dict]:
     return out
 
 
+# Direct Report IDs: fetch these from Salesforce when sf_tab_queries is not set.
+# First report is used for both Kitchens and Master Kitchens list (same data, two tabs).
+SALESFORCE_DIRECT_REPORT_IDS = [
+    ("Kitchens", "00OVO000003z2O92AI"),
+    ("Master Kitchens list", "00OVO000003z2O92AI"),
+    ("SF Churn Data", "00O6T000006Y5DiUAK"),
+    ("Report Y0l6", "00O6T000006Y0l6UAC"),
+    ("Report DPig", "00O6T000006DPigUAG"),
+    ("Report DXT0", "00O6T000006DXT0UAO"),
+]
+
+
 def _get_salesforce_tab_queries() -> dict[str, str]:
-    """Tab name → SOQL or Report ID (00O...). From secrets [sf_tab_queries] or env SF_TAB_QUERIES (JSON)."""
+    """Tab name → SOQL or Report ID (00O...). From secrets [sf_tab_queries], env SF_TAB_QUERIES, or SALESFORCE_DIRECT_REPORT_IDS."""
     try:
         # Streamlit secrets: [sf_tab_queries] with keys like "Kitchens" = "00O..."
         sq = getattr(st, "secrets", None) and st.secrets.get("sf_tab_queries")
@@ -1310,7 +1365,8 @@ def _get_salesforce_tab_queries() -> dict[str, str]:
             return json.loads(raw)
     except (json.JSONDecodeError, TypeError, Exception):
         pass
-    return {}
+    # Default: use direct report IDs so data is fetched from these reports
+    return {name: rid for name, rid in SALESFORCE_DIRECT_REPORT_IDS}
 
 
 def _default_mock_tab_queries() -> dict[str, str]:
@@ -1628,7 +1684,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False):
     if not rows and tab_id == "Master Kitchens list":
         rows = list_generic_tab("Kitchens") or list_generic_tab("SF Kitchen Data")
     if not rows:
-        st.info("No data yet. Use **Refresh from online sheet** or **Refresh from Salesforce** above to load data.")
+        st.info("No data yet. Data is refreshed every 15 minutes by the scheduler.")
         return
     is_kitchens_tab = tab_id in ("Kitchens", "Master Kitchens list")
     if tab_id == "Kitchens":
@@ -1698,22 +1754,28 @@ def main():
     if prefilled:
         st.session_state["user_display_name"] = prefilled
 
-    # One-time refresh on session start (SF or sheet). Must set flag BEFORE _rerun() to avoid infinite rerun loop.
+    # One-time fetch from Salesforce (direct report IDs) when Superset store is empty, so data is available without manual refresh.
     if not st.session_state.get("auto_refresh_done"):
         st.session_state["auto_refresh_done"] = True
-        ok, _ = _refresh_from_salesforce()
-        if ok:
-            st.session_state["data_source"] = "salesforce"
-            st.session_state.pop("used_gsheet_fallback", None)
-            set_last_refresh("salesforce")
-        else:
-            ok, _ = _refresh_from_online_sheet()
+        has_superset = False
+        if data_store_mod:
+            try:
+                df = data_store_mod.read_dataset(getattr(data_store_mod, "MASTER_KITCHENS_LIVE", "master_kitchens_live"))
+                has_superset = df is not None and not df.empty
+            except Exception:
+                pass
+        if not has_superset:
+            ok, _ = _refresh_from_salesforce()
             if ok:
-                st.session_state["data_source"] = "gsheet"
-                st.session_state["used_gsheet_fallback"] = True
-                set_last_refresh("gsheet")
-        if ok:
-            _rerun()
+                st.session_state["data_source"] = "salesforce"
+                set_last_refresh("salesforce")
+            else:
+                ok, _ = _refresh_from_online_sheet()
+                if ok:
+                    st.session_state["data_source"] = "gsheet"
+                    set_last_refresh("gsheet")
+            if ok:
+                _rerun()
 
     # KitchenPark-style theme: light header, teal hero + CTAs (match KitchenPark site)
     st.markdown("""
@@ -1896,15 +1958,12 @@ def main():
         user_role = "super_user"
     st.session_state["user_role"] = user_role
 
-    if user_role == "associate_viewer":
-        section_options = ["Master Kitchens"]
-    elif user_role == "manager_viewer":
-        section_options = ["Master Kitchens", "Live Dashboard"]
-    else:
-        section_options = [
-            "Master Kitchens", "Live Dashboard", "Discussions", "Data", "Search",
-            "Currency Converter", "Inflation Calculator", "Price Multipliers", "Admin / Data Health",
-        ]
+    # Product shape (Feb 18): keep only three sections for all AEs:
+    # - Kitchen Master Data
+    # - Dashboard
+    # - Discussions
+    # Everything else (Data/Search/Tools/Admin) is intentionally removed from navigation.
+    section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
     section = st.sidebar.radio(
         "Section",
         section_options,
@@ -1912,37 +1971,49 @@ def main():
         label_visibility="collapsed",
     )
 
-    # Master Kitchens: filter and report on kitchen-detail tabs only (Prompt 4: status pills, facility, last refresh)
-    if section == "Master Kitchens":
-        st.title("Master Kitchens")
-        # Last refresh (Prompt 3 & 4)
-        data_source = st.session_state.get("data_source") or "salesforce"
-        last_refresh = get_last_refresh(data_source)
-        st.caption(f"Last refresh: **{last_refresh or 'Never'}**" + (f" ({data_source})" if user_role in ("manager_viewer", "super_user") else ""))
-        if st.session_state.get("used_gsheet_fallback") and data_source == "gsheet":
-            st.warning("Salesforce unavailable; showing data from Google Sheet backup.")
-        st.caption("Filter kitchen details and download your report. Data source is **Kitchens** or **Master Kitchens list**.")
-        # Data source selector only for manager and super_user (Prompt 3)
-        sources = _master_kitchens_sources()
-        source_options = [s[0] for s in sources]
-        source_ids = {s[0]: s[1] for s in sources}
-        if user_role in ("manager_viewer", "super_user"):
-            chosen_label = st.selectbox(
-                "Data source",
-                options=source_options,
-                key="master_source",
-                help="Kitchens or Master Kitchens list — kitchen details only.",
-            )
-            source_id = source_ids.get(chosen_label, "Kitchens")
+    # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
+    if section == "Kitchen Master Data":
+        st.title("Kitchen Master Data")
+        superset_rows, superset_meta = _get_superset_master_kitchens()
+        if superset_rows is not None:
+            # Data source: Superset (Trino proxy) — read from persisted store only
+            st.caption("Data source: **Superset (Trino proxy)**. Refreshed every 15 minutes by scheduler.")
+            last_refresh = (superset_meta or {}).get("last_refresh_ts_utc")
+            st.caption(f"Last refresh: **{last_refresh or 'Never'}**")
+            if _superset_stale_warning(superset_meta or {}):
+                st.warning("Last refresh is older than 30 minutes or last run failed. Data may be stale.")
+            st.caption("Filter kitchen details and download your report.")
+            chosen_label = "Master Kitchens (Live)"
+            source_id = "superset"
+            rows = superset_rows
         else:
-            chosen_label = "Kitchens"
-            source_id = "Kitchens"
-        rows = _dashboard_load_source(source_id)
+            # Legacy: Kitchens / Master Kitchens list from DB
+            data_source = st.session_state.get("data_source") or "salesforce"
+            last_refresh = get_last_refresh(data_source)
+            st.caption(f"Last refresh: **{last_refresh or 'Never'}**" + (f" ({data_source})" if user_role in ("manager_viewer", "super_user") else ""))
+            if st.session_state.get("used_gsheet_fallback") and data_source == "gsheet":
+                st.warning("Salesforce unavailable; showing data from Google Sheet backup.")
+            st.caption("Filter kitchen details and download your report. Data source is **Kitchens** or **Master Kitchens list**.")
+            sources = _master_kitchens_sources()
+            source_options = [s[0] for s in sources]
+            source_ids = {s[0]: s[1] for s in sources}
+            if user_role in ("manager_viewer", "super_user"):
+                chosen_label = st.selectbox(
+                    "Data source",
+                    options=source_options,
+                    key="master_source",
+                    help="Kitchens or Master Kitchens list — kitchen details only.",
+                )
+                source_id = source_ids.get(chosen_label, "Kitchens")
+            else:
+                chosen_label = "Kitchens"
+                source_id = "Kitchens"
+            rows = _dashboard_load_source(source_id)
         if not rows:
-            st.info(f"No data in **{chosen_label}** yet. Use **Data** in the sidebar to refresh from Salesforce or the online sheet.")
+            st.info(f"No data in **{chosen_label}** yet. Refresh job runs every 15 minutes.")
         else:
             total = len(rows)
-            is_tracker = source_id == "main_tracker"
+            is_tracker = source_id == "main_tracker"  # superset and Kitchens both use table-like rows
             # Status pills and facility filter for Kitchens / Master Kitchens list (Prompt 4)
             def _row_status(r):
                 for k in ("Status", "Status__c", "status"):
@@ -2135,11 +2206,18 @@ def main():
                         except Exception:
                             pass
 
-    # Live Dashboard (Prompt 6): KPIs, trend, what changed today — manager_viewer and super_user only
-    elif section == "Live Dashboard":
-        st.title("Live Dashboard")
-        st.caption("Vacancy and churn metrics. Data from Kitchens.")
-        rows_kitchens = list_generic_tab("Kitchens") or list_generic_tab("Master Kitchens list") or []
+    # Dashboard: KPIs, trend, what changed today
+    elif section == "Dashboard":
+        st.title("Dashboard")
+        superset_rows, superset_meta = _get_superset_master_kitchens()
+        if superset_rows is not None:
+            st.caption("Data source: **Superset (Trino proxy)**. Last refresh: **" + ((superset_meta or {}).get("last_refresh_ts_utc") or "Never") + "**")
+            if _superset_stale_warning(superset_meta or {}):
+                st.warning("Last refresh is older than 30 minutes or last run failed.")
+            rows_kitchens = superset_rows
+        else:
+            st.caption("Vacancy and churn metrics. Data from Kitchens.")
+            rows_kitchens = list_generic_tab("Kitchens") or list_generic_tab("Master Kitchens list") or []
         if snapshot_mod:
             today_str = date.today().isoformat()
             if not snapshot_mod.snapshot_exists_for_date(today_str) and rows_kitchens:
@@ -2208,11 +2286,6 @@ def main():
                     st.caption("Chart requires plotly.")
         else:
             st.info("Snapshot module not loaded. Install app/snapshot.py for daily change tracking.")
-        return
-
-    elif section == "Dashboard":
-        st.title("Dashboard")
-        st.info("Dashboard (charts, summary, saved views) is coming later. Use **Master Kitchens** to filter and download kitchen details.")
         return
 
     # Search (all tabs)
@@ -2332,74 +2405,7 @@ def main():
                 st.download_button("Download full CSV (ksa_kitchen_tracker.csv)", data=csv_content, file_name="ksa_kitchen_tracker.csv", mime="text/csv", key="dl_csv")
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
-        if is_developer:
-            with st.expander("Refresh data (Google Sheet & Salesforce only)", expanded=True):
-                st.caption(
-                    "**Google Sheet** = same data as the online sheet (refreshed every 4 hours via your Salesforce connector). "
-                    "**Salesforce** = **real-time** data straight from the SF API — use this when you need up-to-the-minute numbers."
-                )
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Google Sheet API** — service account JSON (share the sheet with its email).")
-                    if st.button("Refresh from online sheet", key="btn_gsheet"):
-                        with st.spinner("Loading from Google Sheet…"):
-                            ok, msg = _refresh_from_online_sheet()
-                        if ok:
-                            st.session_state["data_source"] = "gsheet"
-                            set_last_refresh("gsheet")
-                            st.success(msg)
-                            _rerun()
-                        else:
-                            st.error(msg)
-                with col2:
-                    try:
-                        import sfdc_providers as _sfdc
-                        _p = _sfdc.get_sfdc_provider()
-                        st.caption(f"**Data provider:** {_p} (set SFDC_PROVIDER=mock|sandbox|prod in secrets/env)")
-                    except Exception:
-                        st.caption("**Data provider:** prod (default)")
-                    st.markdown("**Salesforce API (real-time)** — Consumer Key/Secret + Username/Password, or Access Token; plus sf_tab_queries.")
-                    if st.button("Refresh from Salesforce", key="btn_salesforce"):
-                        with st.spinner("Loading from Salesforce…"):
-                            ok, msg = _refresh_from_salesforce()
-                        if ok:
-                            st.session_state["data_source"] = "salesforce"
-                            st.session_state.pop("used_gsheet_fallback", None)
-                            set_last_refresh("salesforce")
-                            st.success(msg)
-                            _rerun()
-                        else:
-                            st.error(msg)
-                with st.expander("How to configure real-time Salesforce", expanded=False):
-                    st.markdown("""
-                    In **Streamlit Cloud** → app → **Settings** → **Secrets**, add either:
-
-                    **Option A — Access token (manual)**  
-                    - `SF_INSTANCE_URL` — e.g. `https://yourdomain.my.salesforce.com`  
-                    - `SF_ACCESS_TOKEN` — token from your OAuth/Connected App flow  
-
-                    **Option B — Consumer Key + password (recommended)**  
-                    - `SF_CONSUMER_KEY` — Connected App Consumer Key  
-                    - `SF_CONSUMER_SECRET` — Connected App Consumer Secret  
-                    - `SF_USERNAME` — integration user username  
-                    - `SF_PASSWORD` — integration user password  
-                    - `SF_SECURITY_TOKEN` — (optional) append to password if your org requires it  
-                    - `SF_USE_SANDBOX` — set to `true` if the org is a sandbox  
-
-                    **Tab → SOQL (required for real-time data)**  
-                    - `sf_tab_queries` — map each tab name to a **Report ID** (00O...) or a **SOQL** query:
-
-                    ```toml
-                    [sf_tab_queries]
-                    "SF Churn Data"   = "00O6T000006Y5DiUAK"
-                    "Kitchens" = "00OVO00000PMnq92AD"
-                    # or "SF Kitchen Data" = "00O..." (saved to Kitchens tab)
-                    ```
-
-                    Use the **same Report ID** as the live churn report so columns match. Tab names must match the Data tabs.
-                    """)
-        else:
-            st.info("Refresh is available only to developers. Unlock **Developer access** in the sidebar.")
+        st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
         # When data is from GSheet only: show Master Kitchens (kitchens + account details) — no other tabs
         data_source = st.session_state.get("data_source")
         if data_source == "gsheet":
@@ -2554,35 +2560,44 @@ def main():
 
     if section == "Admin / Data Health":
         st.title("Admin / Data Health")
-        st.caption("Data source health and allowed list (read-only).")
+        st.caption("Data source health and allowed list (read-only). No manual refresh — scheduler runs every 15 minutes.")
         st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
-        st.subheader("Data source health")
-        last_sf = get_last_refresh("salesforce")
-        last_gs = get_last_refresh("gsheet")
-        st.markdown(f"- Salesforce last refresh: **{last_sf or 'Never'}**")
-        st.markdown(f"- Google Sheet last refresh: **{last_gs or 'Never'}**")
-        if snapshot_mod:
-            today_str = date.today().isoformat()
-            snap_ok = snapshot_mod.snapshot_exists_for_date(today_str)
-            st.markdown(f"- Today's snapshot: **{'Written' if snap_ok else 'Not yet written'}**")
-        if st.button("Refresh from Salesforce", key="admin_refresh_sf"):
-            ok, msg = _refresh_from_salesforce()
-            if ok:
-                set_last_refresh("salesforce")
-                st.session_state["data_source"] = "salesforce"
-                st.success(msg)
-                _rerun()
+        st.subheader("Superset persisted store")
+        if data_store_mod:
+            name = getattr(data_store_mod, "MASTER_KITCHENS_LIVE", "master_kitchens_live")
+            meta = data_store_mod.read_metadata(name)
+            if meta:
+                st.markdown(f"- Last refresh: **{meta.get('last_refresh_ts_utc') or 'Never'}**")
+                st.markdown(f"- Status: **{meta.get('status') or '—'}**")
+                st.markdown(f"- Row count: **{meta.get('row_count', '—')}**")
+                if meta.get("error_message"):
+                    st.markdown(f"- Error: *{meta.get('error_message')}*")
+                if meta.get("uploaded_by"):
+                    st.markdown(f"- Last CSV upload by: **{meta.get('uploaded_by')}** at {meta.get('uploaded_at_utc') or '—'}")
             else:
-                st.error(msg)
-        if st.button("Refresh from Google Sheet", key="admin_refresh_gs"):
-            ok, msg = _refresh_from_online_sheet()
-            if ok:
-                set_last_refresh("gsheet")
-                st.session_state["data_source"] = "gsheet"
-                st.success(msg)
-                _rerun()
-            else:
-                st.error(msg)
+                st.caption("No metadata yet (refresh job may not have run).")
+        else:
+            st.caption("data_store module not loaded.")
+        if user_role == "super_user" and data_store_mod:
+            st.subheader("Upload CSV Backup")
+            st.caption("Replace Master Kitchens (Live) with an uploaded CSV. Tracked in metadata.")
+            up = st.file_uploader("CSV file", type=["csv"], key="admin_csv_backup")
+            if up is not None:
+                try:
+                    df_up = pd.read_csv(up)
+                    if not df_up.empty and st.button("Replace dataset with this CSV", key="admin_csv_confirm"):
+                        if data_store_mod.write_dataset_and_metadata(
+                            getattr(data_store_mod, "MASTER_KITCHENS_LIVE", "master_kitchens_live"),
+                            df_up,
+                            status="success",
+                            uploaded_by=current_user or "unknown",
+                        ):
+                            st.success("Dataset replaced. Last refresh and uploaded_by updated.")
+                            _rerun()
+                        else:
+                            st.error("Failed to persist.")
+                except Exception as e:
+                    st.error(str(e))
         st.subheader("Allowed list (read-only)")
         allowed = list_allowed_users()
         if not allowed:

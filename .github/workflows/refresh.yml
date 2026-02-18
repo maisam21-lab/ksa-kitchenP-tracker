@@ -1,0 +1,54 @@
+# Scheduled refresh every 15 minutes: fetch Superset chart data and persist.
+# Secrets: SUPERSET_URL, SUPERSET_USERNAME, SUPERSET_PASSWORD (or SUPERSET_ACCESS_TOKEN);
+#          SUPABASE_URL, SUPABASE_KEY (or leave unset to use parquet in runner).
+name: Superset data refresh
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas pyarrow
+          if [ -n "${{ secrets.SUPABASE_URL }}" ]; then
+            pip install supabase
+          fi
+
+      - name: Run refresh (with retries)
+        env:
+          SUPERSET_URL: ${{ secrets.SUPERSET_URL }}
+          SUPSERSET_URL: ${{ secrets.SUPERSET_URL }}
+          SUPERSET_USERNAME: ${{ secrets.SUPERSET_USERNAME }}
+          SUPERSET_PASSWORD: ${{ secrets.SUPERSET_PASSWORD }}
+          SUPERSET_ACCESS_TOKEN: ${{ secrets.SUPERSET_ACCESS_TOKEN }}
+          SUPERSET_CHART_ID_MASTER_KITCHENS: ${{ secrets.SUPERSET_CHART_ID_MASTER_KITCHENS }}
+          SUPERSET_CHART_ID_FACILITY_KPI: ${{ secrets.SUPERSET_CHART_ID_FACILITY_KPI }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DATA_STORE_DIR: ${{ github.workspace }}/app/data/superset_store
+        run: |
+          for i in 1 2 3; do
+            if python refresh_jobs/run_all.py; then
+              echo "Refresh succeeded (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i failed, backoff 30s"
+            sleep 30
+          done
+          echo "All retries failed"
+          exit 1
+
+      # When not using Supabase, run refresh_jobs/run_all.py on a server with persistent DATA_STORE_DIR
