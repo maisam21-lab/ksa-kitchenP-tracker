@@ -2437,12 +2437,15 @@ def main():
                 st.warning("Last refresh is older than 30 minutes or last run failed.")
             rows_kitchens = superset_rows
         else:
-            rows_kitchens = list_generic_tab("Kitchens") or list_generic_tab("Master Kitchens list") or []
+            # Always use GSheet for Dashboard so regular users see data (session data_source may default to salesforce)
+            rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
         today_str = date.today().isoformat()
         if snapshot_mod and rows_kitchens:
-            today_str = date.today().isoformat()
             if not snapshot_mod.snapshot_exists_for_date(today_str):
-                snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
+                try:
+                    snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
+                except Exception:
+                    pass
         def _s(r):
             v = None
             for k in ("Status", "Status__c", "status", "Kitchen_Status__c", "state"):
@@ -2477,22 +2480,6 @@ def main():
                 if v is not None and str(v).strip():
                     return str(v).strip()
             return ""
-        def _country(r):
-            """Normalized country for dashboard grouping.
-
-            - If a country is present, normalize Bahrain → Saudi Arabia (treated as SA in this view).
-            - If no country field, default to 'Saudi Arabia' so everything is grouped together.
-            """
-            for k in ("Account Country", "County", "Country__c", "Country", "account__r.country__c"):
-                v = r.get(k)
-                if v is not None and str(v).strip():
-                    val = str(v).strip()
-                    low = val.lower()
-                    if low in ("bahrain", "bh", "bhr"):
-                        return "Saudi Arabia"
-                    return val
-            # No explicit country column; this dashboard is for SA/Bahrain which we treat as SA
-            return "Saudi Arabia"
         vacant = sum(1 for r in rows_kitchens if _status_normalized(r) == "Vacant")
         churning = sum(1 for r in rows_kitchens if _status_normalized(r) == "Churning")
         occupied = sum(1 for r in rows_kitchens if _status_normalized(r) == "Occupied")
@@ -2505,21 +2492,9 @@ def main():
         def _pct_fmt(x: float) -> str:
             """Format percentage so 0 is always visible as 0.0%."""
             return f"{x:.1f}%" if x == x else "0.0%"
-        # —— Key insights (management summary) ——
-        st.subheader("Key insights")
-        active = total - sold  # exclude sold from "active" pool for rate context
-        active_pct_occ = (occupied / active * 100) if active else 0
-        bullets = [
-            f"**Occupancy** is **{_pct_fmt(occ_pct)}** of all kitchens ({occupied:,} of {total:,}).",
-            f"**Vacancy rate** is **{_pct_fmt(vac_pct)}** ({vacant:,} kitchens) — **{_pct_fmt(churn_pct)}** in churn pipeline ({churning:,}).",
-            f"**{sold:,}** kitchens in Sold status (excluded from occupancy).",
-        ]
-        if active and active != total:
-            bullets.append(f"Among active kitchens (excl. Sold), occupancy is **{_pct_fmt(active_pct_occ)}**.")
-        for b in bullets:
-            st.markdown(f"- {b}")
-        st.markdown("---")
-        # —— Primary scorecard: percentages and totals ——
+        # —— At a glance (one line, no repetition) ——
+        st.caption(f"**{_pct_fmt(occ_pct)}** occupied · **{vacant:,}** vacant · **{churning:,}** in churn · **{total:,}** total")
+        # —— Scorecard ——
         st.subheader("Scorecard")
         sc1, sc2, sc3, sc4, sc5 = st.columns(5)
         with sc1:
@@ -2533,18 +2508,7 @@ def main():
         with sc5:
             st.metric("Sold", f"{sold:,}", help="Excluded from occupancy")
         st.markdown("---")
-        # —— Status counts (current state, not "today") ——
-        st.subheader("Current status (counts)")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Vacant", str(vacant))
-        with col2:
-            st.metric("Churning", str(churning))
-        with col3:
-            st.metric("Occupied", str(occupied))
-        with col4:
-            st.metric("Sold", str(sold))
-        # —— By facility: occupancy % and vacancy % ——
+        # —— By facility ——
         fac_stats = {}
         for r in rows_kitchens:
             f = _facility(r) or "(No facility)"
@@ -2575,47 +2539,22 @@ def main():
             if fac_rows:
                 df_fac = pd.DataFrame(fac_rows)
                 st.dataframe(df_fac, use_container_width=True, hide_index=True, column_config={"Occupancy %": st.column_config.NumberColumn(format="%.1f"), "Vacancy %": st.column_config.NumberColumn(format="%.1f"), "In churn %": st.column_config.NumberColumn(format="%.1f")})
-        # —— By country ——
-        country_stats = {}
-        for r in rows_kitchens:
-            c = _country(r) or "(No country)"
-            if c not in country_stats:
-                country_stats[c] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0}
-            s = _status_normalized(r)
-            if s == "Vacant":
-                country_stats[c]["vacant"] += 1
-            elif s == "Churning":
-                country_stats[c]["churning"] += 1
-            elif s == "Occupied":
-                country_stats[c]["occupied"] += 1
-            elif s == "Sold":
-                country_stats[c]["sold"] += 1
-        # Only show By country when there is a meaningful split (more than one distinct country)
-        distinct_countries = {c for c in country_stats.keys() if c and c != "(No country)"}
-        if distinct_countries and len(distinct_countries) > 1:
-            st.subheader("By country")
-            c_rows = []
-            for c, counts in country_stats.items():
-                if not c or c == "(No country)":
-                    continue
-                t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
-                if t == 0:
-                    continue
-                occ_p = (counts["occupied"] / t * 100)
-                vac_p = (counts["vacant"] / t * 100)
-                churn_p = (counts["churning"] / t * 100)
-                c_rows.append({"Country": c, "Total": t, "Occupancy %": round(occ_p, 1), "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1), "Vacant": counts["vacant"], "Churning": counts["churning"], "Occupied": counts["occupied"], "Sold": counts["sold"]})
-            c_rows.sort(key=lambda x: -x["Total"])
-            if c_rows:
-                df_c = pd.DataFrame(c_rows)
-                st.dataframe(df_c, use_container_width=True, hide_index=True, column_config={"Occupancy %": st.column_config.NumberColumn(format="%.1f"), "Vacancy %": st.column_config.NumberColumn(format="%.1f"), "In churn %": st.column_config.NumberColumn(format="%.1f")})
-        # —— Trend: occupancy % and vacancy % over time (last 3 months) ——
+                top_vacant = sorted(fac_rows, key=lambda x: -x["Vacant"])[:5]
+                if any(x["Vacant"] > 0 for x in top_vacant):
+                    with st.expander("Focus: top facilities by vacant kitchens", expanded=False):
+                        for r in top_vacant:
+                            if r["Vacant"] > 0:
+                                st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {r['Occupancy %']}% occupancy")
+        # —— Trend: occupancy % over time (last 3 months) ——
         if snapshot_mod:
             snapshots = snapshot_mod.load_snapshots(90)
             by_date = {}
             for s in snapshots:
-                d = s.get("snapshot_date")
-                if not d:
+                raw_d = s.get("snapshot_date")
+                if not raw_d:
+                    continue
+                d = str(raw_d).strip()[:10]
+                if len(d) < 10:
                     continue
                 by_date.setdefault(d, {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0, "total": 0})
                 st_val = (s.get("status") or "").strip()
@@ -2637,26 +2576,32 @@ def main():
                     occ_pcts = [(by_date[d]["occupied"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
                     vac_pcts = [(by_date[d]["vacant"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
                     churn_pcts = [(by_date[d]["churning"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
+                    x_labels = [d[:10] for d in dates_sorted]
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=occ_pcts, name="Occupancy %", mode="lines+markers", line=dict(color="#059669", width=2.5), fill="tozeroy", fillcolor="rgba(5,150,105,0.15)"))
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=vac_pcts, name="Vacancy %", mode="lines+markers", line=dict(color="#DC2626", width=1.5)))
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=churn_pcts, name="In churn %", mode="lines+markers", line=dict(color="#EA580C", width=1.5)))
+                    fig.add_trace(go.Scatter(x=x_labels, y=occ_pcts, name="Occupancy %", mode="lines+markers", line=dict(color="#059669", width=2.5), fill="tozeroy", fillcolor="rgba(5,150,105,0.15)"))
+                    fig.add_trace(go.Scatter(x=x_labels, y=vac_pcts, name="Vacancy %", mode="lines+markers", line=dict(color="#DC2626", width=1.5)))
+                    fig.add_trace(go.Scatter(x=x_labels, y=churn_pcts, name="In churn %", mode="lines+markers", line=dict(color="#EA580C", width=1.5)))
                     fig.update_layout(
                         title="Occupancy % over time",
                         xaxis_title="Date",
                         yaxis_title="%",
                         yaxis=dict(ticksuffix="%", range=[0, 100]),
+                        xaxis=dict(type="category", tickangle=-45),
                         height=360,
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                        margin=dict(t=60),
+                        margin=dict(t=60, b=80),
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                    if len(dates_sorted) < 7:
+                        st.caption("Trend builds up as more daily snapshots are saved (one per day). Add more days for a fuller view.")
                 except Exception:
                     st.caption("Trend chart requires plotly. Install: pip install plotly")
             # Optional: daily change log (collapsed)
             yesterday_str = (date.today() - timedelta(days=1)).isoformat()
-            yesterday_rows = [s for s in snapshots if s.get("snapshot_date") == yesterday_str]
-            today_snap = [s for s in snapshots if s.get("snapshot_date") == today_str]
+            def _snap_date(s):
+                return str(s.get("snapshot_date") or "").strip()[:10]
+            yesterday_rows = [s for s in snapshots if _snap_date(s) == yesterday_str]
+            today_snap = [s for s in snapshots if _snap_date(s) == today_str]
             changes = snapshot_mod.compute_daily_changes(today_snap if today_snap else rows_kitchens, yesterday_rows) if yesterday_rows else []
             if changes:
                 with st.expander("Daily change log (status changes vs yesterday)"):
