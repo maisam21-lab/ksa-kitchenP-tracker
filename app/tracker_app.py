@@ -1801,7 +1801,27 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
-    st.dataframe(rows_shown, use_container_width=True, hide_index=True)
+    # Status color coding for Kitchens / master-style tabs (Vacant=red, Churning=orange, Occupied=green, Sold=blue)
+    _status_colors = {"Vacant": "#FEE2E2", "Churning": "#FED7AA", "Occupied": "#D1FAE5", "Sold": "#DBEAFE"}
+    df_display = pd.DataFrame(rows_shown)
+    status_col = None
+    for c in df_display.columns:
+        if str(c).strip().lower() in ("status", "status__c"):
+            status_col = c
+            break
+    if status_col and not df_display.empty:
+        def _color_status(val):
+            v = (str(val) if val is not None else "").strip()
+            bg = _status_colors.get(v, "")
+            return f"background-color: {bg}" if bg else ""
+        styled = df_display.style.apply(
+            lambda s: [_color_status(v) for v in s],
+            subset=[status_col],
+            axis=0,
+        )
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
     # Download CSV
     buf = io.StringIO()
     if rows_shown:
@@ -2564,27 +2584,20 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
-        # From GSheet: for most users show Kitchens only; super_user can see all tabs from the online tracker.
-        if user_role != "super_user":
-            st.caption("Data from **online sheet**. Showing kitchens and account-related details only (main view).")
-            _render_generic_tab("Kitchens", key_suffix="data_kitchens", is_developer=is_developer, source="gsheet")
-        else:
-            st.caption("Data from **online sheet**. As super user you can browse **all tabs** from the tracker below.")
-            # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
-            all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids("gsheet")) if t != MAIN_TRACKER_TAB_ID]
-            sheet_tabs = st.tabs(all_tab_ids)
-            # Tab tooltips: descriptions shown on hover
-            tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
-            st.markdown(
-                f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
-                'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
-                'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
-                unsafe_allow_html=True,
-            )
-
-            for tab_index, tab_id in enumerate(all_tab_ids):
-                with sheet_tabs[tab_index]:
-                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer, source="gsheet")
+        st.caption("Data from **online sheet**. All tabs from the tracker are listed below.")
+        # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
+        all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids("gsheet")) if t != MAIN_TRACKER_TAB_ID]
+        sheet_tabs = st.tabs(all_tab_ids)
+        tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
+        st.markdown(
+            f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
+            'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
+            'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
+            unsafe_allow_html=True,
+        )
+        for tab_index, tab_id in enumerate(all_tab_ids):
+            with sheet_tabs[tab_index]:
+                _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer, source="gsheet")
 
     # —— Super-user tools (Prompt 7, 8, 9) ——
     if section == "Currency Converter":
