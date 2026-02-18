@@ -1958,12 +1958,11 @@ def main():
         user_role = "super_user"
     st.session_state["user_role"] = user_role
 
-    # Product shape (Feb 18): keep only three sections for all AEs:
-    # - Kitchen Master Data
-    # - Dashboard
-    # - Discussions
-    # Everything else (Data/Search/Tools/Admin) is intentionally removed from navigation.
-    section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
+    # Product shape (Feb 18): AEs see only three sections. Developers/super_user also see Data (sources/tabs) and Admin.
+    if _is_developer() or user_role == "super_user":
+        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Data", "Search", "Admin / Data Health"]
+    else:
+        section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
     section = st.sidebar.radio(
         "Section",
         section_options,
