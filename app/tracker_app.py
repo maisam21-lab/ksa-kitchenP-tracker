@@ -397,6 +397,14 @@ CREATE TABLE IF NOT EXISTS kitchen_daily_snapshot (
 )
 """
 
+# GSheet tab order: matches worksheet order from last refresh (so Data tabs match your sheet)
+TABLE_GSHEET_TAB_ORDER = """
+CREATE TABLE IF NOT EXISTS gsheet_tab_order (
+    tab_index INTEGER NOT NULL,
+    tab_id TEXT NOT NULL PRIMARY KEY
+)
+"""
+
 # Last refresh timestamps per source (Prompt 3)
 TABLE_REFRESH_METADATA = """
 CREATE TABLE IF NOT EXISTS refresh_metadata (
@@ -521,6 +529,7 @@ def init_db():
             _migrate_generic_tab_data_if_needed(c)
         except Exception:
             pass
+        c.execute(TABLE_GSHEET_TAB_ORDER)
         c.execute(TABLE_FEEDBACK)
         c.execute(TABLE_TRAFFIC)
         c.execute(TABLE_RECORD_COMMENTS)
@@ -1202,6 +1211,25 @@ def list_tab_ids_for_source(source: str) -> list[str]:
         return [row[0] for row in r]
 
 
+def list_gsheet_tab_ids_in_sheet_order() -> list[str]:
+    """All GSheet tab IDs that have data, in worksheet order when available (from last refresh). Never omit a tab."""
+    with get_conn() as c:
+        order_rows = c.execute(
+            "SELECT tab_id FROM gsheet_tab_order ORDER BY tab_index"
+        ).fetchall()
+        ordered = [row[0] for row in order_rows]
+        have_data = list(
+            row[0] for row in c.execute(
+                "SELECT DISTINCT tab_id FROM generic_tab_data WHERE source = ?", ("gsheet",)
+            ).fetchall()
+        )
+    # Show all tabs that have data; use saved order when available, then append any others (e.g. from older refresh)
+    ordered_set = set(ordered)
+    in_order = [t for t in ordered if t in set(have_data)]
+    not_in_order = [t for t in have_data if t not in ordered_set]
+    return in_order + not_in_order
+
+
 def list_extra_tab_ids(source=None) -> list[str]:
     """Tab IDs that have data in generic_tab_data for the given source but are not in SHEET_TAB_IDS."""
     if source is None:
@@ -1590,7 +1618,8 @@ def _refresh_from_online_sheet():
             err = err + " — Share the Google Sheet with the service account email (Viewer). See docs/REFRESH_FROM_ONLINE_SHEET.md."
         return False, err
     loaded = []
-    for ws_title, rows in data.items():
+    tab_order: list[tuple[int, str]] = []  # (index, tab_id) to match sheet order
+    for idx, (ws_title, rows) in enumerate(data.items()):
         if not rows:
             continue
         # Match our tab names (exact or strip); main tracker accepts several sheet names
@@ -1633,6 +1662,15 @@ def _refresh_from_online_sheet():
         else:
             save_generic_tab(tab_id, rows, source="gsheet")
             loaded.append(f"{tab_id} ({len(rows)} rows)")
+        # Record tab order (skip exec log so Data tabs match sheet tabs)
+        if tab_id != "Auto Refresh Execution Log" and not _is_main_tracker_tab(tab_id):
+            tab_order.append((len(tab_order), tab_id))
+    # Persist worksheet order so Data section tabs match the Google Sheet
+    if tab_order:
+        with get_conn() as c:
+            c.execute("DELETE FROM gsheet_tab_order")
+            for i, tid in tab_order:
+                c.execute("INSERT OR REPLACE INTO gsheet_tab_order (tab_index, tab_id) VALUES (?, ?)", (i, tid))
     return True, "Loaded: " + "; ".join(loaded) if loaded else "No data in sheet."
 
 
@@ -1880,8 +1918,10 @@ def main():
         h1 { background: #0F766E !important; color: white !important; font-weight: 700 !important; padding: 20px 28px !important; margin: 0 0 1.5rem 0 !important; border-radius: 0 10px 10px 0 !important; }
         h2, h3, p, span, label { color: #E2E8F0 !important; }
         .stCaption { color: #94A3B8 !important; }
-        .stTabs [data-baseweb="tab-list"] { background: #1E293B; padding: 8px; border-radius: 10px; }
-        .stTabs [data-baseweb="tab"] { color: #94A3B8 !important; }
+        .stTabs [data-baseweb="tab-list"] { background: #1E293B; padding: 8px; border-radius: 10px; overflow-x: auto !important; overflow-y: hidden !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { height: 10px; }
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb { background: #475569; border-radius: 5px; }
+        .stTabs [data-baseweb="tab"] { color: #94A3B8 !important; flex-shrink: 0; }
         .stTabs [aria-selected="true"] { background: #0F766E !important; color: white !important; }
         .stTabs [aria-selected="true"] span { color: white !important; }
         .stButton > button[kind="primary"] { background: #0F766E !important; color: white !important; border: none !important; }
@@ -1905,8 +1945,10 @@ def main():
         section[data-testid="stSidebar"] .stMarkdown { color: #1E293B !important; font-weight: 600 !important; }
         h1 { background: #0F766E !important; color: white !important; font-weight: 700 !important; padding: 20px 28px !important; margin: 0 0 1.5rem 0 !important; border-radius: 0 10px 10px 0 !important; }
         h2, h3 { color: #1E293B !important; font-weight: 600 !important; }
-        .stTabs [data-baseweb="tab-list"] { gap: 8px; background: #F1F5F9; padding: 8px; border-radius: 10px; overflow-x: auto !important; }
-        .stTabs [data-baseweb="tab"] { padding: 10px 18px; border-radius: 8px; font-weight: 500; color: #475569; }
+        .stTabs [data-baseweb="tab-list"] { gap: 8px; background: #F1F5F9; padding: 8px; border-radius: 10px; overflow-x: auto !important; overflow-y: hidden !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { height: 10px; }
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb { background: #94A3B8; border-radius: 5px; }
+        .stTabs [data-baseweb="tab"] { padding: 10px 18px; border-radius: 8px; font-weight: 500; color: #475569; flex-shrink: 0; }
         .stTabs [aria-selected="true"] { background: #0F766E !important; color: white !important; }
         .stTabs [aria-selected="true"] span { color: white !important; }
         .stButton > button[kind="primary"] { background: #0F766E !important; border: none !important; color: white !important; }
@@ -2562,9 +2604,11 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
-        st.caption("Data from **online sheet**. All tabs loaded from your last refresh are shown below.")
-        # Show every tab that has data in the GSheet store (no fixed list — reflects actual worksheets from last refresh)
-        all_tab_ids = [t for t in list_tab_ids_for_source("gsheet") if t != MAIN_TRACKER_TAB_ID]
+        st.caption("Data from **online sheet**. Tabs match your Google Sheet order (refresh to update). Scroll the tab bar to see all.")
+        # Tabs in same order as worksheets in the sheet (from last refresh); fallback to stored order if empty
+        all_tab_ids = [t for t in list_gsheet_tab_ids_in_sheet_order() if t != MAIN_TRACKER_TAB_ID]
+        if not all_tab_ids:
+            all_tab_ids = [t for t in list_tab_ids_for_source("gsheet") if t != MAIN_TRACKER_TAB_ID]
         if not all_tab_ids:
             st.info("No sheet data yet. Click **Refresh from Google Sheet** above to load all worksheets from your Google Sheet.")
         else:
