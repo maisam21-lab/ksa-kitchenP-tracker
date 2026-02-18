@@ -9,5 +9,6 @@ google-cloud-bigquery>=3.0
 streamlit>=1.33
 pandas>=2.0
 openpyxl>=3.0
+plotly>=5.0
 # Optional: AI section (Ask AI) — set OPENAI_API_KEY in .streamlit/secrets.toml
 openai>=1.0

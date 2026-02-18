@@ -1112,9 +1112,13 @@ MASTER_KITCHENS_TAB_SHEETS = [
 ]
 
 
+# Tab IDs hidden from Kitchen Master Data (users don't see these in the sheet dropdown)
+MASTER_KITCHENS_HIDDEN_TABS = {"KSA Facility details", "SF Churn Data"}
+
+
 def _master_kitchens_other_sheet_ids() -> list[str]:
-    """Sheet tab IDs shown in Kitchen Master Data Tab dropdown. Only tabs loaded from GSheet (no fallback list)."""
-    return list_tab_ids_for_source("gsheet")
+    """Sheet tab IDs shown in Kitchen Master Data Tab dropdown. Only tabs loaded from GSheet; KSA Facility / SF Churn Data hidden."""
+    return [t for t in list_tab_ids_for_source("gsheet") if t not in MASTER_KITCHENS_HIDDEN_TABS]
 
 
 def _master_kitchens_sources() -> list[tuple[str, str]]:
@@ -1976,10 +1980,18 @@ def main():
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
-    updated_today = get_records_updated_today_count()
-    # Data pulse: status only (no exact count) — cooler label, less info leakage
-    pulse_status = "Live" if updated_today > 0 else "Idle"
-    st.sidebar.metric("Data pulse", pulse_status, help="Activity in the last 24h — status only, no counts shown")
+    # Data pulse: aligned with last GSheet refresh (scheduler runs every 15 min)
+    last_gsheet = get_last_refresh("gsheet")
+    if last_gsheet:
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(last_gsheet.replace("Z", "+00:00"))
+            pulse_display = dt.strftime("%d %b %H:%M")
+        except Exception:
+            pulse_display = last_gsheet
+    else:
+        pulse_display = "—"
+    st.sidebar.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
     # Name / identity for comments, activity, and (optionally) developer visibility
     st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
     current_user = (st.session_state.get("user_display_name") or "").strip()
@@ -2086,7 +2098,8 @@ def main():
     if section == "Kitchen Master Data":
         st.title("Kitchen Master Data")
         # These tabs read from Google Sheet only (no Salesforce).
-        st.caption("Source: **Google Sheet** only. Use **Refresh from Google Sheet** below to pull the latest tabs and data after you update the sheet. Every AE has the same access.")
+        _show_refresh_btn = _is_developer() or user_role == "super_user"
+        st.caption("Source: **Google Sheet** only. Data is refreshed every 15 minutes by the scheduler." + (" Use **Refresh from Google Sheet** below for an immediate update. " if _show_refresh_btn else " ") + "Every AE has the same access.")
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             # Data source: Superset (Trino proxy) — read from persisted store only
@@ -2104,24 +2117,27 @@ def main():
         else:
             # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
             last_refresh = get_last_refresh("gsheet")
-            col_cap, col_btn = st.columns([3, 1])
-            with col_cap:
+            if _show_refresh_btn:
+                col_cap, col_btn = st.columns([3, 1])
+                with col_cap:
+                    st.caption(f"Last refresh (GSheet): **{last_refresh or 'Never'}**.")
+                with col_btn:
+                    if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
+                        ok, msg = _refresh_from_online_sheet()
+                        if ok:
+                            set_last_refresh("gsheet")
+                            st.session_state["data_source"] = "gsheet"
+                            st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
+                        else:
+                            st.error(msg or "Refresh failed.")
+                        _rerun()
+            else:
                 st.caption(f"Last refresh (GSheet): **{last_refresh or 'Never'}**.")
-            with col_btn:
-                if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
-                    ok, msg = _refresh_from_online_sheet()
-                    if ok:
-                        set_last_refresh("gsheet")
-                        st.session_state["data_source"] = "gsheet"
-                        st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
-                    else:
-                        st.error(msg or "Refresh failed.")
-                    _rerun()
             sources = _master_kitchens_sources()
             source_options = [s[0] for s in sources]
             source_ids = {s[0]: s[1] for s in sources}
             if not source_options:
-                st.info("No sheet data yet. Click **Refresh from Google Sheet** above, or go to **Data** → **Google Sheet (GSheet)** → **Refresh from selected source** to load sheets. Tabs will then match your current Google Sheet.")
+                st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
                 rows = []
                 source_id = None
                 chosen_label = ""
@@ -2129,17 +2145,14 @@ def main():
             else:
                 st.caption("Filter and download. Choose a sheet — data from **Google Sheet** only.")
                 first_tab = source_options[0]
-                if user_role in ("manager_viewer", "super_user"):
-                    chosen_label = st.selectbox(
-                        "Tab",
-                        options=source_options,
-                        key="master_source",
-                        help="Sheets from your Google Sheet. Refresh in Data to update.",
-                    )
-                    source_id = source_ids.get(chosen_label, first_tab)
-                else:
-                    chosen_label = first_tab
-                    source_id = first_tab
+                # Show sheet/tab selector for all users (including customers) so everyone can pick Facility, Kitchens, etc.
+                chosen_label = st.selectbox(
+                    "Tab",
+                    options=source_options,
+                    key="master_source",
+                    help="Sheets from your Google Sheet. Refresh above to update.",
+                )
+                source_id = source_ids.get(chosen_label, first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
                 is_other_sheet = True
         # Render selected tab (only when we have tabs from GSheet)
@@ -2387,7 +2400,7 @@ def main():
                         except Exception:
                             pass
 
-    # Dashboard: KPIs, trend, what changed today
+    # Dashboard: management view — percentages, insights, breakdowns; no day-to-day focus
     elif section == "Dashboard":
         st.title("Dashboard")
         superset_rows, superset_meta = _get_superset_master_kitchens()
@@ -2397,14 +2410,27 @@ def main():
                 st.warning("Last refresh is older than 30 minutes or last run failed.")
             rows_kitchens = superset_rows
         else:
-            st.caption("Vacancy and churn metrics. Data from Kitchens.")
+            st.caption("Management view. Data from **Kitchens** (refreshes every 15 min).")
             rows_kitchens = list_generic_tab("Kitchens") or list_generic_tab("Master Kitchens list") or []
-        if snapshot_mod:
+        today_str = date.today().isoformat()
+        if snapshot_mod and rows_kitchens:
             today_str = date.today().isoformat()
-            if not snapshot_mod.snapshot_exists_for_date(today_str) and rows_kitchens:
+            if not snapshot_mod.snapshot_exists_for_date(today_str):
                 snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
         def _s(r):
             for k in ("Status", "Status__c", "status"):
+                v = r.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            return ""
+        def _facility(r):
+            for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+                v = r.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            return ""
+        def _country(r):
+            for k in ("Account Country", "County", "Country__c", "Country", "account__r.country__c"):
                 v = r.get(k)
                 if v is not None and str(v).strip():
                     return str(v).strip()
@@ -2413,60 +2439,164 @@ def main():
         churning = sum(1 for r in rows_kitchens if _s(r) == "Churning")
         occupied = sum(1 for r in rows_kitchens if _s(r) == "Occupied")
         sold = sum(1 for r in rows_kitchens if _s(r) == "Sold")
+        total = vacant + churning + occupied + sold
+        occ_pct = (occupied / total * 100) if total else 0
+        vac_pct = (vacant / total * 100) if total else 0
+        churn_pct = (churning / total * 100) if total else 0
+        sold_pct = (sold / total * 100) if total else 0
+        # —— Key insights (management summary) ——
+        st.subheader("Key insights")
+        active = total - sold  # exclude sold from "active" pool for rate context
+        active_pct_occ = (occupied / active * 100) if active else 0
+        bullets = [
+            f"**Occupancy** is **{occ_pct:.1f}%** of all kitchens ({occupied:,} of {total:,}).",
+            f"**Vacancy rate** is **{vac_pct:.1f}%** ({vacant:,} kitchens) — **{churn_pct:.1f}%** in churn pipeline ({churning:,}).",
+            f"**{sold:,}** kitchens in Sold status (excluded from occupancy).",
+        ]
+        if active and active != total:
+            bullets.append(f"Among active kitchens (excl. Sold), occupancy is **{active_pct_occ:.1f}%**.")
+        for b in bullets:
+            st.markdown(f"- {b}")
+        st.caption("Rates from current snapshot. Data refreshes every 15 minutes.")
+        st.markdown("---")
+        # —— Primary scorecard: percentages and totals ——
+        st.subheader("Scorecard")
+        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+        with sc1:
+            st.metric("Occupancy %", f"{occ_pct:.1f}%", help="Occupied / total kitchens")
+        with sc2:
+            st.metric("Vacancy %", f"{vac_pct:.1f}%", help="Vacant / total")
+        with sc3:
+            st.metric("In churn %", f"{churn_pct:.1f}%", help="Churning / total")
+        with sc4:
+            st.metric("Total kitchens", f"{total:,}")
+        with sc5:
+            st.metric("Sold", f"{sold:,}", help="Excluded from occupancy")
+        st.markdown("---")
+        # —— Status counts (current state, not "today") ——
+        st.subheader("Current status (counts)")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Vacant today", vacant)
+            st.metric("Vacant", vacant)
         with col2:
-            st.metric("Churning today", churning)
+            st.metric("Churning", churning)
         with col3:
-            st.metric("Occupied today", occupied)
+            st.metric("Occupied", occupied)
         with col4:
-            st.metric("Sold today", sold)
+            st.metric("Sold", sold)
+        # —— By facility: occupancy % and vacancy % ——
+        fac_stats = {}
+        for r in rows_kitchens:
+            f = _facility(r) or "(No facility)"
+            if f not in fac_stats:
+                fac_stats[f] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0}
+            s = _s(r)
+            if s == "Vacant":
+                fac_stats[f]["vacant"] += 1
+            elif s == "Churning":
+                fac_stats[f]["churning"] += 1
+            elif s == "Occupied":
+                fac_stats[f]["occupied"] += 1
+            elif s == "Sold":
+                fac_stats[f]["sold"] += 1
+        if fac_stats:
+            st.markdown("---")
+            st.subheader("By facility")
+            fac_rows = []
+            for f, counts in fac_stats.items():
+                t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
+                if t == 0:
+                    continue
+                occ_p = (counts["occupied"] / t * 100)
+                vac_p = (counts["vacant"] / t * 100)
+                churn_p = (counts["churning"] / t * 100)
+                fac_rows.append({"Facility": f, "Total": t, "Occupancy %": round(occ_p, 1), "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1), "Vacant": counts["vacant"], "Churning": counts["churning"], "Occupied": counts["occupied"], "Sold": counts["sold"]})
+            fac_rows.sort(key=lambda x: -x["Total"])
+            if fac_rows:
+                df_fac = pd.DataFrame(fac_rows)
+                st.dataframe(df_fac, use_container_width=True, hide_index=True, column_config={"Occupancy %": st.column_config.NumberColumn(format="%.1f"), "Vacancy %": st.column_config.NumberColumn(format="%.1f"), "In churn %": st.column_config.NumberColumn(format="%.1f")})
+        # —— By country ——
+        country_stats = {}
+        for r in rows_kitchens:
+            c = _country(r) or "(No country)"
+            if c not in country_stats:
+                country_stats[c] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0}
+            s = _s(r)
+            if s == "Vacant":
+                country_stats[c]["vacant"] += 1
+            elif s == "Churning":
+                country_stats[c]["churning"] += 1
+            elif s == "Occupied":
+                country_stats[c]["occupied"] += 1
+            elif s == "Sold":
+                country_stats[c]["sold"] += 1
+        if country_stats and len(country_stats) > 1:
+            st.subheader("By country")
+            c_rows = []
+            for c, counts in country_stats.items():
+                t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
+                if t == 0:
+                    continue
+                occ_p = (counts["occupied"] / t * 100)
+                vac_p = (counts["vacant"] / t * 100)
+                churn_p = (counts["churning"] / t * 100)
+                c_rows.append({"Country": c, "Total": t, "Occupancy %": round(occ_p, 1), "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1), "Vacant": counts["vacant"], "Churning": counts["churning"], "Occupied": counts["occupied"], "Sold": counts["sold"]})
+            c_rows.sort(key=lambda x: -x["Total"])
+            if c_rows:
+                df_c = pd.DataFrame(c_rows)
+                st.dataframe(df_c, use_container_width=True, hide_index=True, column_config={"Occupancy %": st.column_config.NumberColumn(format="%.1f"), "Vacancy %": st.column_config.NumberColumn(format="%.1f"), "In churn %": st.column_config.NumberColumn(format="%.1f")})
+        # —— Trend: occupancy % and vacancy % over time (last 30 days) ——
         if snapshot_mod:
             snapshots = snapshot_mod.load_snapshots(30)
-            yesterday_str = (date.today() - timedelta(days=1)).isoformat()
-            yesterday_rows = [s for s in snapshots if s.get("snapshot_date") == yesterday_str]
-            today_snap = [s for s in snapshots if s.get("snapshot_date") == today_str]
-            changes = snapshot_mod.compute_daily_changes(today_snap if today_snap else rows_kitchens, yesterday_rows) if yesterday_rows else []
-            if yesterday_rows:
-                vac_y = sum(1 for s in yesterday_rows if (s.get("status") or "").strip() == "Vacant")
-                churn_y = sum(1 for s in yesterday_rows if (s.get("status") or "").strip() == "Churning")
-                st.caption(f"Change vs yesterday: Vacant **{vacant - vac_y:+d}**, Churning **{churning - churn_y:+d}**")
-            st.subheader("What changed today")
-            if not changes:
-                st.info("No status changes vs yesterday (or no yesterday snapshot).")
-            else:
-                if HAS_EXCEL:
-                    st.dataframe(pd.DataFrame(changes), use_container_width=True, hide_index=True)
-                else:
-                    for c in changes[:50]:
-                        st.write(c)
-                    if len(changes) > 50:
-                        st.caption(f"… and {len(changes) - 50} more.")
-            st.subheader("Trend (last 30 days)")
             by_date = {}
             for s in snapshots:
                 d = s.get("snapshot_date")
                 if not d:
                     continue
-                by_date.setdefault(d, {"vacant": 0, "churning": 0})
-                if (s.get("status") or "").strip() == "Vacant":
+                by_date.setdefault(d, {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0, "total": 0})
+                st_val = (s.get("status") or "").strip()
+                if st_val == "Vacant":
                     by_date[d]["vacant"] += 1
-                elif (s.get("status") or "").strip() == "Churning":
+                elif st_val == "Churning":
                     by_date[d]["churning"] += 1
+                elif st_val == "Occupied":
+                    by_date[d]["occupied"] += 1
+                elif st_val == "Sold":
+                    by_date[d]["sold"] += 1
+                by_date[d]["total"] = by_date[d]["vacant"] + by_date[d]["churning"] + by_date[d]["occupied"] + by_date[d]["sold"]
             if by_date:
+                st.markdown("---")
+                st.subheader("Trend (last 30 days) — percentages")
                 try:
                     import plotly.graph_objects as go
                     dates_sorted = sorted(by_date.keys())
+                    occ_pcts = [(by_date[d]["occupied"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
+                    vac_pcts = [(by_date[d]["vacant"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
+                    churn_pcts = [(by_date[d]["churning"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=[by_date[d]["vacant"] for d in dates_sorted], name="Vacant", mode="lines+markers"))
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=[by_date[d]["churning"] for d in dates_sorted], name="Churning", mode="lines+markers"))
-                    fig.update_layout(title="Vacant & Churning by day", xaxis_title="Date", yaxis_title="Count", height=300)
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=occ_pcts, name="Occupancy %", mode="lines+markers"))
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=vac_pcts, name="Vacancy %", mode="lines+markers"))
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=churn_pcts, name="In churn %", mode="lines+markers"))
+                    fig.update_layout(title="Occupancy, Vacancy & Churn % over time", xaxis_title="Date", yaxis_title="%", yaxis=dict(ticksuffix="%"), height=340)
                     st.plotly_chart(fig, use_container_width=True)
                 except Exception:
-                    st.caption("Chart requires plotly.")
+                    st.caption("Trend chart requires plotly. Install: pip install plotly")
+            # Optional: daily change log (collapsed)
+            yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+            yesterday_rows = [s for s in snapshots if s.get("snapshot_date") == yesterday_str]
+            today_snap = [s for s in snapshots if s.get("snapshot_date") == today_str]
+            changes = snapshot_mod.compute_daily_changes(today_snap if today_snap else rows_kitchens, yesterday_rows) if yesterday_rows else []
+            if changes:
+                with st.expander("Daily change log (status changes vs yesterday)"):
+                    if HAS_EXCEL:
+                        st.dataframe(pd.DataFrame(changes), use_container_width=True, hide_index=True)
+                    else:
+                        for c in changes[:50]:
+                            st.write(c)
+                        if len(changes) > 50:
+                            st.caption(f"… and {len(changes) - 50} more.")
         else:
-            st.info("Snapshot module not loaded. Install app/snapshot.py for daily change tracking.")
+            st.caption("Enable app/snapshot.py for trend-over-time and daily change log.")
         return
 
     # Search (all tabs)
@@ -2579,19 +2709,23 @@ def main():
         # Data source: Google Sheet only (Salesforce source removed from UI)
         st.session_state["data_source"] = "gsheet"
         last_refresh_gsheet = get_last_refresh("gsheet")
-        col_cap, col_btn = st.columns([3, 1])
-        with col_cap:
-            st.caption(f"Current source: **Google Sheet (GSheet)**. Last refresh: **{last_refresh_gsheet or 'Never'}**.")
-        with col_btn:
-            if st.button("Refresh from Google Sheet", key="data_refresh_btn"):
-                ok, msg = _refresh_from_online_sheet()
-                if ok:
-                    set_last_refresh("gsheet")
-                    st.success("Data loaded from Google Sheet.")
-                else:
-                    st.error(msg or "Google Sheet refresh failed.")
-                if ok:
-                    _rerun()
+        _show_refresh_btn = _is_developer() or user_role == "super_user"
+        if _show_refresh_btn:
+            col_cap, col_btn = st.columns([3, 1])
+            with col_cap:
+                st.caption(f"Current source: **Google Sheet (GSheet)**. Last refresh: **{last_refresh_gsheet or 'Never'}**. Data is refreshed every 15 minutes by the scheduler; you can use the button for an immediate update.")
+            with col_btn:
+                if st.button("Refresh from Google Sheet", key="data_refresh_btn"):
+                    ok, msg = _refresh_from_online_sheet()
+                    if ok:
+                        set_last_refresh("gsheet")
+                        st.success("Data loaded from Google Sheet.")
+                    else:
+                        st.error(msg or "Google Sheet refresh failed.")
+                    if ok:
+                        _rerun()
+        else:
+            st.caption(f"Current source: **Google Sheet (GSheet)**. Last refresh: **{last_refresh_gsheet or 'Never'}**. Data is refreshed every 15 minutes by the scheduler.")
         st.divider()
         # Exports (moved from separate section)
         rows_for_export = list_rows()
@@ -2610,7 +2744,7 @@ def main():
         if not all_tab_ids:
             all_tab_ids = [t for t in list_tab_ids_for_source("gsheet") if t != MAIN_TRACKER_TAB_ID]
         if not all_tab_ids:
-            st.info("No sheet data yet. Click **Refresh from Google Sheet** above to load all worksheets from your Google Sheet.")
+            st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
         else:
             sheet_tabs = st.tabs(all_tab_ids)
             tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]

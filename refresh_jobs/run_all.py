@@ -1,12 +1,14 @@
 """
-Scheduled refresh every 15 minutes: fetch Superset chart data and persist.
+Scheduled refresh every 15 minutes: fetch Superset chart data and GSheet data; persist.
 Run: python refresh_jobs/run_all.py (or from repo root: python -m refresh_jobs.run_all)
-Uses SUPERSET_URL, SUPERSET_USERNAME, SUPERSET_PASSWORD (or SUPERSET_ACCESS_TOKEN).
+Superset: SUPERSET_URL, SUPERSET_USERNAME, SUPERSET_PASSWORD (or SUPERSET_ACCESS_TOKEN).
 Chart IDs: SUPERSET_CHART_ID_MASTER_KITCHENS, SUPERSET_CHART_ID_FACILITY_KPI (optional).
-Storage: Supabase (SUPABASE_URL, SUPABASE_KEY) or parquet in DATA_STORE_DIR.
+GSheet: GOOGLE_APPLICATION_CREDENTIALS (or credentials under scripts/ or .secrets/); optional GSHEET_SHEET_ID.
+Storage: Supabase (SUPABASE_URL, SUPABASE_KEY) or parquet in DATA_STORE_DIR; GSheet → app/data/tracker.db.
 """
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -113,6 +115,22 @@ def main() -> int:
             ok = False
     else:
         logger.info("SUPERSET_CHART_ID_FACILITY_KPI not set; skipping Facility KPI Summary")
+
+    # GSheet refresh: same 15‑minute cycle so users don't have to press the button in the app
+    try:
+        r = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "refresh_jobs" / "refresh_gsheet.py")],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if r.returncode != 0:
+            logger.warning("GSheet refresh failed: %s", r.stderr or r.stdout)
+        else:
+            logger.info("GSheet refresh completed")
+    except Exception as e:
+        logger.warning("GSheet refresh error: %s", e)
 
     return 0 if ok else 1
 
