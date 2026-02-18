@@ -62,7 +62,7 @@ SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
 
 # Rerun works in Streamlit 1.27+; fallback for older versions
 def _rerun():
-    if hasattr(st, "rerun"):
+    if hasattr(st, "rerun"): 
         st.rerun()
     else:
         st.experimental_rerun()
@@ -2478,11 +2478,21 @@ def main():
                     return str(v).strip()
             return ""
         def _country(r):
+            """Normalized country for dashboard grouping.
+
+            - If a country is present, normalize Bahrain → Saudi Arabia (treated as SA in this view).
+            - If no country field, default to 'Saudi Arabia' so everything is grouped together.
+            """
             for k in ("Account Country", "County", "Country__c", "Country", "account__r.country__c"):
                 v = r.get(k)
                 if v is not None and str(v).strip():
-                    return str(v).strip()
-            return ""
+                    val = str(v).strip()
+                    low = val.lower()
+                    if low in ("bahrain", "bh", "bhr"):
+                        return "Saudi Arabia"
+                    return val
+            # No explicit country column; this dashboard is for SA/Bahrain which we treat as SA
+            return "Saudi Arabia"
         vacant = sum(1 for r in rows_kitchens if _status_normalized(r) == "Vacant")
         churning = sum(1 for r in rows_kitchens if _status_normalized(r) == "Churning")
         occupied = sum(1 for r in rows_kitchens if _status_normalized(r) == "Occupied")
@@ -2580,10 +2590,14 @@ def main():
                 country_stats[c]["occupied"] += 1
             elif s == "Sold":
                 country_stats[c]["sold"] += 1
-        if country_stats and len(country_stats) > 1:
+        # Only show By country when there is a meaningful split (more than one distinct country)
+        distinct_countries = {c for c in country_stats.keys() if c and c != "(No country)"}
+        if distinct_countries and len(distinct_countries) > 1:
             st.subheader("By country")
             c_rows = []
             for c, counts in country_stats.items():
+                if not c or c == "(No country)":
+                    continue
                 t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
                 if t == 0:
                     continue
