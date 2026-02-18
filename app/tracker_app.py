@@ -1978,7 +1978,6 @@ def main():
     else:
         st.sidebar.markdown('<span style="color: #2E7D6E; font-size: 1.4rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
     st.sidebar.markdown("**KSA Kitchens Tracker**")
-    st.sidebar.caption("Navigate all kitchens under accounts in all countries, with full details.")
     st.sidebar.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
     # Log this session once (for analytics); show record count — more meaningful than "traffic"
     if not st.session_state.get("traffic_logged"):
@@ -2539,79 +2538,24 @@ def main():
             if fac_rows:
                 df_fac = pd.DataFrame(fac_rows)
                 st.dataframe(df_fac, use_container_width=True, hide_index=True, column_config={"Occupancy %": st.column_config.NumberColumn(format="%.1f"), "Vacancy %": st.column_config.NumberColumn(format="%.1f"), "In churn %": st.column_config.NumberColumn(format="%.1f")})
+                # Bar chart: vacant kitchens by facility (top 15)
+                try:
+                    import plotly.express as px
+                    top_for_bar = [r for r in fac_rows if r["Vacant"] > 0]
+                    if top_for_bar:
+                        df_bar = pd.DataFrame(sorted(top_for_bar, key=lambda x: -x["Vacant"])[:15])
+                        fig_bar = px.bar(df_bar, x="Facility", y="Vacant", title="Vacant kitchens by facility")
+                        fig_bar.update_layout(xaxis_title="Facility", yaxis_title="Vacant kitchens", xaxis_tickangle=-45, height=380)
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                except Exception:
+                    pass
+                # BI: focus list — top facilities by vacant count (actionable)
                 top_vacant = sorted(fac_rows, key=lambda x: -x["Vacant"])[:5]
                 if any(x["Vacant"] > 0 for x in top_vacant):
                     with st.expander("Focus: top facilities by vacant kitchens", expanded=False):
                         for r in top_vacant:
                             if r["Vacant"] > 0:
                                 st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {r['Occupancy %']}% occupancy")
-        # —— Trend: occupancy % over time (last 3 months) ——
-        if snapshot_mod:
-            snapshots = snapshot_mod.load_snapshots(90)
-            by_date = {}
-            for s in snapshots:
-                raw_d = s.get("snapshot_date")
-                if not raw_d:
-                    continue
-                d = str(raw_d).strip()[:10]
-                if len(d) < 10:
-                    continue
-                by_date.setdefault(d, {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0, "total": 0})
-                st_val = (s.get("status") or "").strip()
-                if st_val == "Vacant":
-                    by_date[d]["vacant"] += 1
-                elif st_val == "Churning":
-                    by_date[d]["churning"] += 1
-                elif st_val == "Occupied":
-                    by_date[d]["occupied"] += 1
-                elif st_val == "Sold":
-                    by_date[d]["sold"] += 1
-                by_date[d]["total"] = by_date[d]["vacant"] + by_date[d]["churning"] + by_date[d]["occupied"] + by_date[d]["sold"]
-            if by_date:
-                st.markdown("---")
-                st.subheader("Occupancy % trend (last 3 months)")
-                try:
-                    import plotly.graph_objects as go
-                    dates_sorted = sorted(by_date.keys())
-                    occ_pcts = [(by_date[d]["occupied"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
-                    vac_pcts = [(by_date[d]["vacant"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
-                    churn_pcts = [(by_date[d]["churning"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
-                    x_labels = [d[:10] for d in dates_sorted]
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=x_labels, y=occ_pcts, name="Occupancy %", mode="lines+markers", line=dict(color="#059669", width=2.5), fill="tozeroy", fillcolor="rgba(5,150,105,0.15)"))
-                    fig.add_trace(go.Scatter(x=x_labels, y=vac_pcts, name="Vacancy %", mode="lines+markers", line=dict(color="#DC2626", width=1.5)))
-                    fig.add_trace(go.Scatter(x=x_labels, y=churn_pcts, name="In churn %", mode="lines+markers", line=dict(color="#EA580C", width=1.5)))
-                    fig.update_layout(
-                        title="Occupancy % over time",
-                        xaxis_title="Date",
-                        yaxis_title="%",
-                        yaxis=dict(ticksuffix="%", range=[0, 100]),
-                        xaxis=dict(type="category", tickangle=-45),
-                        height=360,
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                        margin=dict(t=60, b=80),
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                    if len(dates_sorted) < 7:
-                        st.caption("Trend builds up as more daily snapshots are saved (one per day). Add more days for a fuller view.")
-                except Exception:
-                    st.caption("Trend chart requires plotly. Install: pip install plotly")
-            # Optional: daily change log (collapsed)
-            yesterday_str = (date.today() - timedelta(days=1)).isoformat()
-            def _snap_date(s):
-                return str(s.get("snapshot_date") or "").strip()[:10]
-            yesterday_rows = [s for s in snapshots if _snap_date(s) == yesterday_str]
-            today_snap = [s for s in snapshots if _snap_date(s) == today_str]
-            changes = snapshot_mod.compute_daily_changes(today_snap if today_snap else rows_kitchens, yesterday_rows) if yesterday_rows else []
-            if changes:
-                with st.expander("Daily change log (status changes vs yesterday)"):
-                    if HAS_EXCEL:
-                        st.dataframe(pd.DataFrame(changes), use_container_width=True, hide_index=True)
-                    else:
-                        for c in changes[:50]:
-                            st.write(c)
-                        if len(changes) > 50:
-                            st.caption(f"… and {len(changes) - 50} more.")
         else:
             st.caption("Enable app/snapshot.py for trend-over-time and daily change log.")
         return
@@ -2722,7 +2666,7 @@ def main():
     # —— Data: all sheet tabs as horizontal tabs ——
     if section == "Data":
         st.title("Data")
-        st.caption("**Main goal:** Navigate all kitchens under accounts in all countries (SA, UAE, Kuwait, Bahrain, Qatar) with full details. Use the **Kitchens** tab; filter by country or search below.")
+        st.caption("Use the **Kitchens** tab; filter or search below.")
         # Data source: Google Sheet only (Salesforce source removed from UI)
         st.session_state["data_source"] = "gsheet"
         last_refresh_gsheet = get_last_refresh("gsheet")
