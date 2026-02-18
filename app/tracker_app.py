@@ -2562,21 +2562,23 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
-        st.caption("Data from **online sheet**. Only tabs with data are shown below.")
-        # Exclude Tracker and empty tabs
-        candidate_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids("gsheet")) if t != MAIN_TRACKER_TAB_ID]
-        all_tab_ids = [t for t in candidate_ids if list_generic_tab(t, source="gsheet")]
-        sheet_tabs = st.tabs(all_tab_ids)
-        tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
-        st.markdown(
-            f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
-            'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
-            'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
-            unsafe_allow_html=True,
-        )
-        for tab_index, tab_id in enumerate(all_tab_ids):
-            with sheet_tabs[tab_index]:
-                _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer, source="gsheet")
+        st.caption("Data from **online sheet**. All tabs loaded from your last refresh are shown below.")
+        # Show every tab that has data in the GSheet store (no fixed list — reflects actual worksheets from last refresh)
+        all_tab_ids = [t for t in list_tab_ids_for_source("gsheet") if t != MAIN_TRACKER_TAB_ID]
+        if not all_tab_ids:
+            st.info("No sheet data yet. Click **Refresh from Google Sheet** above to load all worksheets from your Google Sheet.")
+        else:
+            sheet_tabs = st.tabs(all_tab_ids)
+            tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
+            st.markdown(
+                f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
+                'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
+                'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
+                unsafe_allow_html=True,
+            )
+            for tab_index, tab_id in enumerate(all_tab_ids):
+                with sheet_tabs[tab_index]:
+                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer, source="gsheet")
 
     # —— Super-user tools (Prompt 7, 8, 9) ——
     if section == "Currency Converter":
