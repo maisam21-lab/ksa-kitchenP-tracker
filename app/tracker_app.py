@@ -1973,9 +1973,10 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         st.title("Kitchen Master Data")
-        # Data reflects the source selected in Data (SF or GSheet). Every AE sees the same kitchens.
+        # Single source: SF or GSheet, set in Data section. No mix.
         data_src = st.session_state.get("data_source") or "salesforce"
-        st.caption("Data reflects the source selected in **Data** (Salesforce or Google Sheet). Refresh in **Data** to update. Every AE has the same access.")
+        src_label = "Salesforce" if data_src == "salesforce" else "Google Sheet"
+        st.caption(f"Source: **{src_label}** (set in **Data**). Refresh in Data to switch or update. Every AE has the same access.")
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             # Data source: Superset (Trino proxy) — read from persisted store only
@@ -2001,10 +2002,10 @@ def main():
             source_ids = {s[0]: s[1] for s in sources}
             if user_role in ("manager_viewer", "super_user"):
                 chosen_label = st.selectbox(
-                    "Data source",
+                    "Tab",
                     options=source_options,
                     key="master_source",
-                    help="Kitchens or Master Kitchens list — kitchen details only.",
+                    help="Which tab to show: Kitchens or Master Kitchens list (same data source as set in Data).",
                 )
                 source_id = source_ids.get(chosen_label, "Kitchens")
             else:
