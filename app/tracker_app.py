@@ -232,7 +232,6 @@ def _is_main_tracker_tab(tab_id: str) -> bool:
 
 # Short descriptions for tab tooltips (hover); Tracker is not shown as a tab (moved to Dashboard)
 TAB_DESCRIPTIONS = {
-    "Auto Refresh Execution Log": "Log of auto-refresh runs and sheet operations. View or add rows.",
     "Kitchens": "All kitchen details. View, filter, and download.",
     "Master Kitchens list": "Master list of all kitchens. View, filter, and download.",
     "Sellable No Status": "Sellable no-status data. View and filter.",
@@ -240,7 +239,6 @@ TAB_DESCRIPTIONS = {
     "LF Comp": "LF Comp data. View and filter.",
     "Pivot Table 10": "Pivot Table 10 dataset. View and filter.",
     "Area Data": "Area data. View and filter.",
-    "SF Churn Data": "SF Churn data. View and filter.",
     "KSA Facility details": "KSA facility details. View and filter.",
     "Inflation FPx": "Inflation FPx data. View and filter.",
     "Price Multipliers": "Price multipliers. View and filter.",
@@ -258,7 +256,6 @@ TAB_DESCRIPTIONS = {
 # Sheet tab names shown in the app; last 7 also loaded via Trino
 # Tracker data is no longer a Data tab; users customize their view on Dashboard
 SHEET_TAB_IDS = [
-    "Auto Refresh Execution Log",
     "Kitchens",
     "Master Kitchens list",
     "Sellable No Status",
@@ -266,7 +263,6 @@ SHEET_TAB_IDS = [
     "LF Comp",
     "Pivot Table 10",
     "Area Data",
-    "SF Churn Data",
     "KSA Facility details",
     "Inflation FPx",
     "Price Multipliers",
@@ -1066,9 +1062,9 @@ def export_csv_generic(rows: list[dict]) -> str:
 
 
 def _dashboard_sources() -> list[tuple[str, str]]:
-    """(display_name, source_id). source_id is 'main_tracker', 'exec_log', or tab_id. All tabs."""
-    out = [("Main tracker (kitchen data)", "main_tracker"), ("Execution Log", "exec_log")]
-    for tab_id in SHEET_TAB_IDS[2:] + list_extra_tab_ids():
+    """(display_name, source_id). source_id is 'main_tracker' or tab_id. All tabs."""
+    out = [("Main tracker (kitchen data)", "main_tracker")]
+    for tab_id in SHEET_TAB_IDS + list_extra_tab_ids():
         out.append((tab_id, tab_id))
     return out
 
@@ -2540,39 +2536,22 @@ def main():
     if section == "Data":
         st.title("Data")
         st.caption("**Main goal:** Navigate all kitchens under accounts in all countries (SA, UAE, Kuwait, Bahrain, Qatar) with full details. Use the **Kitchens** tab; filter by country or search below.")
-        # Data source: SF or GSheet — developer/super_user can choose and refresh
-        current_src = st.session_state.get("data_source") or "salesforce"
-        src_options = ["Salesforce (SF)", "Google Sheet (GSheet)"]
-        src_to_internal = {"Salesforce (SF)": "salesforce", "Google Sheet (GSheet)": "gsheet"}
-        internal_to_src = {"salesforce": "Salesforce (SF)", "gsheet": "Google Sheet (GSheet)"}
-        default_idx = 0 if current_src == "salesforce" else 1
-        chosen_src_label = st.radio(
-            "Data source",
-            src_options,
-            index=default_idx,
-            horizontal=True,
-            key="data_section_source",
-        )
-        chosen_src = src_to_internal.get(chosen_src_label, "salesforce")
-        st.session_state["data_source"] = chosen_src
-        if st.button("Refresh from selected source", key="data_refresh_btn"):
-            if chosen_src == "salesforce":
-                ok, msg = _refresh_from_salesforce()
-                if ok:
-                    set_last_refresh("salesforce")
-                    st.success("Data loaded from Salesforce.")
-                else:
-                    st.error(msg or "Salesforce refresh failed.")
-            else:
+        # Data source: Google Sheet only (Salesforce source removed from UI)
+        st.session_state["data_source"] = "gsheet"
+        last_refresh_gsheet = get_last_refresh("gsheet")
+        col_cap, col_btn = st.columns([3, 1])
+        with col_cap:
+            st.caption(f"Current source: **Google Sheet (GSheet)**. Last refresh: **{last_refresh_gsheet or 'Never'}**.")
+        with col_btn:
+            if st.button("Refresh from Google Sheet", key="data_refresh_btn"):
                 ok, msg = _refresh_from_online_sheet()
                 if ok:
                     set_last_refresh("gsheet")
                     st.success("Data loaded from Google Sheet.")
                 else:
                     st.error(msg or "Google Sheet refresh failed.")
-            if ok:
-                _rerun()
-        st.caption(f"Current source: **{internal_to_src.get(st.session_state.get('data_source') or 'salesforce')}**. Last refresh: **{get_last_refresh(st.session_state.get('data_source') or 'salesforce') or 'Never'}**")
+                if ok:
+                    _rerun()
         st.divider()
         # Exports (moved from separate section)
         rows_for_export = list_rows()
@@ -2605,66 +2584,7 @@ def main():
 
             for tab_index, tab_id in enumerate(all_tab_ids):
                 with sheet_tabs[tab_index]:
-                    if tab_id == "Auto Refresh Execution Log":
-                        sub_list, sub_add = st.tabs(["List", "Add row"])
-                        with sub_list:
-                            rows_log = list_exec_log()
-                            if not rows_log:
-                                st.info("No rows yet." + (" Use **Add row** to add one." if is_developer else ""))
-                            else:
-                                st.markdown(
-                                    '<div style="background: linear-gradient(90deg, #F0FDFA 0%, #F8FAFC 100%); border-left: 4px solid #0F766E; '
-                                    'padding: 10px 14px; margin-bottom: 12px; border-radius: 0 8px 8px 0; font-weight: 600; color: #134E4A;">'
-                                    "Filter by column</div>",
-                                    unsafe_allow_html=True,
-                                )
-                                exec_cols = ["Refresh Time", "Sheet", "Operation", "Status", "User"]
-                                exec_keys = ["refresh_time", "sheet", "operation", "status", "user"]
-                                uniq = lambda k: sorted(set(r.get(k) for r in rows_log if r.get(k)))
-                                fcols = st.columns(5)
-                                filters_exec = {}
-                                for i, (label, key) in enumerate(zip(exec_cols, exec_keys)):
-                                    with fcols[i]:
-                                        st.markdown(f'<span style="font-size: 0.85rem; font-weight: 600; color: #475569;">{label}</span>', unsafe_allow_html=True)
-                                        if key in ("sheet", "status", "user"):
-                                            opts = uniq(key)
-                                            filters_exec[key] = st.multiselect(label, opts, key=f"exec_f_{key}", placeholder="All", label_visibility="collapsed")
-                                        else:
-                                            filters_exec[key] = st.text_input(label, key=f"exec_f_{key}", placeholder="Search…", label_visibility="collapsed")
-                                rows_shown = rows_log
-                                for key in exec_keys:
-                                    val = filters_exec.get(key)
-                                    if key in ("sheet", "status", "user") and val:
-                                        rows_shown = [r for r in rows_shown if r.get(key) in val]
-                                    elif key in ("refresh_time", "operation") and val and str(val).strip():
-                                        term = str(val).strip().lower()
-                                        rows_shown = [r for r in rows_shown if term in str(r.get(key) or "").lower()]
-                                st.caption(f"Showing **{len(rows_shown)}** of **{len(rows_log)}** row(s).")
-                                st.divider()
-                                st.dataframe(
-                                    [{"Refresh Time": r["refresh_time"], "Sheet": r["sheet"], "Operation": r["operation"], "Status": r["status"], "User": r["user"]} for r in rows_shown],
-                                    use_container_width=True,
-                                    hide_index=True,
-                                )
-                        with sub_add:
-                            if not is_developer:
-                                st.info("Only developers can add rows here. Unlock **Developer access** in the sidebar.")
-                            else:
-                                with st.form("exec_log_form"):
-                                    refresh_time = st.text_input("Refresh Time *", value=datetime.now().strftime("%m/%d/%Y %H:%M"))
-                                    sheet = st.text_input("Sheet *", placeholder="e.g. Price Multipliers, SF Kitchen Data")
-                                    operation = st.text_input("Operation *", placeholder="e.g. Report Id: 000V0000003z 2092AI")
-                                    status = st.text_input("Status *", value="Success")
-                                    user = st.text_input("User *", placeholder="email@cloudkitchens.com")
-                                    if st.form_submit_button("Add"):
-                                        if refresh_time and sheet and operation and status and user:
-                                            insert_exec_log({"refresh_time": refresh_time, "sheet": sheet, "operation": operation, "status": status, "user": user})
-                                            st.success("Added.")
-                                            _rerun()
-                                        else:
-                                            st.error("Fill all required fields.")
-                    else:
-                        _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
+                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
 
     # —— Super-user tools (Prompt 7, 8, 9) ——
     if section == "Currency Converter":
