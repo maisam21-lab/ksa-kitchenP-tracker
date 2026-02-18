@@ -1973,6 +1973,9 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         st.title("Kitchen Master Data")
+        # Data reflects the source selected in Data (SF or GSheet). Every AE sees the same kitchens.
+        data_src = st.session_state.get("data_source") or "salesforce"
+        st.caption("Data reflects the source selected in **Data** (Salesforce or Google Sheet). Refresh in **Data** to update. Every AE has the same access.")
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             # Data source: Superset (Trino proxy) — read from persisted store only
@@ -2028,8 +2031,18 @@ def main():
                 return ""
             if not is_tracker:
                 status_filter = st.radio("Status", ["All", "Vacant", "Churning", "Occupied", "Sold"], key="master_status_pill", horizontal=True)
-                facilities = sorted({_row_facility(r) for r in rows if _row_facility(r)})
-                facility_filter = st.selectbox("Facility", ["All"] + facilities, key="master_facility_filter")
+                facility_set = sorted({_row_facility(r) for r in rows if _row_facility(r)})
+                no_facility = [r for r in rows if not _row_facility(r)]
+                facility_list = (["(No facility)"] if no_facility else []) + list(facility_set)
+                use_facility_tabs = len(facility_list) > 0
+                if not use_facility_tabs:
+                    facility_filter = st.selectbox("Facility", ["All"], key="master_facility_filter")
+                else:
+                    facility_filter = None
+            else:
+                use_facility_tabs = False
+                facility_list = []
+                facility_filter = None
             st.markdown("---")
             st.subheader("Refine your data")
             if st.session_state.pop("master_clear_filters", False):
@@ -2085,7 +2098,7 @@ def main():
                     with d2:
                         st.date_input("To report date", value=None, key="master_to_date")
             rows_filtered = rows
-            if not is_tracker:
+            if not is_tracker and not use_facility_tabs:
                 if status_filter and status_filter != "All":
                     rows_filtered = [r for r in rows_filtered if _row_status(r) == status_filter]
                 if facility_filter and facility_filter != "All":
@@ -2127,29 +2140,63 @@ def main():
                     all_keys.update(r.keys() if isinstance(r, dict) else [])
                 rows_filtered = [r for r in rows_filtered if any(term in str(r.get(k) or "").lower() for k in (all_keys or ["_"]))]
             st.markdown("---")
-            st.caption(f"**{len(rows_filtered)}** of **{total}** rows")
-            if total > 0 and len(rows_filtered) == 0:
+            if use_facility_tabs:
+                facility_tabs = st.tabs(facility_list)
+                search_term = (search or "").strip().lower() if search else ""
+                for tab_idx, fac_name in enumerate(facility_list):
+                    with facility_tabs[tab_idx]:
+                        if fac_name == "(No facility)":
+                            rows_f = list(no_facility)
+                        else:
+                            rows_f = [r for r in rows if _row_facility(r) == fac_name]
+                        if status_filter and status_filter != "All":
+                            rows_f = [r for r in rows_f if _row_status(r) == status_filter]
+                        if search_term:
+                            rows_f = [r for r in rows_f if any(search_term in str(r.get(k) or "").lower() for k in (r.keys() if isinstance(r, dict) else []))]
+                        st.caption(f"**{len(rows_f)}** kitchens · *{fac_name}*")
+                        if rows_f:
+                            all_cols_f = list(rows_f[0].keys()) if rows_f else []
+                            default_show_f = st.session_state.get(f"master_col_f_{tab_idx}") or all_cols_f
+                            default_show_f = [c for c in default_show_f if c in all_cols_f] or all_cols_f
+                            cols_show_f = st.multiselect("Columns", options=all_cols_f, default=default_show_f, key=f"master_col_f_{tab_idx}", placeholder="All")
+                            if not cols_show_f:
+                                cols_show_f = all_cols_f
+                            if HAS_EXCEL:
+                                st.dataframe(pd.DataFrame(rows_f)[cols_show_f] if cols_show_f else pd.DataFrame(rows_f), use_container_width=True, hide_index=True)
+                            else:
+                                for r in rows_f[:50]:
+                                    st.json(r)
+                                if len(rows_f) > 50:
+                                    st.caption(f"… and {len(rows_f) - 50} more.")
+                            csv_f = export_csv_generic(rows_f)
+                            safe_fac = (fac_name or "facility").replace("/", "-").replace("\\", "-")[:30]
+                            st.download_button("Download CSV", data=csv_f, file_name=f"kitchens_{safe_fac}.csv", mime="text/csv", key=f"master_dl_f_{tab_idx}")
+                        else:
+                            st.info("No kitchens match filters.")
+            if not use_facility_tabs:
+                st.caption(f"**{len(rows_filtered)}** of **{total}** rows")
+            if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
                 st.info("No rows match your filters. Try clearing or relaxing filters.")
-            if rows_filtered:
+            if rows_filtered and not use_facility_tabs:
                 all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
                 default_show = st.session_state.get("master_columns_show") or all_cols
                 default_show = [c for c in default_show if c in all_cols] or all_cols
                 cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="master_columns_show", placeholder="All columns")
                 if not cols_to_show:
                     cols_to_show = all_cols
-            if HAS_EXCEL and rows_filtered:
+            if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_filtered)[cols_to_show] if cols_to_show else pd.DataFrame(rows_filtered)
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
-            elif rows_filtered:
+            elif rows_filtered and not use_facility_tabs:
                 for r in rows_filtered[:100]:
                     st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
                 if len(rows_filtered) > 100:
                     st.caption(f"… and {len(rows_filtered) - 100} more.")
-            if rows_filtered:
+            if rows_filtered and not use_facility_tabs:
                 csv_data = export_csv(rows_filtered) if is_tracker else export_csv_generic(rows_filtered)
                 safe_name = (chosen_label or "master_kitchens").replace(" ", "_")[:40]
                 st.download_button("Download report (CSV)", data=csv_data, file_name=f"{safe_name}.csv", mime="text/csv", key="master_dl_report_csv")
-            if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0:
+            if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
                 st.markdown("---")
                 st.subheader("Pivot view")
                 st.caption("Slice your data by rows and columns.")
