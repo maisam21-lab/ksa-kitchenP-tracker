@@ -2143,22 +2143,32 @@ def main():
                 chosen_label = ""
                 is_other_sheet = False
             else:
-                st.caption("Filter and download. Choose a sheet — data from **Google Sheet** only.")
+                st.caption("Filter and download. Choose one or more sheets — data from **Google Sheet** only.")
                 first_tab = source_options[0]
-                # Show sheet/tab selector for all users (including customers) so everyone can pick Facility, Kitchens, etc.
-                chosen_label = st.selectbox(
+                # Multi-select: users can pick multiple sheets and see each in its own tab.
+                chosen_labels = st.multiselect(
                     "Tab",
                     options=source_options,
+                    default=[first_tab],
                     key="master_source",
-                    help="Sheets from your Google Sheet. Refresh above to update.",
+                    help="Select one or more sheets. Each selected sheet appears in a tab below.",
                 )
-                source_id = source_ids.get(chosen_label, first_tab)
+                if not chosen_labels:
+                    chosen_labels = [first_tab]
+                source_id = source_ids.get(chosen_labels[0], first_tab)  # used for legacy branch below
                 rows = list_generic_tab(source_id, source="gsheet")
                 is_other_sheet = True
-        # Render selected tab (only when we have tabs from GSheet)
+        # Render selected tab(s): when multiple selected, one tab per sheet; otherwise single view
         other_sheet_ids = set(_master_kitchens_other_sheet_ids()) if source_options else set()
-        if is_other_sheet and source_id:
-            _render_generic_tab(source_id, key_suffix="master_other", is_developer=is_developer, source="gsheet")
+        if is_other_sheet and chosen_labels:
+            if len(chosen_labels) == 1:
+                _render_generic_tab(source_ids.get(chosen_labels[0], chosen_labels[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet")
+            else:
+                sheet_tabs = st.tabs(chosen_labels)
+                for idx, label in enumerate(chosen_labels):
+                    tab_id = source_ids.get(label, label)
+                    with sheet_tabs[idx]:
+                        _render_generic_tab(tab_id, key_suffix=f"master_{label.replace(' ', '_')}_{idx}", is_developer=is_developer, source="gsheet")
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No data in **{chosen_label}** yet. Refresh job runs every 15 minutes.")
         elif not is_other_sheet and source_id:
@@ -2410,7 +2420,6 @@ def main():
                 st.warning("Last refresh is older than 30 minutes or last run failed.")
             rows_kitchens = superset_rows
         else:
-            st.caption("Management view. Data from **Kitchens** (refreshes every 15 min).")
             rows_kitchens = list_generic_tab("Kitchens") or list_generic_tab("Master Kitchens list") or []
         today_str = date.today().isoformat()
         if snapshot_mod and rows_kitchens:
@@ -2444,30 +2453,32 @@ def main():
         vac_pct = (vacant / total * 100) if total else 0
         churn_pct = (churning / total * 100) if total else 0
         sold_pct = (sold / total * 100) if total else 0
+        def _pct_fmt(x: float) -> str:
+            """Format percentage so 0 is always visible as 0.0%."""
+            return f"{x:.1f}%" if x == x else "0.0%"
         # —— Key insights (management summary) ——
         st.subheader("Key insights")
         active = total - sold  # exclude sold from "active" pool for rate context
         active_pct_occ = (occupied / active * 100) if active else 0
         bullets = [
-            f"**Occupancy** is **{occ_pct:.1f}%** of all kitchens ({occupied:,} of {total:,}).",
-            f"**Vacancy rate** is **{vac_pct:.1f}%** ({vacant:,} kitchens) — **{churn_pct:.1f}%** in churn pipeline ({churning:,}).",
+            f"**Occupancy** is **{_pct_fmt(occ_pct)}** of all kitchens ({occupied:,} of {total:,}).",
+            f"**Vacancy rate** is **{_pct_fmt(vac_pct)}** ({vacant:,} kitchens) — **{_pct_fmt(churn_pct)}** in churn pipeline ({churning:,}).",
             f"**{sold:,}** kitchens in Sold status (excluded from occupancy).",
         ]
         if active and active != total:
-            bullets.append(f"Among active kitchens (excl. Sold), occupancy is **{active_pct_occ:.1f}%**.")
+            bullets.append(f"Among active kitchens (excl. Sold), occupancy is **{_pct_fmt(active_pct_occ)}**.")
         for b in bullets:
             st.markdown(f"- {b}")
-        st.caption("Rates from current snapshot. Data refreshes every 15 minutes.")
         st.markdown("---")
         # —— Primary scorecard: percentages and totals ——
         st.subheader("Scorecard")
         sc1, sc2, sc3, sc4, sc5 = st.columns(5)
         with sc1:
-            st.metric("Occupancy %", f"{occ_pct:.1f}%", help="Occupied / total kitchens")
+            st.metric("Occupancy %", _pct_fmt(occ_pct), help="Occupied / total kitchens")
         with sc2:
-            st.metric("Vacancy %", f"{vac_pct:.1f}%", help="Vacant / total")
+            st.metric("Vacancy %", _pct_fmt(vac_pct), help="Vacant / total")
         with sc3:
-            st.metric("In churn %", f"{churn_pct:.1f}%", help="Churning / total")
+            st.metric("In churn %", _pct_fmt(churn_pct), help="Churning / total")
         with sc4:
             st.metric("Total kitchens", f"{total:,}")
         with sc5:
@@ -2477,13 +2488,13 @@ def main():
         st.subheader("Current status (counts)")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Vacant", vacant)
+            st.metric("Vacant", str(vacant))
         with col2:
-            st.metric("Churning", churning)
+            st.metric("Churning", str(churning))
         with col3:
-            st.metric("Occupied", occupied)
+            st.metric("Occupied", str(occupied))
         with col4:
-            st.metric("Sold", sold)
+            st.metric("Sold", str(sold))
         # —— By facility: occupancy % and vacancy % ——
         fac_stats = {}
         for r in rows_kitchens:
@@ -2566,7 +2577,7 @@ def main():
                 by_date[d]["total"] = by_date[d]["vacant"] + by_date[d]["churning"] + by_date[d]["occupied"] + by_date[d]["sold"]
             if by_date:
                 st.markdown("---")
-                st.subheader("Trend (last 30 days) — percentages")
+                st.subheader("Occupancy % trend (last 30 days)")
                 try:
                     import plotly.graph_objects as go
                     dates_sorted = sorted(by_date.keys())
@@ -2574,10 +2585,18 @@ def main():
                     vac_pcts = [(by_date[d]["vacant"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
                     churn_pcts = [(by_date[d]["churning"] / by_date[d]["total"] * 100) if by_date[d]["total"] else 0 for d in dates_sorted]
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=occ_pcts, name="Occupancy %", mode="lines+markers"))
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=vac_pcts, name="Vacancy %", mode="lines+markers"))
-                    fig.add_trace(go.Scatter(x=dates_sorted, y=churn_pcts, name="In churn %", mode="lines+markers"))
-                    fig.update_layout(title="Occupancy, Vacancy & Churn % over time", xaxis_title="Date", yaxis_title="%", yaxis=dict(ticksuffix="%"), height=340)
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=occ_pcts, name="Occupancy %", mode="lines+markers", line=dict(color="#059669", width=2.5), fill="tozeroy", fillcolor="rgba(5,150,105,0.15)"))
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=vac_pcts, name="Vacancy %", mode="lines+markers", line=dict(color="#DC2626", width=1.5)))
+                    fig.add_trace(go.Scatter(x=dates_sorted, y=churn_pcts, name="In churn %", mode="lines+markers", line=dict(color="#EA580C", width=1.5)))
+                    fig.update_layout(
+                        title="Occupancy % over time",
+                        xaxis_title="Date",
+                        yaxis_title="%",
+                        yaxis=dict(ticksuffix="%", range=[0, 100]),
+                        height=360,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        margin=dict(t=60),
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                 except Exception:
                     st.caption("Trend chart requires plotly. Install: pip install plotly")
