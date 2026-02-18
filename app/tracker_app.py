@@ -2564,14 +2564,14 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
-        # When data is from GSheet only: show Master Kitchens (kitchens + account details) — no other tabs
-        data_source = st.session_state.get("data_source")
-        if data_source == "gsheet":
-            st.caption("Data from **online sheet**. Showing kitchens and account-related details only.")
-            _render_generic_tab("Kitchens", key_suffix="data_kitchens", is_developer=is_developer)
+        # From GSheet: for most users show Kitchens only; super_user can see all tabs from the online tracker.
+        if user_role != "super_user":
+            st.caption("Data from **online sheet**. Showing kitchens and account-related details only (main view).")
+            _render_generic_tab("Kitchens", key_suffix="data_kitchens", is_developer=is_developer, source="gsheet")
         else:
+            st.caption("Data from **online sheet**. As super user you can browse **all tabs** from the tracker below.")
             # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
-            all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids()) if t != MAIN_TRACKER_TAB_ID]
+            all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids("gsheet")) if t != MAIN_TRACKER_TAB_ID]
             sheet_tabs = st.tabs(all_tab_ids)
             # Tab tooltips: descriptions shown on hover
             tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
@@ -2584,7 +2584,7 @@ def main():
 
             for tab_index, tab_id in enumerate(all_tab_ids):
                 with sheet_tabs[tab_index]:
-                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer)
+                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer, source="gsheet")
 
     # —— Super-user tools (Prompt 7, 8, 9) ——
     if section == "Currency Converter":
