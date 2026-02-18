@@ -2394,6 +2394,40 @@ def main():
     if section == "Data":
         st.title("Data")
         st.caption("**Main goal:** Navigate all kitchens under accounts in all countries (SA, UAE, Kuwait, Bahrain, Qatar) with full details. Use the **Kitchens** tab; filter by country or search below.")
+        # Data source: SF or GSheet — developer/super_user can choose and refresh
+        current_src = st.session_state.get("data_source") or "salesforce"
+        src_options = ["Salesforce (SF)", "Google Sheet (GSheet)"]
+        src_to_internal = {"Salesforce (SF)": "salesforce", "Google Sheet (GSheet)": "gsheet"}
+        internal_to_src = {"salesforce": "Salesforce (SF)", "gsheet": "Google Sheet (GSheet)"}
+        default_idx = 0 if current_src == "salesforce" else 1
+        chosen_src_label = st.radio(
+            "Data source",
+            src_options,
+            index=default_idx,
+            horizontal=True,
+            key="data_section_source",
+        )
+        chosen_src = src_to_internal.get(chosen_src_label, "salesforce")
+        st.session_state["data_source"] = chosen_src
+        if st.button("Refresh from selected source", key="data_refresh_btn"):
+            if chosen_src == "salesforce":
+                ok, msg = _refresh_from_salesforce()
+                if ok:
+                    set_last_refresh("salesforce")
+                    st.success("Data loaded from Salesforce.")
+                else:
+                    st.error(msg or "Salesforce refresh failed.")
+            else:
+                ok, msg = _refresh_from_online_sheet()
+                if ok:
+                    set_last_refresh("gsheet")
+                    st.success("Data loaded from Google Sheet.")
+                else:
+                    st.error(msg or "Google Sheet refresh failed.")
+            if ok:
+                _rerun()
+        st.caption(f"Current source: **{internal_to_src.get(st.session_state.get('data_source') or 'salesforce')}**. Last refresh: **{get_last_refresh(st.session_state.get('data_source') or 'salesforce') or 'Never'}**")
+        st.divider()
         # Exports (moved from separate section)
         rows_for_export = list_rows()
         with st.expander("Exports", expanded=False):
