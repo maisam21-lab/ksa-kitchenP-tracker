@@ -2050,7 +2050,7 @@ def main():
     if section == "Kitchen Master Data":
         st.title("Kitchen Master Data")
         # These tabs read from Google Sheet only (no Salesforce).
-        st.caption("Source: **Google Sheet** only. Refresh in **Data** (select Google Sheet → Refresh from selected source) to update. Every AE has the same access.")
+        st.caption("Source: **Google Sheet** only. Use **Refresh from Google Sheet** below to pull the latest tabs and data after you update the sheet. Every AE has the same access.")
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             # Data source: Superset (Trino proxy) — read from persisted store only
@@ -2068,12 +2068,24 @@ def main():
         else:
             # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
             last_refresh = get_last_refresh("gsheet")
-            st.caption(f"Last refresh (GSheet): **{last_refresh or 'Never'}**. Refresh in **Data** to update.")
+            col_cap, col_btn = st.columns([3, 1])
+            with col_cap:
+                st.caption(f"Last refresh (GSheet): **{last_refresh or 'Never'}**.")
+            with col_btn:
+                if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
+                    ok, msg = _refresh_from_online_sheet()
+                    if ok:
+                        set_last_refresh("gsheet")
+                        st.session_state["data_source"] = "gsheet"
+                        st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
+                    else:
+                        st.error(msg or "Refresh failed.")
+                    _rerun()
             sources = _master_kitchens_sources()
             source_options = [s[0] for s in sources]
             source_ids = {s[0]: s[1] for s in sources}
             if not source_options:
-                st.info("No sheet data yet. Go to **Data** → select **Google Sheet (GSheet)** → **Refresh from selected source** to load your sheets. Kitchen Master Data will then list all tabs from that sheet.")
+                st.info("No sheet data yet. Click **Refresh from Google Sheet** above, or go to **Data** → **Google Sheet (GSheet)** → **Refresh from selected source** to load sheets. Tabs will then match your current Google Sheet.")
                 rows = []
                 source_id = None
                 chosen_label = ""
