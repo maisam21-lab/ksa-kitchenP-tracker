@@ -1935,6 +1935,8 @@ def main():
         .stDataFrame thead th { background: #334155 !important; color: #F1F5F9 !important; border-bottom: 2px solid #0F766E !important; }
         .stDataFrame tbody td { background: #1E293B !important; color: #E2E8F0 !important; }
         [data-testid="stMetricValue"] { color: #F1F5F9 !important; }
+        section[data-testid="stSidebar"] [data-testid="stMetricValue"] { font-size: 0.85rem !important; }
+        section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
         div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
         </style>
@@ -1962,6 +1964,8 @@ def main():
         .stDataFrame thead th { background: #F1F5F9 !important; color: #1E293B !important; font-weight: 600 !important; padding: 10px 12px !important; border-bottom: 2px solid #0F766E !important; }
         .stDataFrame tbody td { padding: 8px 12px !important; }
         [data-testid="stMetricValue"] { color: #1E293B !important; }
+        section[data-testid="stSidebar"] [data-testid="stMetricValue"] { font-size: 0.85rem !important; }
+        section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         .stCaption { color: #64748B !important; }
         div[data-testid="stVerticalBlock"] > div { padding-top: 0.25rem; }
         </style>
@@ -2145,14 +2149,27 @@ def main():
             else:
                 st.caption("Filter and download. Choose one or more sheets — data from **Google Sheet** only.")
                 first_tab = source_options[0]
-                # Multi-select: users can pick multiple sheets and see each in its own tab.
-                chosen_labels = st.multiselect(
-                    "Tab",
-                    options=source_options,
-                    default=[first_tab],
-                    key="master_source",
-                    help="Select one or more sheets. Each selected sheet appears in a tab below.",
-                )
+                # Select all / Clear and multi-select
+                col_sel, col_ms = st.columns([1, 4])
+                with col_sel:
+                    if st.button("Select all", key="master_select_all_btn"):
+                        st.session_state["master_source"] = list(source_options)
+                        _rerun()
+                    if st.button("Clear", key="master_clear_tabs_btn"):
+                        st.session_state["master_source"] = [first_tab]
+                        _rerun()
+                with col_ms:
+                    default_sel = st.session_state.get("master_source")
+                    if default_sel is None or not all(t in source_options for t in (default_sel or [])):
+                        default_sel = [first_tab]
+                        st.session_state["master_source"] = default_sel
+                    chosen_labels = st.multiselect(
+                        "Tab",
+                        options=source_options,
+                        default=default_sel,
+                        key="master_source",
+                        help="Select one or more sheets, or use Select all. Each selected sheet appears in a tab below.",
+                    )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
                 source_id = source_ids.get(chosen_labels[0], first_tab)  # used for legacy branch below
@@ -2427,11 +2444,33 @@ def main():
             if not snapshot_mod.snapshot_exists_for_date(today_str):
                 snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
         def _s(r):
-            for k in ("Status", "Status__c", "status"):
-                v = r.get(k)
-                if v is not None and str(v).strip():
-                    return str(v).strip()
-            return ""
+            v = None
+            for k in ("Status", "Status__c", "status", "Kitchen_Status__c", "state"):
+                if k in r and r.get(k) is not None and str(r.get(k)).strip():
+                    v = str(r.get(k)).strip()
+                    break
+            if v is None:
+                for k, val in (r or {}).items():
+                    if val is not None and str(k).strip().lower() == "status":
+                        v = str(val).strip()
+                        if v:
+                            break
+            return v or ""
+        def _status_normalized(r):
+            """Return one of Vacant, Churning, Occupied, Sold for counting (case-insensitive match)."""
+            raw = _s(r)
+            if not raw:
+                return ""
+            low = raw.strip().lower()
+            if low == "vacant":
+                return "Vacant"
+            if low == "churning":
+                return "Churning"
+            if low == "occupied":
+                return "Occupied"
+            if low == "sold":
+                return "Sold"
+            return raw  # keep as-is so it won't match and will fall into "other" (not counted)
         def _facility(r):
             for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
                 v = r.get(k)
@@ -2444,10 +2483,10 @@ def main():
                 if v is not None and str(v).strip():
                     return str(v).strip()
             return ""
-        vacant = sum(1 for r in rows_kitchens if _s(r) == "Vacant")
-        churning = sum(1 for r in rows_kitchens if _s(r) == "Churning")
-        occupied = sum(1 for r in rows_kitchens if _s(r) == "Occupied")
-        sold = sum(1 for r in rows_kitchens if _s(r) == "Sold")
+        vacant = sum(1 for r in rows_kitchens if _status_normalized(r) == "Vacant")
+        churning = sum(1 for r in rows_kitchens if _status_normalized(r) == "Churning")
+        occupied = sum(1 for r in rows_kitchens if _status_normalized(r) == "Occupied")
+        sold = sum(1 for r in rows_kitchens if _status_normalized(r) == "Sold")
         total = vacant + churning + occupied + sold
         occ_pct = (occupied / total * 100) if total else 0
         vac_pct = (vacant / total * 100) if total else 0
@@ -2501,7 +2540,7 @@ def main():
             f = _facility(r) or "(No facility)"
             if f not in fac_stats:
                 fac_stats[f] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0}
-            s = _s(r)
+            s = _status_normalized(r)
             if s == "Vacant":
                 fac_stats[f]["vacant"] += 1
             elif s == "Churning":
@@ -2532,7 +2571,7 @@ def main():
             c = _country(r) or "(No country)"
             if c not in country_stats:
                 country_stats[c] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0}
-            s = _s(r)
+            s = _status_normalized(r)
             if s == "Vacant":
                 country_stats[c]["vacant"] += 1
             elif s == "Churning":
@@ -2556,9 +2595,9 @@ def main():
             if c_rows:
                 df_c = pd.DataFrame(c_rows)
                 st.dataframe(df_c, use_container_width=True, hide_index=True, column_config={"Occupancy %": st.column_config.NumberColumn(format="%.1f"), "Vacancy %": st.column_config.NumberColumn(format="%.1f"), "In churn %": st.column_config.NumberColumn(format="%.1f")})
-        # —— Trend: occupancy % and vacancy % over time (last 30 days) ——
+        # —— Trend: occupancy % and vacancy % over time (last 3 months) ——
         if snapshot_mod:
-            snapshots = snapshot_mod.load_snapshots(30)
+            snapshots = snapshot_mod.load_snapshots(90)
             by_date = {}
             for s in snapshots:
                 d = s.get("snapshot_date")
@@ -2577,7 +2616,7 @@ def main():
                 by_date[d]["total"] = by_date[d]["vacant"] + by_date[d]["churning"] + by_date[d]["occupied"] + by_date[d]["sold"]
             if by_date:
                 st.markdown("---")
-                st.subheader("Occupancy % trend (last 30 days)")
+                st.subheader("Occupancy % trend (last 3 months)")
                 try:
                     import plotly.graph_objects as go
                     dates_sorted = sorted(by_date.keys())
