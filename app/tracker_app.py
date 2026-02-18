@@ -1801,7 +1801,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
-    # Status color coding for Kitchens / master-style tabs (Vacant=red, Churning=orange, Occupied=green, Sold=blue)
+    # Status color coding for entire row (Vacant=red, Churning=orange, Occupied=green, Sold=blue)
     _status_colors = {"Vacant": "#FEE2E2", "Churning": "#FED7AA", "Occupied": "#D1FAE5", "Sold": "#DBEAFE"}
     df_display = pd.DataFrame(rows_shown)
     status_col = None
@@ -1810,15 +1810,12 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
             status_col = c
             break
     if status_col and not df_display.empty:
-        def _color_status(val):
-            v = (str(val) if val is not None else "").strip()
+        def _row_bg(row):
+            v = (str(row[status_col]) if row[status_col] is not None else "").strip()
             bg = _status_colors.get(v, "")
-            return f"background-color: {bg}" if bg else ""
-        styled = df_display.style.apply(
-            lambda s: [_color_status(v) for v in s],
-            subset=[status_col],
-            axis=0,
-        )
+            style = f"background-color: {bg}" if bg else ""
+            return [style] * len(row)
+        styled = df_display.style.apply(_row_bg, axis=1)
         st.dataframe(styled, use_container_width=True, hide_index=True)
     else:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
@@ -1869,76 +1866,56 @@ def main():
             if ok:
                 _rerun()
 
-    # KitchenPark-style theme: light header, teal hero + CTAs (match KitchenPark site)
-    st.markdown("""
+    # Theme: light (default) or dark mode — applied based on sidebar toggle
+    _dark = st.session_state.get("dark_mode", False)
+    if _dark:
+        st.markdown("""
         <style>
-        /* App: clean light background like KitchenPark */
-        .stApp { background: #FAFBFC; font-family: sans-serif; }
-        /* Header: light grey bar, dark text (like KitchenPark top nav) */
-        header[data-testid="stHeader"] {
-            background: #F1F3F4 !important;
-            border-bottom: 1px solid #E2E8F0;
-        }
-        header[data-testid="stHeader"] * { color: #1E293B !important; }
-        /* Sidebar: white, teal accent stripe */
-        section[data-testid="stSidebar"] {
-            background: #FFFFFF;
-            border-right: 4px solid #0F766E;
-        }
-        section[data-testid="stSidebar"] .stMarkdown { color: #1E293B !important; font-weight: 600 !important; }
-        /* Page title = hero block: teal bar, white headline (like "Commercial kitchen spaces...") */
-        h1 {
-            background: #0F766E !important;
-            color: white !important;
-            font-weight: 700 !important;
-            letter-spacing: -0.02em !important;
-            padding: 20px 28px !important;
-            margin: 0 0 1.5rem 0 !important;
-            border-radius: 0 10px 10px 0 !important;
-            box-shadow: 0 2px 8px rgba(15,118,110,0.2);
-        }
-        h2, h3 { color: #1E293B !important; font-weight: 600 !important; }
-        /* Tabs: neutral bar, selected = solid teal (like CONTACT US button) */
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 8px; background: #F1F5F9; padding: 8px; border-radius: 10px;
-            overflow-x: auto !important; overflow-y: hidden;
-            flex-wrap: nowrap !important;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: thin;
-            padding-bottom: 8px;
-        }
-        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { height: 8px; }
-        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb { background: #94A3B8; border-radius: 4px; }
-        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover { background: #0F766E; }
-        .stTabs [data-baseweb="tab"] { padding: 10px 18px; border-radius: 8px; font-weight: 500; flex-shrink: 0; color: #475569; }
-        .stTabs [aria-selected="true"] {
-            background: #0F766E !important;
-            color: white !important;
-        }
+        .stApp { background: #0F172A; font-family: sans-serif; }
+        header[data-testid="stHeader"] { background: #1E293B !important; border-bottom: 1px solid #334155; }
+        header[data-testid="stHeader"] * { color: #F1F5F9 !important; }
+        section[data-testid="stSidebar"] { background: #1E293B; border-right: 4px solid #0F766E; }
+        section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] .stCaption { color: #E2E8F0 !important; }
+        section[data-testid="stSidebar"] input { background: #334155 !important; color: #F1F5F9 !important; border-color: #475569 !important; }
+        h1 { background: #0F766E !important; color: white !important; font-weight: 700 !important; padding: 20px 28px !important; margin: 0 0 1.5rem 0 !important; border-radius: 0 10px 10px 0 !important; }
+        h2, h3, p, span, label { color: #E2E8F0 !important; }
+        .stCaption { color: #94A3B8 !important; }
+        .stTabs [data-baseweb="tab-list"] { background: #1E293B; padding: 8px; border-radius: 10px; }
+        .stTabs [data-baseweb="tab"] { color: #94A3B8 !important; }
+        .stTabs [aria-selected="true"] { background: #0F766E !important; color: white !important; }
         .stTabs [aria-selected="true"] span { color: white !important; }
-        /* Primary buttons: solid teal like CONTACT US */
-        .stButton > button { border-radius: 8px; font-weight: 500; }
-        .stButton > button[kind="primary"] {
-            background: #0F766E !important;
-            border: none !important;
-            color: white !important;
-        }
-        .stButton > button[kind="primary"]:hover {
-            background: #0D9488 !important;
-            color: white !important;
-        }
-        /* Expanders: light grey, teal left border */
-        .streamlit-expanderHeader { background: #F8FAFC; border-radius: 8px; font-weight: 500; border-left: 4px solid #0F766E; }
-        /* Filter inputs: consistent, polished */
+        .stButton > button[kind="primary"] { background: #0F766E !important; color: white !important; border: none !important; }
+        .streamlit-expanderHeader { background: #334155 !important; color: #E2E8F0 !important; border-left: 4px solid #0F766E; }
+        .stTextInput input, .stSelectbox > div { background: #334155 !important; color: #F1F5F9 !important; border: 1px solid #475569 !important; }
+        .stDataFrame { border-radius: 8px; border: 1px solid #475569; background: #1E293B !important; }
+        .stDataFrame thead th { background: #334155 !important; color: #F1F5F9 !important; border-bottom: 2px solid #0F766E !important; }
+        .stDataFrame tbody td { background: #1E293B !important; color: #E2E8F0 !important; }
+        [data-testid="stMetricValue"] { color: #F1F5F9 !important; }
+        [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
+        div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
+        </style>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <style>
+        .stApp { background: #FAFBFC; font-family: sans-serif; }
+        header[data-testid="stHeader"] { background: #F1F3F4 !important; border-bottom: 1px solid #E2E8F0; }
+        header[data-testid="stHeader"] * { color: #1E293B !important; }
+        section[data-testid="stSidebar"] { background: #FFFFFF; border-right: 4px solid #0F766E; }
+        section[data-testid="stSidebar"] .stMarkdown { color: #1E293B !important; font-weight: 600 !important; }
+        h1 { background: #0F766E !important; color: white !important; font-weight: 700 !important; padding: 20px 28px !important; margin: 0 0 1.5rem 0 !important; border-radius: 0 10px 10px 0 !important; }
+        h2, h3 { color: #1E293B !important; font-weight: 600 !important; }
+        .stTabs [data-baseweb="tab-list"] { gap: 8px; background: #F1F5F9; padding: 8px; border-radius: 10px; overflow-x: auto !important; }
+        .stTabs [data-baseweb="tab"] { padding: 10px 18px; border-radius: 8px; font-weight: 500; color: #475569; }
+        .stTabs [aria-selected="true"] { background: #0F766E !important; color: white !important; }
+        .stTabs [aria-selected="true"] span { color: white !important; }
+        .stButton > button[kind="primary"] { background: #0F766E !important; border: none !important; color: white !important; }
+        .streamlit-expanderHeader { background: #F8FAFC; border-radius: 8px; border-left: 4px solid #0F766E; }
         .stTextInput input, .stSelectbox > div { border-radius: 6px !important; background: #F8FAFC !important; border: 1px solid #E2E8F0 !important; }
-        .stTextInput input:focus { border-color: #0F766E !important; box-shadow: 0 0 0 1px #0F766E !important; }
-        /* Dataframes: clean card, clear header */
-        .stDataFrame { border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; }
+        .stDataFrame { border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; }
         .stDataFrame thead th { background: #F1F5F9 !important; color: #1E293B !important; font-weight: 600 !important; padding: 10px 12px !important; border-bottom: 2px solid #0F766E !important; }
         .stDataFrame tbody td { padding: 8px 12px !important; }
-        /* Metrics / captions: dark grey */
-        [data-testid="stMetricValue"] { color: #1E293B !important; font-weight: 600 !important; }
-        [data-testid="stMetricLabel"] { color: #64748B !important; }
+        [data-testid="stMetricValue"] { color: #1E293B !important; }
         .stCaption { color: #64748B !important; }
         div[data-testid="stVerticalBlock"] > div { padding-top: 0.25rem; }
         </style>
@@ -1952,6 +1929,7 @@ def main():
         st.sidebar.markdown('<span style="color: #2E7D6E; font-size: 1.4rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
     st.sidebar.markdown("**KSA Kitchens Tracker**")
     st.sidebar.caption("Navigate all kitchens under accounts in all countries, with full details.")
+    st.sidebar.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
     # Log this session once (for analytics); show record count — more meaningful than "traffic"
     if not st.session_state.get("traffic_logged"):
         log_traffic()
@@ -2584,9 +2562,10 @@ def main():
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
-        st.caption("Data from **online sheet**. All tabs from the tracker are listed below.")
-        # Exclude Tracker from tabs; Tracker data is customized on Dashboard instead
-        all_tab_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids("gsheet")) if t != MAIN_TRACKER_TAB_ID]
+        st.caption("Data from **online sheet**. Only tabs with data are shown below.")
+        # Exclude Tracker and empty tabs
+        candidate_ids = [t for t in (SHEET_TAB_IDS + list_extra_tab_ids("gsheet")) if t != MAIN_TRACKER_TAB_ID]
+        all_tab_ids = [t for t in candidate_ids if list_generic_tab(t, source="gsheet")]
         sheet_tabs = st.tabs(all_tab_ids)
         tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
         st.markdown(
