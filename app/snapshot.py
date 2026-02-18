@@ -53,26 +53,30 @@ def write_daily_snapshot(rows: list[dict], snapshot_date: str | None = None) -> 
     try:
         c = conn
         c.execute("DELETE FROM kitchen_daily_snapshot WHERE snapshot_date = ?", (snapshot_date,))
-        count = 0
-        for row in rows:
+        # Build one row per kitchen_key (last occurrence wins) to avoid PRIMARY KEY duplicate
+        seen = {}
+        for i, row in enumerate(rows):
             if not isinstance(row, dict):
                 row = dict(row)
             key = _kitchen_key_from_row(row)
+            if not key.strip():
+                key = f"_no_key_{i}"
             facility = _row_key(row, "Account Name", "Account Name__c", "facility", "Facility", "Account__r.Name")
             kitchen_name = _row_key(row, "Kitchen Number Name", "Name", "Kitchen Number", "Kitchen_Number_ID_18__c")
             status = _row_key(row, "Status", "Status__c", "status")
             churn_date = _row_key(row, "Churn Date", "Churn_Date__c", "Opportunity__r.Churn_Date__c")
             floor_price = _row_key(row, "Floor Price", "Floor_Price__c", "floor_price")
             data_json = json.dumps(row, ensure_ascii=False)
+            seen[key] = (snapshot_date, key, facility, kitchen_name, status, churn_date, floor_price, data_json)
+        for key, vals in seen.items():
             c.execute(
-                """INSERT INTO kitchen_daily_snapshot
+                """INSERT OR REPLACE INTO kitchen_daily_snapshot
                    (snapshot_date, kitchen_key, facility, kitchen_name, status, churn_date, floor_price, data_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (snapshot_date, key, facility, kitchen_name, status, churn_date, floor_price, data_json),
+                vals,
             )
-            count += 1
         conn.commit()
-        return count
+        return len(seen)
     finally:
         conn.close()
 
