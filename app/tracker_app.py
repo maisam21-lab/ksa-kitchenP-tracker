@@ -200,7 +200,7 @@ def _load_workbook_into_db(data: dict[str, list[dict]], progress_placeholder=Non
                 upsert_row(row)
             loaded.append(f"{tab_id} ({len(rows)} rows)")
         else:
-            save_generic_tab(tab_id, rows)
+            save_generic_tab(tab_id, rows, source="gsheet")
             loaded.append(f"{tab_id} ({len(rows)} rows)")
     if progress_placeholder:
         progress_placeholder.empty()
@@ -309,13 +309,15 @@ CREATE TABLE IF NOT EXISTS ksa_auto_refresh_execution_log (
 """
 EXEC_LOG_COLUMNS = ["refresh_time", "sheet", "operation", "status", "user"]
 
-# Generic tab data: any sheet tab (SF Kitchen Data, Area Data, etc.) — store rows as JSON per row
+# Generic tab data: any sheet tab (SF Kitchen Data, Area Data, etc.) — store rows as JSON per row.
+# source = 'salesforce' | 'gsheet' so SF data is never overwritten by GSheet and vice versa.
 TABLE_GENERIC_TAB = """
 CREATE TABLE IF NOT EXISTS generic_tab_data (
+    source TEXT NOT NULL,
     tab_id TEXT NOT NULL,
     row_index INTEGER NOT NULL,
     data TEXT NOT NULL,
-    PRIMARY KEY (tab_id, row_index)
+    PRIMARY KEY (source, tab_id, row_index)
 )
 """
 
@@ -492,11 +494,37 @@ def _ensure_allowed_users_role():
             pass
 
 
+def _migrate_generic_tab_data_if_needed(c):
+    """If generic_tab_data has old schema (no source column), migrate to source-separated schema."""
+    r = c.execute("PRAGMA table_info(generic_tab_data)").fetchall()
+    columns = [row[1] for row in r]
+    if not columns:
+        return  # table didn't exist; TABLE_GENERIC_TAB created it with new schema
+    if "source" in columns:
+        return
+    # Old schema: (tab_id, row_index, data). Copy into new table with source='salesforce'.
+    c.execute(
+        "CREATE TABLE generic_tab_data_new (source TEXT NOT NULL, tab_id TEXT NOT NULL, row_index INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (source, tab_id, row_index))"
+    )
+    c.execute("INSERT INTO generic_tab_data_new (source, tab_id, row_index, data) SELECT 'salesforce', tab_id, row_index, data FROM generic_tab_data")
+    c.execute("DROP TABLE generic_tab_data")
+    c.execute("ALTER TABLE generic_tab_data_new RENAME TO generic_tab_data")
+
+
 def init_db():
     with get_conn() as c:
         c.execute(TABLE)
         c.execute(TABLE_EXEC_LOG)
-        c.execute(TABLE_GENERIC_TAB)
+        # Create generic_tab_data (may create with old schema on first run if table name reused; migration fixes it)
+        try:
+            c.execute(TABLE_GENERIC_TAB)
+        except Exception:
+            pass
+        # If table existed with old 3-column schema, migrate to source-separated schema
+        try:
+            _migrate_generic_tab_data_if_needed(c)
+        except Exception:
+            pass
         c.execute(TABLE_FEEDBACK)
         c.execute(TABLE_TRAFFIC)
         c.execute(TABLE_RECORD_COMMENTS)
@@ -1045,13 +1073,48 @@ def _dashboard_sources() -> list[tuple[str, str]]:
     return out
 
 
+# Tab options in Kitchen Master Data: all facility/sheet names that fetch from GSheet (or SF) when selected in Data
+MASTER_KITCHENS_TAB_SHEETS = [
+    "Muraslat",
+    "rawda",
+    "Arida",
+    "Tuawiq",
+    "Bishr",
+    "Hofuf",
+    "Rawda - DMM",
+    "Zuhur DMM",
+    "Rakah KBR",
+    "Aqrabiya KBR",
+    "Wurud",
+    "Yasmin",
+    "king faisal",
+    "narjis",
+    "Arid2",
+    "kinf Fahd",
+    "Jarir",
+    "Aqiq2",
+    "Salam",
+    "Khaleej",
+    "Malaga2",
+    "Malaga1",
+    "swueidi2",
+    "swueidi",
+    "dahrat Laban",
+    "wadi",
+    "sulimaniah",
+    "olaya",
+    "qortuba",
+]
+
+
+def _master_kitchens_other_sheet_ids() -> list[str]:
+    """Sheet tab IDs shown in Kitchen Master Data Tab dropdown. Only tabs loaded from GSheet (no fallback list)."""
+    return list_tab_ids_for_source("gsheet")
+
+
 def _master_kitchens_sources() -> list[tuple[str, str]]:
-    """(display_name, source_id). Only kitchen-detail tabs for Master Kitchens section."""
-    return [
-        ("Kitchens", "Kitchens"),
-        ("Master Kitchens list", "Master Kitchens list"),
-        ("Main tracker (kitchen data)", "main_tracker"),
-    ]
+    """(display_name, source_id). Only Qurtoba - Old and sheets after it (no Kitchens / Master Kitchens list / Main tracker)."""
+    return [(tab_id, tab_id) for tab_id in _master_kitchens_other_sheet_ids()]
 
 
 def _dashboard_load_source(source_id: str) -> list[dict]:
@@ -1124,20 +1187,32 @@ def insert_exec_log(row):
 
 
 # —— Generic tab data (any sheet tab: SF Kitchen Data, Area Data, etc.) ——
-def list_generic_tab(tab_id):
+# source = 'salesforce' | 'gsheet'. When None, uses st.session_state["data_source"] so SF and GSheet data stay separate.
+def list_generic_tab(tab_id, source=None):
+    if source is None:
+        source = (st.session_state.get("data_source") or "salesforce").strip() or "salesforce"
     with get_conn() as c:
         r = c.execute(
-            "SELECT data FROM generic_tab_data WHERE tab_id = ? ORDER BY row_index",
-            (tab_id,),
+            "SELECT data FROM generic_tab_data WHERE source = ? AND tab_id = ? ORDER BY row_index",
+            (source, tab_id),
         )
         return [json.loads(row[0]) for row in r]
 
 
-def list_extra_tab_ids() -> list[str]:
-    """Tab IDs that have data in generic_tab_data but are not in SHEET_TAB_IDS (e.g. from Excel sheets)."""
+def list_tab_ids_for_source(source: str) -> list[str]:
+    """All tab IDs that have data in generic_tab_data for the given source (e.g. 'gsheet')."""
+    with get_conn() as c:
+        r = c.execute("SELECT DISTINCT tab_id FROM generic_tab_data WHERE source = ? ORDER BY tab_id", (source,))
+        return [row[0] for row in r]
+
+
+def list_extra_tab_ids(source=None) -> list[str]:
+    """Tab IDs that have data in generic_tab_data for the given source but are not in SHEET_TAB_IDS."""
+    if source is None:
+        source = (st.session_state.get("data_source") or "salesforce").strip() or "salesforce"
     known = set(SHEET_TAB_IDS)
     with get_conn() as c:
-        r = c.execute("SELECT DISTINCT tab_id FROM generic_tab_data ORDER BY tab_id")
+        r = c.execute("SELECT DISTINCT tab_id FROM generic_tab_data WHERE source = ? ORDER BY tab_id", (source,))
         return [row[0] for row in r if row[0] not in known]
 
 
@@ -1170,15 +1245,16 @@ def _search_all_tabs(term: str) -> dict:
     return out
 
 
-def save_generic_tab(tab_id, rows):
+def save_generic_tab(tab_id, rows, source: str):
+    """Save rows for a tab under the given source ('salesforce' or 'gsheet'). SF and GSheet data are stored separately."""
     with get_conn() as c:
-        c.execute("DELETE FROM generic_tab_data WHERE tab_id = ?", (tab_id,))
+        c.execute("DELETE FROM generic_tab_data WHERE source = ? AND tab_id = ?", (source, tab_id))
         for i, row in enumerate(rows):
             if not isinstance(row, dict):
                 row = dict(row)
             c.execute(
-                "INSERT INTO generic_tab_data (tab_id, row_index, data) VALUES (?, ?, ?)",
-                (tab_id, i, json.dumps(row, ensure_ascii=False)),
+                "INSERT INTO generic_tab_data (source, tab_id, row_index, data) VALUES (?, ?, ?, ?)",
+                (source, tab_id, i, json.dumps(row, ensure_ascii=False)),
             )
 
 
@@ -1402,7 +1478,7 @@ def _refresh_from_salesforce():
             save_to = KITCHENS_TAB if tab_id == "SF Kitchen Data" else tab_id
             try:
                 rows = sfdc.mock_fetch_tab_data(tab_id, soql_or_report_id)
-                save_generic_tab(save_to, rows)
+                save_generic_tab(save_to, rows, source="salesforce")
                 loaded.append(f"{save_to} ({len(rows)} rows)")
             except Exception as e:
                 errors.append(f"{tab_id}: {e}")
@@ -1431,7 +1507,7 @@ def _refresh_from_salesforce():
             else:
                 rows = _salesforce_query(soql_or_report_id, config)
             if rows:
-                save_generic_tab(save_to, rows)
+                save_generic_tab(save_to, rows, source="salesforce")
                 loaded.append(f"{save_to} ({len(rows)} rows)")
             else:
                 loaded.append(f"{save_to} (0 rows)")
@@ -1559,7 +1635,7 @@ def _refresh_from_online_sheet():
                 upsert_row(row)
             loaded.append(f"{tab_id} ({len(rows)} rows)")
         else:
-            save_generic_tab(tab_id, rows)
+            save_generic_tab(tab_id, rows, source="gsheet")
             loaded.append(f"{tab_id} ({len(rows)} rows)")
     return True, "Loaded: " + "; ".join(loaded) if loaded else "No data in sheet."
 
@@ -1674,15 +1750,15 @@ def _kitchens_column_order(cols: list[str]) -> list[str]:
     return cols
 
 
-def _render_generic_tab(tab_id, key_suffix="", is_developer=False):
-    """View/filter/download for a generic tab. Data is loaded from Google Sheet or Salesforce only."""
-    rows = list_generic_tab(tab_id)
+def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
+    """View/filter/download for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source."""
+    rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if not rows and tab_id == "Kitchens":
-        rows = list_generic_tab("SF Kitchen Data")
+        rows = list_generic_tab("SF Kitchen Data", source=source) if source else list_generic_tab("SF Kitchen Data")
     # Master Kitchens list: fallback to Kitchens if empty
     if not rows and tab_id == "Master Kitchens list":
-        rows = list_generic_tab("Kitchens") or list_generic_tab("SF Kitchen Data")
+        rows = (list_generic_tab("Kitchens", source=source) or list_generic_tab("SF Kitchen Data", source=source)) if source else (list_generic_tab("Kitchens") or list_generic_tab("SF Kitchen Data"))
     if not rows:
         st.info("No data yet. Data is refreshed every 15 minutes by the scheduler.")
         return
@@ -1973,10 +2049,8 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         st.title("Kitchen Master Data")
-        # Single source: SF or GSheet, set in Data section. No mix.
-        data_src = st.session_state.get("data_source") or "salesforce"
-        src_label = "Salesforce" if data_src == "salesforce" else "Google Sheet"
-        st.caption(f"Source: **{src_label}** (set in **Data**). Refresh in Data to switch or update. Every AE has the same access.")
+        # These tabs read from Google Sheet only (no Salesforce).
+        st.caption("Source: **Google Sheet** only. Refresh in **Data** (select Google Sheet → Refresh from selected source) to update. Every AE has the same access.")
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             # Data source: Superset (Trino proxy) — read from persisted store only
@@ -1989,32 +2063,44 @@ def main():
             chosen_label = "Master Kitchens (Live)"
             source_id = "superset"
             rows = superset_rows
+            source_options = []
+            is_other_sheet = False
         else:
-            # Legacy: Kitchens / Master Kitchens list from DB
-            data_source = st.session_state.get("data_source") or "salesforce"
-            last_refresh = get_last_refresh(data_source)
-            st.caption(f"Last refresh: **{last_refresh or 'Never'}**" + (f" ({data_source})" if user_role in ("manager_viewer", "super_user") else ""))
-            if st.session_state.get("used_gsheet_fallback") and data_source == "gsheet":
-                st.warning("Salesforce unavailable; showing data from Google Sheet backup.")
-            st.caption("Filter kitchen details and download your report. Data source is **Kitchens** or **Master Kitchens list**.")
+            # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
+            last_refresh = get_last_refresh("gsheet")
+            st.caption(f"Last refresh (GSheet): **{last_refresh or 'Never'}**. Refresh in **Data** to update.")
             sources = _master_kitchens_sources()
             source_options = [s[0] for s in sources]
             source_ids = {s[0]: s[1] for s in sources}
-            if user_role in ("manager_viewer", "super_user"):
-                chosen_label = st.selectbox(
-                    "Tab",
-                    options=source_options,
-                    key="master_source",
-                    help="Which tab to show: Kitchens or Master Kitchens list (same data source as set in Data).",
-                )
-                source_id = source_ids.get(chosen_label, "Kitchens")
+            if not source_options:
+                st.info("No sheet data yet. Go to **Data** → select **Google Sheet (GSheet)** → **Refresh from selected source** to load your sheets. Kitchen Master Data will then list all tabs from that sheet.")
+                rows = []
+                source_id = None
+                chosen_label = ""
+                is_other_sheet = False
             else:
-                chosen_label = "Kitchens"
-                source_id = "Kitchens"
-            rows = _dashboard_load_source(source_id)
-        if not rows:
+                st.caption("Filter and download. Choose a sheet — data from **Google Sheet** only.")
+                first_tab = source_options[0]
+                if user_role in ("manager_viewer", "super_user"):
+                    chosen_label = st.selectbox(
+                        "Tab",
+                        options=source_options,
+                        key="master_source",
+                        help="Sheets from your Google Sheet. Refresh in Data to update.",
+                    )
+                    source_id = source_ids.get(chosen_label, first_tab)
+                else:
+                    chosen_label = first_tab
+                    source_id = first_tab
+                rows = list_generic_tab(source_id, source="gsheet")
+                is_other_sheet = True
+        # Render selected tab (only when we have tabs from GSheet)
+        other_sheet_ids = set(_master_kitchens_other_sheet_ids()) if source_options else set()
+        if is_other_sheet and source_id:
+            _render_generic_tab(source_id, key_suffix="master_other", is_developer=is_developer, source="gsheet")
+        if not rows and not is_other_sheet and chosen_label:
             st.info(f"No data in **{chosen_label}** yet. Refresh job runs every 15 minutes.")
-        else:
+        elif not is_other_sheet and source_id:
             total = len(rows)
             is_tracker = source_id == "main_tracker"  # superset and Kitchens both use table-like rows
             # Status pills and facility filter for Kitchens / Master Kitchens list (Prompt 4)
