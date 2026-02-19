@@ -2024,7 +2024,10 @@ def main():
             _st_login = getattr(st, "login", None)
             if callable(_st_login):
                 if st.sidebar.button("Sign in", type="primary", key="gate_sign_in"):
-                    _st_login()
+                    try:
+                        _st_login()
+                    except Exception:
+                        st.sidebar.error("Sign-in is not configured. Use **Developer access** below (key), or ask the app admin to enable Sign in with Google in Streamlit settings.")
             else:
                 st.sidebar.info("The app administrator must enable **Sign in with Google** (or OIDC) in Streamlit deployment settings. Until then, only developer key access is possible below.")
             with st.sidebar.expander("Developer access (key only)", expanded=False):
@@ -2205,13 +2208,19 @@ def main():
                     st.session_state["master_source"] = default_sel
                 source_id = source_ids.get(default_sel[0] if default_sel else first_tab, first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
-                st.caption("**Sheets** — choose one or more sheets.")
+                cap_col, btn_col = st.columns([3, 1])
+                with cap_col:
+                    st.caption("**Sheets** — choose one or more sheets.")
+                with btn_col:
+                    if st.button("Select all", key="master_sheets_select_all"):
+                        st.session_state["master_source"] = list(source_options)
+                        _rerun()
                 chosen_labels = st.multiselect(
                     "Sheets (tabs)",
                     options=source_options,
                     default=default_sel,
                     key="master_source",
-                    help="Select one or more sheets.",
+                    help="Select one or more sheets. Use **Select all** above to add every sheet.",
                 )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
