@@ -2474,7 +2474,7 @@ def main():
                     pass
         def _s(r):
             v = None
-            for k in ("Status", "Status__c", "status", "Kitchen_Status__c", "state"):
+            for k in ("Status", "Status__c", "status", "Kitchen_Status__c", "state", "Kitchen_Number__c.Status__c"):
                 if k in r and r.get(k) is not None and str(r.get(k)).strip():
                     v = str(r.get(k)).strip()
                     break
@@ -2506,12 +2506,19 @@ def main():
                 if v is not None and str(v).strip():
                     return str(v).strip()
             return ""
+        def _kitchen_name(r):
+            for k in ("Kitchen Number", "Name", "Kitchen_Number_ID_18__c", "Kitchen Number Name", "Kitchen_Number__c.Name"):
+                v = r.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            return ""
         vacant = sum(1 for r in rows_kitchens if _status_normalized(r) == "Vacant")
         churning = sum(1 for r in rows_kitchens if _status_normalized(r) == "Churning")
         occupied = sum(1 for r in rows_kitchens if _status_normalized(r) == "Occupied")
         sold = sum(1 for r in rows_kitchens if _status_normalized(r) == "Sold")
         total = vacant + churning + occupied + sold
         occ_pct = (occupied / total * 100) if total else 0
+        sold_rate_pct = ((occupied + sold + churning) / total * 100) if total else 0  # Sales view: (Occupied + Sold + Churning) / Total
         vac_pct = (vacant / total * 100) if total else 0
         churn_pct = (churning / total * 100) if total else 0
         sold_pct = (sold / total * 100) if total else 0
@@ -2524,21 +2531,36 @@ def main():
             if v is None or v == "": return "—"
             try: return f"${float(v):,.0f}"
             except (TypeError, ValueError): return "—"
-        def _price(r):
-            for k in ("List Price", "Sell_Price__c", "Floor Price", "Floor_Price__c", "floor_price", "List_Price__c"):
-                v = r.get(k)
-                if v is None:
-                    continue
-                try:
-                    s = str(v).replace(",", "").strip()
-                    if s:
-                        return float(s)
-                except (ValueError, TypeError):
-                    pass
+        def _parse_price(v):
+            if v is None: return None
+            try:
+                s = str(v).replace(",", "").strip()
+                if s:
+                    return float(s)
+            except (ValueError, TypeError):
+                pass
             return None
-        sum_vacant_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Vacant")
-        sum_churning_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Churning")
-        sum_occupied_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Occupied")
+        def _price(r):
+            """Single fallback: first available of List/Floor (for tables etc.)."""
+            for k in ("List Price", "Sell_Price__c", "Floor Price", "Floor_Price__c", "floor_price", "List_Price__c", "Kitchen_Number__c.Sell_Price__c", "Kitchen_Number__c.Floor_Price__c"):
+                p = _parse_price(r.get(k))
+                if p is not None:
+                    return p
+            return None
+        # Value cards per internal books: Vacant = List then Floor (opportunity); Churning/Occupied = Floor then List (revenue at risk / current fee)
+        def _price_for_value(r, status: str):
+            if status == "Vacant":
+                keys = ("List Price", "List_Price__c", "Sell_Price__c", "Kitchen_Number__c.Sell_Price__c", "Floor Price", "Floor_Price__c", "Kitchen_Number__c.Floor_Price__c", "floor_price")
+            else:
+                keys = ("Floor Price", "Floor_Price__c", "Kitchen_Number__c.Floor_Price__c", "floor_price", "List Price", "List_Price__c", "Sell_Price__c", "Kitchen_Number__c.Sell_Price__c")
+            for k in keys:
+                p = _parse_price(r.get(k))
+                if p is not None:
+                    return p
+            return None
+        sum_vacant_val = sum((_price_for_value(r, "Vacant") or 0) for r in rows_kitchens if _status_normalized(r) == "Vacant")
+        sum_churning_val = sum((_price_for_value(r, "Churning") or 0) for r in rows_kitchens if _status_normalized(r) == "Churning")
+        sum_occupied_val = sum((_price_for_value(r, "Occupied") or 0) for r in rows_kitchens if _status_normalized(r) == "Occupied")
         has_cost = sum_vacant_val > 0 or sum_churning_val > 0 or sum_occupied_val > 0
         # —— Dashboard styling: summary bar, scorecard, value cards ——
         st.markdown("""
@@ -2566,84 +2588,162 @@ def main():
         </style>
         """, unsafe_allow_html=True)
         st.markdown(
-            f'<div class="dashboard-summary"><strong>At a glance</strong> · {_pct_fmt(occ_pct)} occupied · {vacant:,} vacant · {churning:,} in churn · {total:,} total</div>',
+            f'<div class="dashboard-summary"><strong>KSA at a glance</strong> · {total:,} sellable · Sold Rate {_pct_fmt(sold_rate_pct)} · Occupancy {_pct_fmt(occ_pct)} · {vacant:,} vacant · {churning:,} churning</div>',
             unsafe_allow_html=True,
         )
-        # —— Scorecard ——
+        # —— Scorecard (Sales-first: Sold Rate + Ops Occupancy) ——
         st.subheader("Scorecard")
-        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+        sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
         with sc1:
-            st.metric("Occupancy %", _pct_fmt(occ_pct), help="Occupied / total kitchens")
+            st.metric("Total kitchens", f"{total:,}", help="Sellable only (Vacant+Sold+Occupied+Churning)")
         with sc2:
-            st.metric("Vacancy %", _pct_fmt(vac_pct), help="Vacant / total")
+            st.metric("Sold Rate %", _pct_fmt(sold_rate_pct), help="(Occupied + Sold + Churning) / Total — Sales view")
         with sc3:
-            st.metric("In churn %", _pct_fmt(churn_pct), help="Churning / total")
+            st.metric("Occupancy % (Ops)", _pct_fmt(occ_pct), help="Occupied / Total")
         with sc4:
-            st.metric("Total kitchens", f"{total:,}")
+            st.metric("Vacancy %", _pct_fmt(vac_pct), help="Vacant / Total")
         with sc5:
-            st.metric("Sold", f"{sold:,}", help="Excluded from occupancy")
-        # —— Value (List / Floor Price) in USD — colored cards, hover shows tooltip ——
+            st.metric("Churn %", _pct_fmt(churn_pct), help="Churning / Total")
+        with sc6:
+            st.metric("Sold", f"{sold:,}", help="Closed Won, future access")
+        # —— Value: Monthly | Annualized toggle ——
+        value_annualized = st.toggle("Annualized (ARR)", value=False, key="dashboard_value_annualized", help="Show MRR × 12 as ARR")
+        mult = 12 if value_annualized else 1
+        value_label = "ARR" if value_annualized else "MRR"
         if has_cost:
-            st.subheader("Value (List / Floor Price)")
-            st.caption(f"All amounts in **{DASHBOARD_CURRENCY}**. Move the mouse over a card for details.")
-            vac_display = _curr(sum_vacant_val)
-            churn_display = _curr(sum_churning_val)
-            occ_display = _curr(sum_occupied_val)
+            st.subheader(f"Value — {value_label} ({DASHBOARD_CURRENCY})")
+            st.caption("Vacant/Churn: Floor; Occupied: current book. Hover for details.")
+            vac_display = _curr(sum_vacant_val * mult)
+            churn_display = _curr(sum_churning_val * mult)
+            occ_display = _curr(sum_occupied_val * mult)
             st.markdown(
                 f'<div class="dashboard-value-row">'
-                f'<div class="dashboard-value-card vacant" title="Sum of List/Floor Price for vacant kitchens ({DASHBOARD_CURRENCY})">'
-                f'<div class="label">Vacant (opportunity)</div><div class="value">{vac_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
-                f'<div class="dashboard-value-card churning" title="Sum of List/Floor Price for churning kitchens ({DASHBOARD_CURRENCY})">'
-                f'<div class="label">Churning (at-risk)</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
-                f'<div class="dashboard-value-card occupied" title="Sum of List/Floor Price for occupied kitchens ({DASHBOARD_CURRENCY})">'
-                f'<div class="label">Occupied</div><div class="value">{occ_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'<div class="dashboard-value-card vacant" title="Sellable monthly upside — List/Floor for vacant ({DASHBOARD_CURRENCY})">'
+                f'<div class="label">Vacant {value_label} (opportunity)</div><div class="value">{vac_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'<div class="dashboard-value-card churning" title="Monthly revenue at risk — Floor for churning ({DASHBOARD_CURRENCY})">'
+                f'<div class="label">Churn {value_label} (at-risk)</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'<div class="dashboard-value-card occupied" title="Current book of business — Floor/actual for occupied ({DASHBOARD_CURRENCY})">'
+                f'<div class="label">Occupied {value_label}</div><div class="value">{occ_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
+        # —— Dashboard logic (internal books) ——
+        with st.expander("How these numbers are calculated", expanded=False):
+            st.markdown("""
+**Status (Kitchen Number)**  
+- **Vacant** — No occupancy; available to sell.  
+- **Sold** — Closed Won, access date in the future.  
+- **Occupied** — Closed Won, access date in the past (paying kitchen).  
+- **Churning** — Closed Won with a future churn date (still operating, can resell).
+
+**Counts**  
+- **Total kitchens** = Vacant + Churning + Sold + Occupied (sellable only; excludes Waitlist, Virtual, Blocked, etc.).  
+- **Occupancy %** = Occupied ÷ Total.  
+- **Vacancy %** = Vacant ÷ Total.  
+- **In churn %** = Churning ÷ Total.  
+- **Sold** = count with status Sold (excluded from occupancy %).
+
+**Value (USD, List / Floor Price)**  
+- **Vacant (opportunity)** — Sum of List Price (then Floor) for Vacant kitchens (pipelineable value if all sold at list/floor).  
+- **Churning (at-risk)** — Sum of Floor Price (then List) for Churning kitchens (revenue at risk).  
+- **Occupied** — Sum of Floor Price (then List) for Occupied kitchens (proxy for current monthly license revenue).
+            """)
         st.markdown("---")
-        # —— By facility ——
+        # —— Park leaderboard (where to focus: by Vacant MRR or Churn MRR) ——
         fac_stats = {}
         for r in rows_kitchens:
             f = _facility(r) or "(No facility)"
             if f not in fac_stats:
-                fac_stats[f] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0}
+                fac_stats[f] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0, "vacant_mrr": 0.0, "churn_mrr": 0.0}
             s = _status_normalized(r)
             if s == "Vacant":
                 fac_stats[f]["vacant"] += 1
+                fac_stats[f]["vacant_mrr"] += _price_for_value(r, "Vacant") or 0
             elif s == "Churning":
                 fac_stats[f]["churning"] += 1
+                fac_stats[f]["churn_mrr"] += _price_for_value(r, "Churning") or 0
             elif s == "Occupied":
                 fac_stats[f]["occupied"] += 1
             elif s == "Sold":
                 fac_stats[f]["sold"] += 1
         if fac_stats:
-            st.markdown("---")
-            st.subheader("By facility")
+            st.subheader("Park leaderboard — where to focus")
             fac_rows = []
             for f, counts in fac_stats.items():
                 t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
                 if t == 0:
                     continue
                 occ_p = (counts["occupied"] / t * 100)
+                sold_rate_p = ((counts["occupied"] + counts["sold"] + counts["churning"]) / t * 100)
                 vac_p = (counts["vacant"] / t * 100)
                 churn_p = (counts["churning"] / t * 100)
-                fac_rows.append({"Facility": f, "Total": t, "Occupancy %": round(occ_p, 1), "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1), "Vacant": counts["vacant"], "Churning": counts["churning"], "Occupied": counts["occupied"], "Sold": counts["sold"]})
-            fac_rows.sort(key=lambda x: -x["Total"])
+                fac_rows.append({
+                    "Facility": f, "Total": t, "Sold Rate %": round(sold_rate_p, 1), "Occupancy %": round(occ_p, 1),
+                    "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1),
+                    "Vacant": counts["vacant"], "Vacant MRR": round(counts["vacant_mrr"], 0),
+                    "Churning": counts["churning"], "Churn MRR": round(counts["churn_mrr"], 0),
+                    "Occupied": counts["occupied"], "Sold": counts["sold"],
+                })
+            sort_by = st.radio("Sort parks by", ["Vacant MRR (opportunity)", "Churn MRR (at-risk)"], key="park_sort", horizontal=True)
+            if "Churn" in sort_by:
+                fac_rows.sort(key=lambda x: (-x["Churn MRR"], -x["Total"]))
+            else:
+                fac_rows.sort(key=lambda x: (-x["Vacant MRR"], -x["Total"]))
             if fac_rows:
                 n_fac = len(fac_rows)
-                top_vac = max(fac_rows, key=lambda x: x["Vacant"])
-                summary_line = f"<strong>{n_fac}</strong> facilities · Top by vacancy: <strong>{html.escape(top_vac['Facility'])}</strong> ({top_vac['Vacant']} vacant)"
+                top = fac_rows[0]
+                summary_line = f"<strong>{n_fac}</strong> parks · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Churn MRR {_curr(top['Churn MRR'])}"
                 st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
-                # Styled table (same theme as scorecard / value cards)
-                header = "<tr><th>Facility</th><th>Total</th><th>Occupancy %</th><th>Vacancy %</th><th>In churn %</th><th>Vacant</th><th>Churning</th><th>Occupied</th><th>Sold</th></tr>"
+                header = "<tr><th>Park</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Churn MRR</th></tr>"
                 body = "".join(
-                    f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Occupancy %']}</td><td>{r['Vacancy %']}</td><td>{r['In churn %']}</td><td>{r['Vacant']}</td><td>{r['Churning']}</td><td>{r['Occupied']}</td><td>{r['Sold']}</td></tr>"
+                    f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Sold Rate %']}</td><td>{r['Occupancy %']}</td><td>{r['Vacant']}</td><td>{_curr(r['Vacant MRR'])}</td><td>{r['Churning']}</td><td>{_curr(r['Churn MRR'])}</td></tr>"
                     for r in fac_rows
                 )
                 st.markdown(
                     f'<div class="dashboard-facility-card"><table class="dashboard-facility-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
                     unsafe_allow_html=True,
                 )
+                park_options = ["(Select a park)"] + [r["Facility"] for r in fac_rows]
+                selected_park = st.selectbox("Select park for inventory detail", park_options, key="dashboard_selected_park")
+                # —— Inventory to sell: kitchen-level view for selected park ——
+                if selected_park and selected_park != "(Select a park)":
+                    st.subheader(f"Inventory — {selected_park}")
+                    park_rows = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_park]
+                    status_filter = st.multiselect("Status", ["Vacant", "Churning", "Sold", "Occupied"], default=["Vacant", "Churning"], key="inv_status")
+                    if status_filter:
+                        park_rows = [r for r in park_rows if _status_normalized(r) in status_filter]
+                    # Price band (Low/Mid/High by floor price tertiles in this park)
+                    floor_prices = [(_price(r) or 0) for r in park_rows]
+                    if floor_prices:
+                        p33 = sorted(floor_prices)[max(0, len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else 0
+                        p66 = sorted(floor_prices)[max(0, 2 * len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else max(floor_prices)
+                    else:
+                        p33 = p66 = 0
+                    price_band = st.radio("Price band", ["All", "Low", "Mid", "High"], key="inv_price_band", horizontal=True)
+                    def _band(r):
+                        p = _price(r) or 0
+                        if p <= p33: return "Low"
+                        if p <= p66: return "Mid"
+                        return "High"
+                    if price_band != "All":
+                        park_rows = [r for r in park_rows if _band(r) == price_band]
+                    if park_rows:
+                        inv_data = []
+                        for r in park_rows:
+                            st_val = _status_normalized(r) or "Vacant"
+                            floor_val = _price_for_value(r, "Occupied") or _price(r) or 0
+                            list_val = _price_for_value(r, "Vacant") or _price(r) or 0
+                            inv_data.append({
+                                "Kitchen": _kitchen_name(r) or "—",
+                                "Status": st_val or "—",
+                                "Floor (MRR)": floor_val,
+                                "List (MRR)": list_val,
+                                "Park": _facility(r) or "—",
+                            })
+                        df_inv = pd.DataFrame(inv_data)
+                        st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
+                    else:
+                        st.caption("No kitchens match the filters.")
                 # Bar chart: vacant kitchens by facility (top 15)
                 try:
                     import plotly.express as px
@@ -2659,13 +2759,48 @@ def main():
                         st.plotly_chart(fig_bar, use_container_width=True)
                 except Exception:
                     pass
-                # BI: focus list — top facilities by vacant count (actionable)
-                top_vacant = sorted(fac_rows, key=lambda x: -x["Vacant"])[:5]
-                if any(x["Vacant"] > 0 for x in top_vacant):
-                    with st.expander("Focus: top facilities by vacant kitchens", expanded=False):
-                        for r in top_vacant:
-                            if r["Vacant"] > 0:
-                                st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {r['Occupancy %']}% occupancy")
+                # Action list: top vacant by MRR (no pipeline filter until we have opp data)
+                with st.expander("Focus: top parks by vacant kitchens", expanded=False):
+                    for r in fac_rows[:5]:
+                        if r["Vacant"] > 0:
+                            st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {_curr(r['Vacant MRR'])} MRR · {r['Occupancy %']}% occupancy")
+        # —— Churn & at-risk block ——
+        churning_rows = [r for r in rows_kitchens if _status_normalized(r) == "Churning"]
+        if churning_rows:
+            st.markdown("---")
+            st.subheader("Churn & at-risk — save this revenue")
+            churn_mrr_total = sum((_price_for_value(r, "Churning") or 0) for r in churning_rows)
+            st.metric("Churn MRR (all churning)", _curr(churn_mrr_total), help="Sum of Floor/actual for all Churning kitchens")
+            churn_cols = ["Kitchen", "Account / Park", "Churn MRR", "Status"]
+            churn_data = []
+            for r in churning_rows:
+                churn_data.append({
+                    "Kitchen": _kitchen_name(r) or "—",
+                    "Account / Park": _facility(r) or "—",
+                    "Churn MRR": _price_for_value(r, "Churning") or _price(r) or 0,
+                    "Status": "Churning",
+                })
+            df_churn = pd.DataFrame(churn_data)
+            st.dataframe(df_churn, use_container_width=True, hide_index=True, column_config={"Churn MRR": st.column_config.NumberColumn(format="%.0f")})
+        # —— How these numbers are calculated ——
+        st.markdown("---")
+        with st.expander("How these numbers are calculated", expanded=False):
+            st.markdown("""
+**Status (Kitchen Number)**  
+- **Vacant** — No occupancy; available to sell.  
+- **Sold** — Closed Won, access date in the future.  
+- **Occupied** — Closed Won, access date in the past (paying kitchen).  
+- **Churning** — Closed Won with a future churn date (still operating, can resell).
+
+**Counts & rates**  
+- **Total** = Vacant + Churning + Sold + Occupied (sellable only).  
+- **Sold Rate %** = (Occupied + Sold + Churning) / Total — Sales view.  
+- **Occupancy %** = Occupied / Total — Ops view.  
+- **Vacancy %** = Vacant / Total. **Churn %** = Churning / Total.
+
+**Value (MRR/ARR)**  
+- **Vacant MRR** — List/Floor for vacant (sellable upside). **Churn MRR** — Floor for churning (revenue at risk). **Occupied MRR** — Floor/actual for occupied (current book).
+            """)
         return
 
     # Search (all tabs)
