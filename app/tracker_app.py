@@ -4,6 +4,7 @@ All sheet tabs in tool form: view, filter, add/edit, export. Single source of tr
 Accepts CSV or Excel (.xlsx) uploads. Can refresh directly from the online Google Sheet.
 """
 import csv
+import html
 import io
 import json
 import os
@@ -2554,6 +2555,14 @@ def main():
         .dashboard-value-card .label { font-size: 0.85rem; color: #374151; font-weight: 600; margin-bottom: 4px; }
         .dashboard-value-card .value { font-size: 1.35rem; font-weight: 700; color: #111827; }
         .dashboard-value-card .currency-hint { font-size: 0.75rem; color: #6B7280; margin-top: 4px; }
+        .dashboard-facility-card { background: linear-gradient(145deg, #f0fdf4 0%, #e0f2fe 100%); border-radius: 12px; padding: 16px; margin: 1rem 0; border-left: 4px solid #0F766E; overflow-x: auto; }
+        .dashboard-facility-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .dashboard-facility-table th { background: rgba(15,118,110,0.15); color: #134e4a; padding: 10px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #0F766E; }
+        .dashboard-facility-table td { padding: 8px 12px; border-bottom: 1px solid rgba(15,118,110,0.2); }
+        .dashboard-facility-table tr:hover { background: rgba(255,255,255,0.7); }
+        .dashboard-facility-table tr:nth-child(even) { background: rgba(255,255,255,0.4); }
+        .dashboard-facility-table tr:nth-child(even):hover { background: rgba(255,255,255,0.8); }
+        .dashboard-facility-summary { background: linear-gradient(135deg, #ecfeff 0%, #f0fdf4 100%); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; border-left: 4px solid #0d9488; font-size: 0.9rem; }
         </style>
         """, unsafe_allow_html=True)
         st.markdown(
@@ -2621,8 +2630,20 @@ def main():
                 fac_rows.append({"Facility": f, "Total": t, "Occupancy %": round(occ_p, 1), "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1), "Vacant": counts["vacant"], "Churning": counts["churning"], "Occupied": counts["occupied"], "Sold": counts["sold"]})
             fac_rows.sort(key=lambda x: -x["Total"])
             if fac_rows:
-                df_fac = pd.DataFrame(fac_rows)
-                st.dataframe(df_fac, use_container_width=True, hide_index=True, column_config={"Occupancy %": st.column_config.NumberColumn(format="%.1f"), "Vacancy %": st.column_config.NumberColumn(format="%.1f"), "In churn %": st.column_config.NumberColumn(format="%.1f")})
+                n_fac = len(fac_rows)
+                top_vac = max(fac_rows, key=lambda x: x["Vacant"])
+                summary_line = f"<strong>{n_fac}</strong> facilities · Top by vacancy: <strong>{html.escape(top_vac['Facility'])}</strong> ({top_vac['Vacant']} vacant)"
+                st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
+                # Styled table (same theme as scorecard / value cards)
+                header = "<tr><th>Facility</th><th>Total</th><th>Occupancy %</th><th>Vacancy %</th><th>In churn %</th><th>Vacant</th><th>Churning</th><th>Occupied</th><th>Sold</th></tr>"
+                body = "".join(
+                    f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Occupancy %']}</td><td>{r['Vacancy %']}</td><td>{r['In churn %']}</td><td>{r['Vacant']}</td><td>{r['Churning']}</td><td>{r['Occupied']}</td><td>{r['Sold']}</td></tr>"
+                    for r in fac_rows
+                )
+                st.markdown(
+                    f'<div class="dashboard-facility-card"><table class="dashboard-facility-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
+                    unsafe_allow_html=True,
+                )
                 # Bar chart: vacant kitchens by facility (top 15)
                 try:
                     import plotly.express as px
