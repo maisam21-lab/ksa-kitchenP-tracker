@@ -713,6 +713,20 @@ def get_last_refresh(source: str) -> str | None:
         return row[0] if row else None
 
 
+def _gsheet_refresh_is_stale(minutes: int = 15) -> bool:
+    """True if no GSheet refresh yet or last refresh was more than `minutes` ago."""
+    ts = get_last_refresh("gsheet")
+    if not ts:
+        return True
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+        return age_sec > minutes * 60
+    except Exception:
+        return True
+
+
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
     """Add a discussion post or reply (parent_id=None for top-level)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2120,6 +2134,18 @@ def main():
         else:
             # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
             last_refresh = get_last_refresh("gsheet")
+            # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
+            import time
+            now_sec = time.time()
+            last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
+            if _gsheet_refresh_is_stale(15) and (now_sec - last_run) >= 900:  # 15 min cooldown
+                st.session_state["gsheet_auto_refresh_last_run"] = now_sec
+                ok, msg = _refresh_from_online_sheet()
+                if ok:
+                    set_last_refresh("gsheet")
+                    st.session_state["data_source"] = "gsheet"
+                    _rerun()
+                last_refresh = get_last_refresh("gsheet")
             if _show_refresh_btn:
                 col_cap, col_btn = st.columns([3, 1])
                 with col_cap:
@@ -2556,8 +2582,6 @@ def main():
                         for r in top_vacant:
                             if r["Vacant"] > 0:
                                 st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {r['Occupancy %']}% occupancy")
-        else:
-            st.caption("Enable app/snapshot.py for trend-over-time and daily change log.")
         return
 
     # Search (all tabs)
@@ -2670,6 +2694,17 @@ def main():
         # Data source: Google Sheet only (Salesforce source removed from UI)
         st.session_state["data_source"] = "gsheet"
         last_refresh_gsheet = get_last_refresh("gsheet")
+        # Auto-refresh when no data or stale (>15 min), no click needed (same cooldown as Kitchen Master Data)
+        import time
+        _now_sec = time.time()
+        _last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
+        if _gsheet_refresh_is_stale(15) and (_now_sec - _last_run) >= 900:
+            st.session_state["gsheet_auto_refresh_last_run"] = _now_sec
+            ok, msg = _refresh_from_online_sheet()
+            if ok:
+                set_last_refresh("gsheet")
+                _rerun()
+            last_refresh_gsheet = get_last_refresh("gsheet")
         _show_refresh_btn = _is_developer() or user_role == "super_user"
         if _show_refresh_btn:
             col_cap, col_btn = st.columns([3, 1])
