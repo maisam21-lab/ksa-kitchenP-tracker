@@ -2193,6 +2193,7 @@ def main():
                 st.caption("**Sheets & facilities** — choose sheets and filter by facility in one place.")
                 col_sel, col_ms = st.columns([1, 4])
                 with col_sel:
+                    st.caption("**Sheets**")
                     if st.button("Select all", key="master_select_all_btn"):
                         st.session_state["master_source"] = list(source_options)
                         _rerun()
@@ -2210,6 +2211,7 @@ def main():
                 if facility_list_early:
                     col_fac_sel, col_fac_ms = st.columns([1, 4])
                     with col_fac_sel:
+                        st.caption("**Facilities**")
                         if st.button("Select all", key="master_facility_select_all_btn"):
                             st.session_state["master_facility_multi"] = list(facility_list_early)
                             _rerun()
