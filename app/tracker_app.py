@@ -2723,7 +2723,7 @@ def main():
                         st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
                     else:
                         st.caption("No kitchens match the filters.")
-                # Bar chart: dynamic by current sort (Vacant MRR or Scheduled Churn MRR), same order as leaderboard
+                # Bar chart: dynamic by sort + colors aligned with dashboard (red = vacant/opportunity, orange = churn/at-risk)
                 try:
                     import plotly.express as px
                     top_for_bar = fac_rows[:15]  # already sorted by sort_by
@@ -2731,13 +2731,16 @@ def main():
                         df_bar = pd.DataFrame(top_for_bar)
                         if "Churn" in sort_by:
                             y_col, y_label, title = "Churn MRR", "Scheduled Churn MRR", "Scheduled Churn MRR by facility (top 15)"
+                            color_scale = ["#FFEDD5", "#FED7AA", "#EA580C", "#C2410C"]  # orange gradient (at-risk, like churn card)
                         else:
                             y_col, y_label, title = "Vacant MRR", "Vacant MRR", "Vacant MRR by facility (top 15)"
-                        fig_bar = px.bar(df_bar, x="Facility", y=y_col, title=title, color_discrete_sequence=["#0F766E"])
+                            color_scale = ["#FEE2E2", "#FECACA", "#DC2626", "#B91C1C"]  # red gradient (opportunity, like vacant card)
+                        fig_bar = px.bar(df_bar, x="Facility", y=y_col, title=title, color=y_col, color_continuous_scale=color_scale)
                         fig_bar.update_layout(
                             xaxis_title="Facility", yaxis_title=y_label, xaxis_tickangle=-45, height=380,
                             template="plotly_white", margin=dict(t=50, b=100), font=dict(size=12),
                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                            coloraxis=dict(colorbar=dict(title=y_label)),
                         )
                         st.plotly_chart(fig_bar, use_container_width=True)
                 except Exception:
