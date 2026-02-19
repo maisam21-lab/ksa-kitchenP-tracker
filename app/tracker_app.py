@@ -2218,18 +2218,14 @@ def main():
             else:
                 first_tab = source_options[0]
                 # Sheets and facilities in one filter box: Select all / Clear + multiselect for each
-                # Keep session state in sync with available options; use it as initial value for multiselect
-                if "master_source" not in st.session_state or not st.session_state["master_source"]:
-                    st.session_state["master_source"] = [first_tab]
-                else:
-                    current = st.session_state["master_source"]
-                    if not isinstance(current, list):
-                        current = [current] if current else [first_tab]
-                        st.session_state["master_source"] = current
-                    valid = [t for t in current if t in source_options]
-                    if not valid or valid != current:
-                        st.session_state["master_source"] = valid if valid else [first_tab]
-                source_id = source_ids.get((st.session_state["master_source"] or [first_tab])[0], first_tab)
+                # Use a dedicated key for multiselect so we never write to the widget key after it runs (avoids StreamlitAPIException on Cloud)
+                _sel_key = "master_sheets_selection"
+                if _sel_key not in st.session_state:
+                    st.session_state[_sel_key] = [first_tab]
+                _initial_sel = st.session_state.get(_sel_key) or [first_tab]
+                if not isinstance(_initial_sel, list):
+                    _initial_sel = [_initial_sel] if _initial_sel else [first_tab]
+                source_id = source_ids.get((_initial_sel or [first_tab])[0], first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
                 cap_col, btn_col = st.columns([3, 1])
                 with cap_col:
@@ -2238,39 +2234,28 @@ def main():
                     sel_col, clr_col = st.columns(2)
                     with sel_col:
                         if st.button("Select all", key="master_sheets_select_all"):
-                            st.session_state["master_source"] = list(source_options)
+                            st.session_state[_sel_key] = list(source_options)
                             _rerun()
                     with clr_col:
                         if st.button("Clear", key="master_sheets_clear"):
-                            st.session_state["master_source"] = [first_tab]
+                            st.session_state[_sel_key] = [first_tab]
                             _rerun()
-                # Multiselect: key= so Streamlit binds value to session_state (use session_state after widget for current selection)
                 chosen_labels = st.multiselect(
                     "Sheets (tabs)",
                     options=source_options,
-                    key="master_source",
+                    key=_sel_key,
                     help="Select one or more sheets. Use **Select all** above to add every sheet.",
                 )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
-                    st.session_state["master_source"] = [first_tab]
-                # Use the larger of widget return vs session_state (Streamlit can lag by one run)
-                _from_widget = list(chosen_labels) if chosen_labels else []
-                _from_state = list(st.session_state.get("master_source") or [])
-                if len(_from_state) > len(_from_widget):
-                    chosen_labels = _from_state
-                else:
-                    st.session_state["master_source"] = _from_widget
-                    chosen_labels = _from_widget
-                chosen_labels = [t for t in chosen_labels if t in source_options] or [first_tab]
-                st.session_state["master_source"] = chosen_labels
+                chosen_labels = [t for t in (chosen_labels or []) if t in source_options] or [first_tab]
                 source_id = source_ids.get(chosen_labels[0], first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
                 is_other_sheet = True
         # Render: single sheet or combined (user can force "Combined" when multiple selected)
         if is_other_sheet and chosen_labels:
             _n = len(chosen_labels)
-            _n_in_state = len(st.session_state.get("master_source") or [])
+            _n_in_state = len(st.session_state.get("master_sheets_selection") or [])
             _view_mode = st.radio(
                 "View",
                 ["Single sheet (first selected)", "Combined table (all selected)"],
@@ -2280,7 +2265,7 @@ def main():
             )
             # When "Combined" use session_state list (multiselect can lag); otherwise first only
             if _view_mode.startswith("Combined"):
-                _labels_to_use = [t for t in (st.session_state.get("master_source") or chosen_labels) if t in (source_options or [])]
+                _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
                 if not _labels_to_use:
                     _labels_to_use = chosen_labels[:1]
             else:
