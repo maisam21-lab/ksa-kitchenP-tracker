@@ -2015,38 +2015,54 @@ def main():
         pulse_display = "—"
     st.sidebar.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
 
-    # When allowlist is on: require verified sign-in (or developer key). No typed email — prevents impersonation.
+    # When allowlist is on: require verified sign-in, developer key, or (if fallback allowed) typed email
+    def _require_verified_signin() -> bool:
+        """If true, only verified sign-in or developer key; no typed email. Set ALLOWLIST_REQUIRE_VERIFIED_SIGNIN=1 for strict."""
+        try:
+            v = st.secrets.get("ALLOWLIST_REQUIRE_VERIFIED_SIGNIN") or os.environ.get("ALLOWLIST_REQUIRE_VERIFIED_SIGNIN", "")
+        except Exception:
+            v = os.environ.get("ALLOWLIST_REQUIRE_VERIFIED_SIGNIN", "")
+        return str(v).strip().lower() in ("1", "true", "yes")
     if _allowlist_enabled():
         is_developer = _is_developer()
         if not _verified_email and not is_developer:
-            st.sidebar.error("Sign-in required")
-            st.sidebar.markdown("Access is restricted. You must **sign in** with your company account (no typing someone else's email).")
-            _st_login = getattr(st, "login", None)
-            if callable(_st_login):
-                if st.sidebar.button("Sign in", type="primary", key="gate_sign_in"):
-                    try:
-                        _st_login()
-                    except Exception:
-                        st.sidebar.error("Sign-in is not configured. Use **Developer access** below (key), or ask the app admin to enable Sign in with Google in Streamlit settings.")
-            else:
-                st.sidebar.info("The app administrator must enable **Sign in with Google** (or OIDC) in Streamlit deployment settings. Until then, only developer key access is possible below.")
-            with st.sidebar.expander("Developer access (key only)", expanded=False):
-                key_in = st.text_input("Key", type="password", key="gate_dev_key", placeholder="Enter developer key")
-                if st.button("Unlock", key="gate_dev_unlock") and key_in.strip() and key_in.strip() == _get_developer_key() and _get_developer_key():
-                    st.session_state["developer_unlocked"] = True
-                    _rerun()
-            st.markdown("---")
-            st.info("**You must sign in to use this app.** Use the **Sign in** button in the sidebar, or unlock with a developer key if you have one.")
-            st.stop()
-        # Allowlist on and (verified or developer): identity is verified email only, or developer key
-        if _verified_email:
-            st.session_state["user_display_name"] = _verified_email
-            current_user = _verified_email
-            st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True)
+            if _require_verified_signin():
+                st.sidebar.error("Sign-in required")
+                st.sidebar.markdown("Access is restricted. You must **sign in** with your company account.")
+                _st_login = getattr(st, "login", None)
+                if callable(_st_login):
+                    if st.sidebar.button("Sign in", type="primary", key="gate_sign_in"):
+                        try:
+                            _st_login()
+                        except Exception:
+                            st.sidebar.error("Sign-in is not configured. Use **Developer access** below (key), or ask the app admin to enable Sign in with Google in Streamlit settings.")
+                else:
+                    st.sidebar.info("The app administrator must enable **Sign in with Google** (or OIDC) in Streamlit deployment settings. Until then, only developer key access is possible below.")
+                with st.sidebar.expander("Developer access (key only)", expanded=False):
+                    key_in = st.text_input("Key", type="password", key="gate_dev_key", placeholder="Enter developer key")
+                    if st.button("Unlock", key="gate_dev_unlock") and key_in.strip() and key_in.strip() == _get_developer_key() and _get_developer_key():
+                        st.session_state["developer_unlocked"] = True
+                        _rerun()
+                st.markdown("---")
+                st.info("**You must sign in to use this app.** Use the **Sign in** button in the sidebar, or unlock with a developer key if you have one.")
+                st.stop()
+            # Fallback: Sign-in not required — allow typed email (identity not verified)
+            st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
+            current_user = (st.session_state.get("user_display_name") or "").strip()
+            if not current_user:
+                st.sidebar.warning("Enter your email to continue.")
+                st.stop()
+            st.sidebar.caption("⚠️ Identity is not verified. For stronger security, set **ALLOWLIST_REQUIRE_VERIFIED_SIGNIN=1** and enable Sign in with Google.")
         else:
-            st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin")
-            current_user = (st.session_state.get("user_display_name") or "Developer").strip()
-            st.sidebar.caption("Developer session (key unlocked)")
+            # Allowlist on and (verified or developer): identity is verified email only, or developer key
+            if _verified_email:
+                st.session_state["user_display_name"] = _verified_email
+                current_user = _verified_email
+                st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True)
+            else:
+                st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin")
+                current_user = (st.session_state.get("user_display_name") or "Developer").strip()
+                st.sidebar.caption("Developer session (key unlocked)")
     else:
         # Allowlist off: allow typed email for display only (not for access control)
         is_developer = _is_developer()
@@ -2202,42 +2218,101 @@ def main():
             else:
                 first_tab = source_options[0]
                 # Sheets and facilities in one filter box: Select all / Clear + multiselect for each
-                default_sel = st.session_state.get("master_source")
-                if default_sel is None or not all(t in source_options for t in (default_sel or [])):
-                    default_sel = [first_tab]
-                    st.session_state["master_source"] = default_sel
-                source_id = source_ids.get(default_sel[0] if default_sel else first_tab, first_tab)
+                # Keep session state in sync with available options; use it as initial value for multiselect
+                if "master_source" not in st.session_state or not st.session_state["master_source"]:
+                    st.session_state["master_source"] = [first_tab]
+                else:
+                    current = st.session_state["master_source"]
+                    if not isinstance(current, list):
+                        current = [current] if current else [first_tab]
+                        st.session_state["master_source"] = current
+                    valid = [t for t in current if t in source_options]
+                    if not valid or valid != current:
+                        st.session_state["master_source"] = valid if valid else [first_tab]
+                source_id = source_ids.get((st.session_state["master_source"] or [first_tab])[0], first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
                 cap_col, btn_col = st.columns([3, 1])
                 with cap_col:
-                    st.caption("**Sheets** — choose one or more sheets.")
+                    st.caption("**Sheets** — choose one or more sheets. Multiple selection shows one combined table with a **Sheet** column.")
                 with btn_col:
-                    if st.button("Select all", key="master_sheets_select_all"):
-                        st.session_state["master_source"] = list(source_options)
-                        _rerun()
+                    sel_col, clr_col = st.columns(2)
+                    with sel_col:
+                        if st.button("Select all", key="master_sheets_select_all"):
+                            st.session_state["master_source"] = list(source_options)
+                            _rerun()
+                    with clr_col:
+                        if st.button("Clear", key="master_sheets_clear"):
+                            st.session_state["master_source"] = [first_tab]
+                            _rerun()
+                # Multiselect: key= so Streamlit binds value to session_state (use session_state after widget for current selection)
                 chosen_labels = st.multiselect(
                     "Sheets (tabs)",
                     options=source_options,
-                    default=default_sel,
                     key="master_source",
                     help="Select one or more sheets. Use **Select all** above to add every sheet.",
                 )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
+                    st.session_state["master_source"] = [first_tab]
+                # Use the larger of widget return vs session_state (Streamlit can lag by one run)
+                _from_widget = list(chosen_labels) if chosen_labels else []
+                _from_state = list(st.session_state.get("master_source") or [])
+                if len(_from_state) > len(_from_widget):
+                    chosen_labels = _from_state
+                else:
+                    st.session_state["master_source"] = _from_widget
+                    chosen_labels = _from_widget
+                chosen_labels = [t for t in chosen_labels if t in source_options] or [first_tab]
+                st.session_state["master_source"] = chosen_labels
                 source_id = source_ids.get(chosen_labels[0], first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
                 is_other_sheet = True
-        # Render selected tab(s): when multiple selected, one tab per sheet; otherwise single view
-        other_sheet_ids = set(_master_kitchens_other_sheet_ids()) if source_options else set()
+        # Render: single sheet or combined (user can force "Combined" when multiple selected)
         if is_other_sheet and chosen_labels:
-            if len(chosen_labels) == 1:
-                _render_generic_tab(source_ids.get(chosen_labels[0], chosen_labels[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet")
+            _n = len(chosen_labels)
+            _n_in_state = len(st.session_state.get("master_source") or [])
+            _view_mode = st.radio(
+                "View",
+                ["Single sheet (first selected)", "Combined table (all selected)"],
+                index=1 if (_n > 1 or _n_in_state > 1) else 0,
+                key="master_view_mode",
+                horizontal=True,
+            )
+            # When "Combined" use session_state list (multiselect can lag); otherwise first only
+            if _view_mode.startswith("Combined"):
+                _labels_to_use = [t for t in (st.session_state.get("master_source") or chosen_labels) if t in (source_options or [])]
+                if not _labels_to_use:
+                    _labels_to_use = chosen_labels[:1]
             else:
-                sheet_tabs = st.tabs(chosen_labels)
-                for idx, label in enumerate(chosen_labels):
+                _labels_to_use = chosen_labels[:1]
+            _show_combined = len(_labels_to_use) > 1
+            if not _show_combined:
+                _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet")
+            else:
+                # Combined view: load every selected sheet and merge into one table
+                combined_rows = []
+                for label in _labels_to_use:
                     tab_id = source_ids.get(label, label)
-                    with sheet_tabs[idx]:
-                        _render_generic_tab(tab_id, key_suffix=f"master_{label.replace(' ', '_')}_{idx}", is_developer=is_developer, source="gsheet")
+                    sheet_rows = list_generic_tab(tab_id, source="gsheet") or []
+                    for r in sheet_rows:
+                        combined_rows.append({"Sheet": label, **r})
+                if not combined_rows:
+                    st.info("No data in the selected sheets yet.")
+                else:
+                    st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets. Column **Sheet** shows the source.")
+                    cols_combined = list(combined_rows[0].keys()) if combined_rows else []
+                    search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
+                    rows_shown = combined_rows
+                    if (search_combined or "").strip():
+                        term = search_combined.strip().lower()
+                        rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
+                    st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s).")
+                    st.dataframe(pd.DataFrame(rows_shown), use_container_width=True, hide_index=True)
+                    buf = io.StringIO()
+                    w = csv.DictWriter(buf, fieldnames=cols_combined, extrasaction="ignore")
+                    w.writeheader()
+                    w.writerows(rows_shown)
+                    st.download_button("Download combined CSV", data=buf.getvalue(), file_name="master_sheets_combined.csv", mime="text/csv", key="dl_master_combined")
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No data in **{chosen_label}** yet. Refresh job runs every 15 minutes.")
         elif not is_other_sheet and source_id:
