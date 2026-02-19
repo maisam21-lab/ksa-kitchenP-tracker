@@ -2190,45 +2190,25 @@ def main():
                 facility_set_early = sorted({_row_facility_early(r) for r in rows if _row_facility_early(r)})
                 no_fac_early = [r for r in rows if not _row_facility_early(r)]
                 facility_list_early = (["(No facility)"] if no_fac_early else []) + list(facility_set_early)
-                st.caption("**Sheets & facilities** — choose sheets and filter by facility in one place.")
-                col_sel, col_ms = st.columns([1, 4])
-                with col_sel:
-                    st.caption("**Sheets**")
-                    if st.button("Select all", key="master_select_all_btn"):
-                        st.session_state["master_source"] = list(source_options)
-                        _rerun()
-                    if st.button("Clear", key="master_clear_tabs_btn"):
-                        st.session_state["master_source"] = [first_tab]
-                        _rerun()
-                with col_ms:
-                    chosen_labels = st.multiselect(
-                        "Sheets (tabs)",
-                        options=source_options,
-                        default=default_sel,
-                        key="master_source",
-                        help="Select one or more sheets.",
-                    )
+                st.caption("**Sheets & facilities** — choose sheets and filter by facility.")
+                chosen_labels = st.multiselect(
+                    "Sheets (tabs)",
+                    options=source_options,
+                    default=default_sel,
+                    key="master_source",
+                    help="Select one or more sheets.",
+                )
                 if facility_list_early:
-                    col_fac_sel, col_fac_ms = st.columns([1, 4])
-                    with col_fac_sel:
-                        st.caption("**Facilities**")
-                        if st.button("Select all", key="master_facility_select_all_btn"):
-                            st.session_state["master_facility_multi"] = list(facility_list_early)
-                            _rerun()
-                        if st.button("Clear", key="master_facility_clear_btn"):
-                            st.session_state["master_facility_multi"] = []
-                            _rerun()
-                    with col_fac_ms:
-                        default_fac = st.session_state.get("master_facility_multi")
-                        if default_fac is None or not all(f in facility_list_early for f in (default_fac or [])):
-                            default_fac = []  # empty = all facilities
-                        chosen_facilities = st.multiselect(
-                            "Facilities (empty = all)",
-                            options=facility_list_early,
-                            default=default_fac if default_fac else [],
-                            key="master_facility_multi",
-                            help="Select specific facilities, or leave empty for all. Use buttons to select all / clear.",
-                        )
+                    default_fac = st.session_state.get("master_facility_multi")
+                    if default_fac is None or not all(f in facility_list_early for f in (default_fac or [])):
+                        default_fac = []  # empty = all facilities
+                    chosen_facilities = st.multiselect(
+                        "Facilities (empty = all)",
+                        options=facility_list_early,
+                        default=default_fac if default_fac else [],
+                        key="master_facility_multi",
+                        help="Select specific facilities, or leave empty for all.",
+                    )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
                 source_id = source_ids.get(chosen_labels[0], first_tab)
