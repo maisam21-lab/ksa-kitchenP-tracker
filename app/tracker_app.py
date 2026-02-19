@@ -2517,6 +2517,12 @@ def main():
         def _pct_fmt(x: float) -> str:
             """Format percentage so 0 is always visible as 0.0%."""
             return f"{x:.1f}%" if x == x else "0.0%"
+        DASHBOARD_CURRENCY = "USD"
+        def _curr(v) -> str:
+            """Format as currency in USD (e.g. $1,234,567 or $0)."""
+            if v is None or v == "": return "—"
+            try: return f"${float(v):,.0f}"
+            except (TypeError, ValueError): return "—"
         def _price(r):
             for k in ("List Price", "Sell_Price__c", "Floor Price", "Floor_Price__c", "floor_price", "List_Price__c"):
                 v = r.get(k)
@@ -2533,10 +2539,21 @@ def main():
         sum_churning_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Churning")
         sum_occupied_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Occupied")
         has_cost = sum_vacant_val > 0 or sum_churning_val > 0 or sum_occupied_val > 0
-        # —— Dashboard styling: summary bar ——
+        # —— Dashboard styling: summary bar, scorecard, value cards ——
         st.markdown("""
         <style>
         .dashboard-summary { background: linear-gradient(135deg, #f0fdf4 0%, #ecfeff 100%); border-radius: 12px; padding: 14px 18px; margin-bottom: 1rem; border-left: 4px solid #0F766E; font-size: 0.95rem; }
+        div[data-testid="stMetric"] { background: linear-gradient(145deg, #f0fdf4 0%, #e0f2fe 100%); border-radius: 10px; padding: 12px 14px; border-left: 4px solid #0F766E; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+        div[data-testid="stMetric"]:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(15,118,110,0.2); }
+        .dashboard-value-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+        .dashboard-value-card { flex: 1; min-width: 160px; border-radius: 12px; padding: 16px 18px; transition: transform 0.2s ease, box-shadow 0.2s ease; cursor: default; }
+        .dashboard-value-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.12); }
+        .dashboard-value-card.vacant { background: linear-gradient(145deg, #FEE2E2 0%, #FECACA 100%); border-left: 4px solid #DC2626; }
+        .dashboard-value-card.churning { background: linear-gradient(145deg, #FFEDD5 0%, #FED7AA 100%); border-left: 4px solid #EA580C; }
+        .dashboard-value-card.occupied { background: linear-gradient(145deg, #D1FAE5 0%, #A7F3D0 100%); border-left: 4px solid #059669; }
+        .dashboard-value-card .label { font-size: 0.85rem; color: #374151; font-weight: 600; margin-bottom: 4px; }
+        .dashboard-value-card .value { font-size: 1.35rem; font-weight: 700; color: #111827; }
+        .dashboard-value-card .currency-hint { font-size: 0.75rem; color: #6B7280; margin-top: 4px; }
         </style>
         """, unsafe_allow_html=True)
         st.markdown(
@@ -2556,16 +2573,24 @@ def main():
             st.metric("Total kitchens", f"{total:,}")
         with sc5:
             st.metric("Sold", f"{sold:,}", help="Excluded from occupancy")
-        # —— Cost / value (when price data exists) ——
+        # —— Value (List / Floor Price) in USD — colored cards, hover shows tooltip ——
         if has_cost:
             st.subheader("Value (List / Floor Price)")
-            cv1, cv2, cv3 = st.columns(3)
-            with cv1:
-                st.metric("Vacant (opportunity)", f"{sum_vacant_val:,.0f}" if sum_vacant_val else "—", help="Sum of price for vacant kitchens")
-            with cv2:
-                st.metric("Churning (at-risk)", f"{sum_churning_val:,.0f}" if sum_churning_val else "—", help="Sum of price for churning kitchens")
-            with cv3:
-                st.metric("Occupied", f"{sum_occupied_val:,.0f}" if sum_occupied_val else "—", help="Sum of price for occupied kitchens")
+            st.caption(f"All amounts in **{DASHBOARD_CURRENCY}**. Move the mouse over a card for details.")
+            vac_display = _curr(sum_vacant_val)
+            churn_display = _curr(sum_churning_val)
+            occ_display = _curr(sum_occupied_val)
+            st.markdown(
+                f'<div class="dashboard-value-row">'
+                f'<div class="dashboard-value-card vacant" title="Sum of List/Floor Price for vacant kitchens ({DASHBOARD_CURRENCY})">'
+                f'<div class="label">Vacant (opportunity)</div><div class="value">{vac_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'<div class="dashboard-value-card churning" title="Sum of List/Floor Price for churning kitchens ({DASHBOARD_CURRENCY})">'
+                f'<div class="label">Churning (at-risk)</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'<div class="dashboard-value-card occupied" title="Sum of List/Floor Price for occupied kitchens ({DASHBOARD_CURRENCY})">'
+                f'<div class="label">Occupied</div><div class="value">{occ_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
         st.markdown("---")
         # —— By facility ——
         fac_stats = {}
