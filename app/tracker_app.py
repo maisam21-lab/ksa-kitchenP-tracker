@@ -1829,17 +1829,6 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
     if is_kitchens_tab:
         rows, cols = _apply_kitchen_labels(rows, cols)
         cols = _kitchens_column_order(cols)
-    # Kitchen Master Data: apply facility filter from top-level multiselect (master_facility_multi)
-    if key_suffix and "master" in key_suffix and rows:
-        fac_multi = st.session_state.get("master_facility_multi") or []
-        if fac_multi:
-            def _fac(r):
-                for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
-                    v = r.get(k)
-                    if v is not None and str(v).strip():
-                        return str(v).strip()
-                return ""
-            rows = [r for r in rows if _fac(r) in fac_multi]
     # Cleaner filtering: one search box + optional single-column filter in expander
     search_all = st.text_input(
         "Search in all columns",
@@ -1906,10 +1895,14 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide")
     init_db()
 
-    # Pre-fill name/email from URL so users can bookmark and avoid typing each time
-    prefilled = (st.query_params.get("email") or st.query_params.get("name") or st.query_params.get("user") or "").strip()
-    if prefilled:
-        st.session_state["user_display_name"] = prefilled
+    # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
+    _streamlit_user = getattr(st, "user", None)
+    _verified_email = None
+    if _streamlit_user and getattr(_streamlit_user, "is_logged_in", False) and getattr(_streamlit_user, "email", None):
+        _verified_email = (_streamlit_user.email or "").strip()
+        if _verified_email:
+            st.session_state["user_display_name"] = _verified_email
+    # Do NOT pre-fill from URL (?email= etc.) — that would allow anyone to impersonate by link
 
     # One-time fetch from Salesforce (direct report IDs) when Superset store is empty, so data is available without manual refresh.
     if not st.session_state.get("auto_refresh_done"):
@@ -2021,17 +2014,50 @@ def main():
     else:
         pulse_display = "—"
     st.sidebar.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
-    # Name / identity for comments, activity, and (optionally) developer visibility
-    st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
-    current_user = (st.session_state.get("user_display_name") or "").strip()
-    # Keep email in URL so refreshing or reopening the bookmarked link remembers you (no retyping)
-    if current_user and current_user != prefilled:
-        st.query_params["email"] = current_user
-    st.sidebar.caption("Used for access, comments, and \"Updated by\". We save it in the URL — bookmark this page and you won't need to retype.")
+
+    # When allowlist is on: require verified sign-in (or developer key). No typed email — prevents impersonation.
+    if _allowlist_enabled():
+        is_developer = _is_developer()
+        if not _verified_email and not is_developer:
+            st.sidebar.error("Sign-in required")
+            st.sidebar.markdown("Access is restricted. You must **sign in** with your company account (no typing someone else's email).")
+            _st_login = getattr(st, "login", None)
+            if callable(_st_login):
+                if st.sidebar.button("Sign in", type="primary", key="gate_sign_in"):
+                    _st_login()
+            else:
+                st.sidebar.info("The app administrator must enable **Sign in with Google** (or OIDC) in Streamlit deployment settings. Until then, only developer key access is possible below.")
+            with st.sidebar.expander("Developer access (key only)", expanded=False):
+                key_in = st.text_input("Key", type="password", key="gate_dev_key", placeholder="Enter developer key")
+                if st.button("Unlock", key="gate_dev_unlock") and key_in.strip() and key_in.strip() == _get_developer_key() and _get_developer_key():
+                    st.session_state["developer_unlocked"] = True
+                    _rerun()
+            st.markdown("---")
+            st.info("**You must sign in to use this app.** Use the **Sign in** button in the sidebar, or unlock with a developer key if you have one.")
+            st.stop()
+        # Allowlist on and (verified or developer): identity is verified email only, or developer key
+        if _verified_email:
+            st.session_state["user_display_name"] = _verified_email
+            current_user = _verified_email
+            st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True)
+        else:
+            st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin")
+            current_user = (st.session_state.get("user_display_name") or "Developer").strip()
+            st.sidebar.caption("Developer session (key unlocked)")
+    else:
+        # Allowlist off: allow typed email for display only (not for access control)
+        is_developer = _is_developer()
+        if _verified_email:
+            st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True)
+            current_user = _verified_email
+        else:
+            st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
+            current_user = (st.session_state.get("user_display_name") or "").strip()
+    st.sidebar.caption("Use your own email only. Access is restricted to allowed users and may be logged.")
+    if not _allowlist_enabled():
+        st.sidebar.caption("⚠️ Allowlist is off — enable **ALLOWLIST_ENABLED** in secrets for production.")
     st.sidebar.markdown("---")
     st.sidebar.caption("Developed by **RevOps** team")
-
-    is_developer = _is_developer()
 
     # Helper: list of configured developer identifiers from secrets/env
     def _get_developer_ids_list() -> list[str]:
@@ -2082,16 +2108,14 @@ def main():
                         st.error("Invalid key")
 
     st.sidebar.divider()
-    # Access control: if allowlist is enabled, only allowed users (or developers) can see content
-    current_user = (st.session_state.get("user_display_name") or "").strip()
+    # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
         if not current_user:
-            st.warning("Enter your name or email in the sidebar to access the tracker.")
-            st.info("If you don't have access, contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added to the allowed users list.")
+            st.warning("No identity available. Sign in or use developer key.")
             st.stop()
         if not is_user_allowed(current_user):
-            st.error("Access restricted. Your name or email is not on the authorized list.")
-            st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added, or sign in with developer access if you have the key.")
+            st.error("Access restricted. Your account is not on the authorized list.")
+            st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added.")
             st.stop()
 
     # RBAC: resolve role and build sidebar sections (Prompt 1 & 2)
@@ -2181,16 +2205,7 @@ def main():
                     st.session_state["master_source"] = default_sel
                 source_id = source_ids.get(default_sel[0] if default_sel else first_tab, first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
-                def _row_facility_early(r):
-                    for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
-                        v = r.get(k)
-                        if v is not None and str(v).strip():
-                            return str(v).strip()
-                    return ""
-                facility_set_early = sorted({_row_facility_early(r) for r in rows if _row_facility_early(r)})
-                no_fac_early = [r for r in rows if not _row_facility_early(r)]
-                facility_list_early = (["(No facility)"] if no_fac_early else []) + list(facility_set_early)
-                st.caption("**Sheets & facilities** — choose sheets and filter by facility.")
+                st.caption("**Sheets** — choose one or more sheets.")
                 chosen_labels = st.multiselect(
                     "Sheets (tabs)",
                     options=source_options,
@@ -2198,17 +2213,6 @@ def main():
                     key="master_source",
                     help="Select one or more sheets.",
                 )
-                if facility_list_early:
-                    default_fac = st.session_state.get("master_facility_multi")
-                    if default_fac is None or not all(f in facility_list_early for f in (default_fac or [])):
-                        default_fac = []  # empty = all facilities
-                    chosen_facilities = st.multiselect(
-                        "Facilities (empty = all)",
-                        options=facility_list_early,
-                        default=default_fac if default_fac else [],
-                        key="master_facility_multi",
-                        help="Select specific facilities, or leave empty for all.",
-                    )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
                 source_id = source_ids.get(chosen_labels[0], first_tab)
