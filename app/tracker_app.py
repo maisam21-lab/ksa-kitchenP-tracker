@@ -2512,6 +2512,23 @@ def main():
                 if v is not None and str(v).strip():
                     return str(v).strip()
             return ""
+        def _churn_date(r):
+            for k in ("Churn Date", "Churn_Date__c", "Opportunity__r.Churn_Date__c", "churn_date"):
+                v = r.get(k)
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if not s:
+                    continue
+                try:
+                    if "T" in s:
+                        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                    else:
+                        d = datetime.strptime(s[:10], "%Y-%m-%d")
+                    return d.strftime("%Y-%m-%d")
+                except Exception:
+                    return s[:10] if len(s) >= 10 else s
+            return ""
         vacant = sum(1 for r in rows_kitchens if _status_normalized(r) == "Vacant")
         churning = sum(1 for r in rows_kitchens if _status_normalized(r) == "Churning")
         occupied = sum(1 for r in rows_kitchens if _status_normalized(r) == "Occupied")
@@ -2585,6 +2602,16 @@ def main():
         .dashboard-facility-table tr:nth-child(even) { background: rgba(255,255,255,0.4); }
         .dashboard-facility-table tr:nth-child(even):hover { background: rgba(255,255,255,0.8); }
         .dashboard-facility-summary { background: linear-gradient(135deg, #ecfeff 0%, #f0fdf4 100%); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; border-left: 4px solid #0d9488; font-size: 0.9rem; }
+        .dashboard-churn-card { background: linear-gradient(145deg, #FFEDD5 0%, #FED7AA 100%); border-radius: 12px; padding: 16px; margin: 1rem 0; border-left: 4px solid #EA580C; overflow-x: auto; }
+        .dashboard-churn-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .dashboard-churn-table th { background: rgba(234,88,12,0.2); color: #9a3412; padding: 10px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #EA580C; }
+        .dashboard-churn-table td { padding: 8px 12px; border-bottom: 1px solid rgba(234,88,12,0.25); }
+        .dashboard-churn-table tr:hover { background: rgba(255,255,255,0.6); }
+        .dashboard-churn-table tr:nth-child(even) { background: rgba(255,255,255,0.35); }
+        .dashboard-churn-table tr:nth-child(even):hover { background: rgba(255,255,255,0.75); }
+        .dashboard-churn-metric { background: linear-gradient(145deg, #FFEDD5 0%, #FED7AA 100%); border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; border-left: 4px solid #EA580C; display: inline-block; min-width: 200px; }
+        .dashboard-churn-metric .label { font-size: 0.85rem; color: #9a3412; font-weight: 600; margin-bottom: 4px; }
+        .dashboard-churn-metric .value { font-size: 1.35rem; font-weight: 700; color: #111827; }
         </style>
         """, unsafe_allow_html=True)
         st.markdown(
@@ -2753,21 +2780,32 @@ def main():
         # —— Churn & at-risk block ——
         churning_rows = [r for r in rows_kitchens if _status_normalized(r) == "Churning"]
         if churning_rows:
+            # Sort by churn date (soonest first) when available
+            def _churn_date_sort_key(r):
+                s = _churn_date(r)
+                if not s:
+                    return "9999-99-99"
+                return s
+            churning_rows = sorted(churning_rows, key=_churn_date_sort_key)
             st.markdown("---")
             st.subheader("Churn & at-risk — save this revenue")
+            st.caption("**What this means:** These kitchens are still active (paying) today but have a **future churn date** (notice given). The total below is the **monthly revenue we could lose** if we don’t renew or backfill them. The table lists each kitchen, its MRR at risk, and **churn date** (soonest first).")
             churn_mrr_total = sum((_price_for_value(r, "Churning") or 0) for r in churning_rows)
-            st.metric("Scheduled Churn MRR", _curr(churn_mrr_total), help="Monthly recurring revenue from kitchens that are currently active but have a future churn date (notice given).")
-            churn_cols = ["Kitchen", "Account / Facility", "Scheduled Churn MRR", "Status"]
-            churn_data = []
-            for r in churning_rows:
-                churn_data.append({
-                    "Kitchen": _kitchen_name(r) or "—",
-                    "Account / Facility": _facility(r) or "—",
-                    "Scheduled Churn MRR": _price_for_value(r, "Churning") or _price(r) or 0,
-                    "Status": "Churning",
-                })
-            df_churn = pd.DataFrame(churn_data)
-            st.dataframe(df_churn, use_container_width=True, hide_index=True, column_config={"Scheduled Churn MRR": st.column_config.NumberColumn(format="%.0f")})
+            st.markdown(
+                f'<div class="dashboard-churn-metric" title="Total monthly revenue at risk from all kitchens with status Churning (future churn date).">'
+                f'<div class="label">Scheduled Churn MRR</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
+                unsafe_allow_html=True,
+            )
+            st.caption("**Table:** Each row is one kitchen with status **Churning**. **Churn date** = when the kitchen is scheduled to churn (table sorted soonest first). **Scheduled Churn MRR** = monthly revenue at risk in **USD**. **Status** = Churning.")
+            header = "<tr><th>Kitchen</th><th>Account / Facility</th><th>Churn date</th><th>Scheduled Churn MRR (USD)</th><th>Status</th></tr>"
+            body = "".join(
+                f"<tr><td>{html.escape(str(_kitchen_name(r) or '—'))}</td><td>{html.escape(str(_facility(r) or '—'))}</td><td>{_churn_date(r) or '—'}</td><td>{_curr(_price_for_value(r, 'Churning') or _price(r) or 0)}</td><td>Churning</td></tr>"
+                for r in churning_rows
+            )
+            st.markdown(
+                f'<div class="dashboard-churn-card"><table class="dashboard-churn-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
+                unsafe_allow_html=True,
+            )
         # —— How these numbers are calculated ——
         st.markdown("---")
         with st.expander("How these numbers are calculated", expanded=False):
