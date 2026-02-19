@@ -2517,8 +2517,32 @@ def main():
         def _pct_fmt(x: float) -> str:
             """Format percentage so 0 is always visible as 0.0%."""
             return f"{x:.1f}%" if x == x else "0.0%"
-        # —— At a glance (one line, no repetition) ——
-        st.caption(f"**{_pct_fmt(occ_pct)}** occupied · **{vacant:,}** vacant · **{churning:,}** in churn · **{total:,}** total")
+        def _price(r):
+            for k in ("List Price", "Sell_Price__c", "Floor Price", "Floor_Price__c", "floor_price", "List_Price__c"):
+                v = r.get(k)
+                if v is None:
+                    continue
+                try:
+                    s = str(v).replace(",", "").strip()
+                    if s:
+                        return float(s)
+                except (ValueError, TypeError):
+                    pass
+            return None
+        sum_vacant_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Vacant")
+        sum_churning_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Churning")
+        sum_occupied_val = sum((_price(r) or 0) for r in rows_kitchens if _status_normalized(r) == "Occupied")
+        has_cost = sum_vacant_val > 0 or sum_churning_val > 0 or sum_occupied_val > 0
+        # —— Dashboard styling: summary bar ——
+        st.markdown("""
+        <style>
+        .dashboard-summary { background: linear-gradient(135deg, #f0fdf4 0%, #ecfeff 100%); border-radius: 12px; padding: 14px 18px; margin-bottom: 1rem; border-left: 4px solid #0F766E; font-size: 0.95rem; }
+        </style>
+        """, unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="dashboard-summary"><strong>At a glance</strong> · {_pct_fmt(occ_pct)} occupied · {vacant:,} vacant · {churning:,} in churn · {total:,} total</div>',
+            unsafe_allow_html=True,
+        )
         # —— Scorecard ——
         st.subheader("Scorecard")
         sc1, sc2, sc3, sc4, sc5 = st.columns(5)
@@ -2532,6 +2556,16 @@ def main():
             st.metric("Total kitchens", f"{total:,}")
         with sc5:
             st.metric("Sold", f"{sold:,}", help="Excluded from occupancy")
+        # —— Cost / value (when price data exists) ——
+        if has_cost:
+            st.subheader("Value (List / Floor Price)")
+            cv1, cv2, cv3 = st.columns(3)
+            with cv1:
+                st.metric("Vacant (opportunity)", f"{sum_vacant_val:,.0f}" if sum_vacant_val else "—", help="Sum of price for vacant kitchens")
+            with cv2:
+                st.metric("Churning (at-risk)", f"{sum_churning_val:,.0f}" if sum_churning_val else "—", help="Sum of price for churning kitchens")
+            with cv3:
+                st.metric("Occupied", f"{sum_occupied_val:,.0f}" if sum_occupied_val else "—", help="Sum of price for occupied kitchens")
         st.markdown("---")
         # —— By facility ——
         fac_stats = {}
@@ -2570,8 +2604,12 @@ def main():
                     top_for_bar = [r for r in fac_rows if r["Vacant"] > 0]
                     if top_for_bar:
                         df_bar = pd.DataFrame(sorted(top_for_bar, key=lambda x: -x["Vacant"])[:15])
-                        fig_bar = px.bar(df_bar, x="Facility", y="Vacant", title="Vacant kitchens by facility")
-                        fig_bar.update_layout(xaxis_title="Facility", yaxis_title="Vacant kitchens", xaxis_tickangle=-45, height=380)
+                        fig_bar = px.bar(df_bar, x="Facility", y="Vacant", title="Vacant kitchens by facility", color_discrete_sequence=["#0F766E"])
+                        fig_bar.update_layout(
+                            xaxis_title="Facility", yaxis_title="Vacant kitchens", xaxis_tickangle=-45, height=380,
+                            template="plotly_white", margin=dict(t=50, b=100), font=dict(size=12),
+                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        )
                         st.plotly_chart(fig_bar, use_container_width=True)
                 except Exception:
                     pass
