@@ -2620,36 +2620,15 @@ def main():
                 f'<div class="dashboard-value-row">'
                 f'<div class="dashboard-value-card vacant" title="Sellable monthly upside — List/Floor for vacant ({DASHBOARD_CURRENCY})">'
                 f'<div class="label">Vacant {value_label} (opportunity)</div><div class="value">{vac_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
-                f'<div class="dashboard-value-card churning" title="Monthly revenue at risk — Floor for churning ({DASHBOARD_CURRENCY})">'
-                f'<div class="label">Churn {value_label} (at-risk)</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'<div class="dashboard-value-card churning" title="Monthly recurring revenue from kitchens that are currently active but have a future churn date (notice given).">'
+                f'<div class="label">Scheduled Churn {value_label}</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
                 f'<div class="dashboard-value-card occupied" title="Current book of business — Floor/actual for occupied ({DASHBOARD_CURRENCY})">'
                 f'<div class="label">Occupied {value_label}</div><div class="value">{occ_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
-        # —— Dashboard logic (internal books) ——
-        with st.expander("How these numbers are calculated", expanded=False):
-            st.markdown("""
-**Status (Kitchen Number)**  
-- **Vacant** — No occupancy; available to sell.  
-- **Sold** — Closed Won, access date in the future.  
-- **Occupied** — Closed Won, access date in the past (paying kitchen).  
-- **Churning** — Closed Won with a future churn date (still operating, can resell).
-
-**Counts**  
-- **Total kitchens** = Vacant + Churning + Sold + Occupied (sellable only; excludes Waitlist, Virtual, Blocked, etc.).  
-- **Occupancy %** = Occupied ÷ Total.  
-- **Vacancy %** = Vacant ÷ Total.  
-- **In churn %** = Churning ÷ Total.  
-- **Sold** = count with status Sold (excluded from occupancy %).
-
-**Value (USD, List / Floor Price)**  
-- **Vacant (opportunity)** — Sum of List Price (then Floor) for Vacant kitchens (pipelineable value if all sold at list/floor).  
-- **Churning (at-risk)** — Sum of Floor Price (then List) for Churning kitchens (revenue at risk).  
-- **Occupied** — Sum of Floor Price (then List) for Occupied kitchens (proxy for current monthly license revenue).
-            """)
         st.markdown("---")
-        # —— Park leaderboard (where to focus: by Vacant MRR or Churn MRR) ——
+        # —— Facility leaderboard (where to focus: by Vacant MRR or Scheduled Churn MRR) ——
         fac_stats = {}
         for r in rows_kitchens:
             f = _facility(r) or "(No facility)"
@@ -2667,7 +2646,7 @@ def main():
             elif s == "Sold":
                 fac_stats[f]["sold"] += 1
         if fac_stats:
-            st.subheader("Park leaderboard — where to focus")
+            st.subheader("Facility leaderboard — where to focus")
             fac_rows = []
             for f, counts in fac_stats.items():
                 t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
@@ -2684,7 +2663,7 @@ def main():
                     "Churning": counts["churning"], "Churn MRR": round(counts["churn_mrr"], 0),
                     "Occupied": counts["occupied"], "Sold": counts["sold"],
                 })
-            sort_by = st.radio("Sort parks by", ["Vacant MRR (opportunity)", "Churn MRR (at-risk)"], key="park_sort", horizontal=True)
+            sort_by = st.radio("Sort facilities by", ["Vacant MRR (opportunity)", "Scheduled Churn MRR"], key="facility_sort", horizontal=True)
             if "Churn" in sort_by:
                 fac_rows.sort(key=lambda x: (-x["Churn MRR"], -x["Total"]))
             else:
@@ -2692,9 +2671,9 @@ def main():
             if fac_rows:
                 n_fac = len(fac_rows)
                 top = fac_rows[0]
-                summary_line = f"<strong>{n_fac}</strong> parks · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Churn MRR {_curr(top['Churn MRR'])}"
+                summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn MRR {_curr(top['Churn MRR'])}"
                 st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
-                header = "<tr><th>Park</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Churn MRR</th></tr>"
+                header = "<tr><th>Facility</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Scheduled Churn MRR</th></tr>"
                 body = "".join(
                     f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Sold Rate %']}</td><td>{r['Occupancy %']}</td><td>{r['Vacant']}</td><td>{_curr(r['Vacant MRR'])}</td><td>{r['Churning']}</td><td>{_curr(r['Churn MRR'])}</td></tr>"
                     for r in fac_rows
@@ -2703,17 +2682,17 @@ def main():
                     f'<div class="dashboard-facility-card"><table class="dashboard-facility-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
                     unsafe_allow_html=True,
                 )
-                park_options = ["(Select a park)"] + [r["Facility"] for r in fac_rows]
-                selected_park = st.selectbox("Select park for inventory detail", park_options, key="dashboard_selected_park")
-                # —— Inventory to sell: kitchen-level view for selected park ——
-                if selected_park and selected_park != "(Select a park)":
-                    st.subheader(f"Inventory — {selected_park}")
-                    park_rows = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_park]
+                facility_options = ["(Select a facility)"] + [r["Facility"] for r in fac_rows]
+                selected_facility = st.selectbox("Select facility for inventory detail", facility_options, key="dashboard_selected_facility")
+                # —— Inventory to sell: kitchen-level view for selected facility ——
+                if selected_facility and selected_facility != "(Select a facility)":
+                    st.subheader(f"Inventory — {selected_facility}")
+                    facility_rows = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_facility]
                     status_filter = st.multiselect("Status", ["Vacant", "Churning", "Sold", "Occupied"], default=["Vacant", "Churning"], key="inv_status")
                     if status_filter:
-                        park_rows = [r for r in park_rows if _status_normalized(r) in status_filter]
-                    # Price band (Low/Mid/High by floor price tertiles in this park)
-                    floor_prices = [(_price(r) or 0) for r in park_rows]
+                        facility_rows = [r for r in facility_rows if _status_normalized(r) in status_filter]
+                    # Price band (Low/Mid/High by floor price tertiles in this facility)
+                    floor_prices = [(_price(r) or 0) for r in facility_rows]
                     if floor_prices:
                         p33 = sorted(floor_prices)[max(0, len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else 0
                         p66 = sorted(floor_prices)[max(0, 2 * len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else max(floor_prices)
@@ -2726,10 +2705,10 @@ def main():
                         if p <= p66: return "Mid"
                         return "High"
                     if price_band != "All":
-                        park_rows = [r for r in park_rows if _band(r) == price_band]
-                    if park_rows:
+                        facility_rows = [r for r in facility_rows if _band(r) == price_band]
+                    if facility_rows:
                         inv_data = []
-                        for r in park_rows:
+                        for r in facility_rows:
                             st_val = _status_normalized(r) or "Vacant"
                             floor_val = _price_for_value(r, "Occupied") or _price(r) or 0
                             list_val = _price_for_value(r, "Vacant") or _price(r) or 0
@@ -2738,29 +2717,33 @@ def main():
                                 "Status": st_val or "—",
                                 "Floor (MRR)": floor_val,
                                 "List (MRR)": list_val,
-                                "Park": _facility(r) or "—",
+                                "Facility": _facility(r) or "—",
                             })
                         df_inv = pd.DataFrame(inv_data)
                         st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
                     else:
                         st.caption("No kitchens match the filters.")
-                # Bar chart: vacant kitchens by facility (top 15)
+                # Bar chart: dynamic by current sort (Vacant MRR or Scheduled Churn MRR), same order as leaderboard
                 try:
                     import plotly.express as px
-                    top_for_bar = [r for r in fac_rows if r["Vacant"] > 0]
+                    top_for_bar = fac_rows[:15]  # already sorted by sort_by
                     if top_for_bar:
-                        df_bar = pd.DataFrame(sorted(top_for_bar, key=lambda x: -x["Vacant"])[:15])
-                        fig_bar = px.bar(df_bar, x="Facility", y="Vacant", title="Vacant kitchens by facility", color_discrete_sequence=["#0F766E"])
+                        df_bar = pd.DataFrame(top_for_bar)
+                        if "Churn" in sort_by:
+                            y_col, y_label, title = "Churn MRR", "Scheduled Churn MRR", "Scheduled Churn MRR by facility (top 15)"
+                        else:
+                            y_col, y_label, title = "Vacant MRR", "Vacant MRR", "Vacant MRR by facility (top 15)"
+                        fig_bar = px.bar(df_bar, x="Facility", y=y_col, title=title, color_discrete_sequence=["#0F766E"])
                         fig_bar.update_layout(
-                            xaxis_title="Facility", yaxis_title="Vacant kitchens", xaxis_tickangle=-45, height=380,
+                            xaxis_title="Facility", yaxis_title=y_label, xaxis_tickangle=-45, height=380,
                             template="plotly_white", margin=dict(t=50, b=100), font=dict(size=12),
                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                         )
                         st.plotly_chart(fig_bar, use_container_width=True)
                 except Exception:
                     pass
-                # Action list: top vacant by MRR (no pipeline filter until we have opp data)
-                with st.expander("Focus: top parks by vacant kitchens", expanded=False):
+                # Action list: top facilities by vacant
+                with st.expander("Focus: top facilities by vacant kitchens", expanded=False):
                     for r in fac_rows[:5]:
                         if r["Vacant"] > 0:
                             st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {_curr(r['Vacant MRR'])} MRR · {r['Occupancy %']}% occupancy")
@@ -2770,18 +2753,18 @@ def main():
             st.markdown("---")
             st.subheader("Churn & at-risk — save this revenue")
             churn_mrr_total = sum((_price_for_value(r, "Churning") or 0) for r in churning_rows)
-            st.metric("Churn MRR (all churning)", _curr(churn_mrr_total), help="Sum of Floor/actual for all Churning kitchens")
-            churn_cols = ["Kitchen", "Account / Park", "Churn MRR", "Status"]
+            st.metric("Scheduled Churn MRR", _curr(churn_mrr_total), help="Monthly recurring revenue from kitchens that are currently active but have a future churn date (notice given).")
+            churn_cols = ["Kitchen", "Account / Facility", "Scheduled Churn MRR", "Status"]
             churn_data = []
             for r in churning_rows:
                 churn_data.append({
                     "Kitchen": _kitchen_name(r) or "—",
-                    "Account / Park": _facility(r) or "—",
-                    "Churn MRR": _price_for_value(r, "Churning") or _price(r) or 0,
+                    "Account / Facility": _facility(r) or "—",
+                    "Scheduled Churn MRR": _price_for_value(r, "Churning") or _price(r) or 0,
                     "Status": "Churning",
                 })
             df_churn = pd.DataFrame(churn_data)
-            st.dataframe(df_churn, use_container_width=True, hide_index=True, column_config={"Churn MRR": st.column_config.NumberColumn(format="%.0f")})
+            st.dataframe(df_churn, use_container_width=True, hide_index=True, column_config={"Scheduled Churn MRR": st.column_config.NumberColumn(format="%.0f")})
         # —— How these numbers are calculated ——
         st.markdown("---")
         with st.expander("How these numbers are calculated", expanded=False):
@@ -2799,7 +2782,7 @@ def main():
 - **Vacancy %** = Vacant / Total. **Churn %** = Churning / Total.
 
 **Value (MRR/ARR)**  
-- **Vacant MRR** — List/Floor for vacant (sellable upside). **Churn MRR** — Floor for churning (revenue at risk). **Occupied MRR** — Floor/actual for occupied (current book).
+- **Vacant MRR** — List/Floor for vacant (sellable upside). **Scheduled Churn MRR** — Monthly recurring revenue from kitchens that are currently active but have a future churn date (notice given). **Occupied MRR** — Floor/actual for occupied (current book).
             """)
         return
 
