@@ -2047,34 +2047,37 @@ def main():
                 st.info("**You must sign in to use this app.** Use the **Sign in** button in the sidebar, or unlock with a developer key if you have one.")
                 st.stop()
             # Fallback: Sign-in not required — allow typed email (identity not verified)
-            st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
+            st.sidebar.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
             if not current_user:
                 st.sidebar.warning("Enter your email to continue.")
                 st.stop()
-            st.sidebar.caption("⚠️ Identity is not verified. For stronger security, set **ALLOWLIST_REQUIRE_VERIFIED_SIGNIN=1** and enable Sign in with Google.")
+            if "@" not in current_user or "." not in current_user.split("@")[-1]:
+                st.sidebar.warning("Enter a valid email address (e.g. name@company.com).")
+                st.stop()
         else:
             # Allowlist on and (verified or developer): identity is verified email only, or developer key
             if _verified_email:
                 st.session_state["user_display_name"] = _verified_email
                 current_user = _verified_email
-                st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True)
+                st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True, help="Verified via Sign in with Google. Used for access and comments.")
             else:
-                st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin")
+                st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin", help="Developer session. Name shown on comments.")
                 current_user = (st.session_state.get("user_display_name") or "Developer").strip()
                 st.sidebar.caption("Developer session (key unlocked)")
     else:
         # Allowlist off: allow typed email for display only (not for access control)
         is_developer = _is_developer()
         if _verified_email:
-            st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True)
+            st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True, help="Verified email. Used for comments and display.")
             current_user = _verified_email
         else:
-            st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com")
+            st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
-    st.sidebar.caption("Use your own email only. Access is restricted to allowed users and may be logged.")
-    if not _allowlist_enabled():
-        st.sidebar.caption("⚠️ Allowlist is off — enable **ALLOWLIST_ENABLED** in secrets for production.")
+    if _allowlist_enabled():
+        st.sidebar.caption("Access is limited to allowed users.")
+    else:
+        st.sidebar.caption("Contact your admin to restrict access to this app.")
     st.sidebar.markdown("---")
     st.sidebar.caption("Developed by **RevOps** team")
 
