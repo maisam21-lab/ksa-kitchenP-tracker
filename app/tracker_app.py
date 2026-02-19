@@ -1829,6 +1829,17 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
     if is_kitchens_tab:
         rows, cols = _apply_kitchen_labels(rows, cols)
         cols = _kitchens_column_order(cols)
+    # Kitchen Master Data: apply facility filter from top-level multiselect (master_facility_multi)
+    if key_suffix and "master" in key_suffix and rows:
+        fac_multi = st.session_state.get("master_facility_multi") or []
+        if fac_multi:
+            def _fac(r):
+                for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+                    v = r.get(k)
+                    if v is not None and str(v).strip():
+                        return str(v).strip()
+                return ""
+            rows = [r for r in rows if _fac(r) in fac_multi]
     # Cleaner filtering: one search box + optional single-column filter in expander
     search_all = st.text_input(
         "Search in all columns",
@@ -2115,15 +2126,10 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         st.title("Kitchen Master Data")
-        # These tabs read from Google Sheet only (no Salesforce).
         _show_refresh_btn = _is_developer() or user_role == "super_user"
-        st.caption("Source: **Google Sheet** only. Data is refreshed every 15 minutes by the scheduler." + (" Use **Refresh from Google Sheet** below for an immediate update. " if _show_refresh_btn else " ") + "Every AE has the same access.")
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
-            # Data source: Superset (Trino proxy) — read from persisted store only
-            st.caption("Data source: **Superset (Trino proxy)**. Refreshed every 15 minutes by scheduler.")
             last_refresh = (superset_meta or {}).get("last_refresh_ts_utc")
-            st.caption(f"Last refresh: **{last_refresh or 'Never'}**")
             if _superset_stale_warning(superset_meta or {}):
                 st.warning("Last refresh is older than 30 minutes or last run failed. Data may be stale.")
             st.caption("Filter kitchen details and download your report.")
@@ -2148,21 +2154,15 @@ def main():
                     _rerun()
                 last_refresh = get_last_refresh("gsheet")
             if _show_refresh_btn:
-                col_cap, col_btn = st.columns([3, 1])
-                with col_cap:
-                    st.caption(f"Last refresh (GSheet): **{last_refresh or 'Never'}**.")
-                with col_btn:
-                    if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
-                        ok, msg = _refresh_from_online_sheet()
-                        if ok:
-                            set_last_refresh("gsheet")
-                            st.session_state["data_source"] = "gsheet"
-                            st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
-                        else:
-                            st.error(msg or "Refresh failed.")
-                        _rerun()
-            else:
-                st.caption(f"Last refresh (GSheet): **{last_refresh or 'Never'}**.")
+                if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
+                    ok, msg = _refresh_from_online_sheet()
+                    if ok:
+                        set_last_refresh("gsheet")
+                        st.session_state["data_source"] = "gsheet"
+                        st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
+                    else:
+                        st.error(msg or "Refresh failed.")
+                    _rerun()
             sources = _master_kitchens_sources()
             source_options = [s[0] for s in sources]
             source_ids = {s[0]: s[1] for s in sources}
@@ -2173,9 +2173,24 @@ def main():
                 chosen_label = ""
                 is_other_sheet = False
             else:
-                st.caption("Filter and download. Choose one or more sheets — data from **Google Sheet** only.")
                 first_tab = source_options[0]
-                # Select all / Clear and multi-select
+                # Sheets and facilities in one filter box: Select all / Clear + multiselect for each
+                default_sel = st.session_state.get("master_source")
+                if default_sel is None or not all(t in source_options for t in (default_sel or [])):
+                    default_sel = [first_tab]
+                    st.session_state["master_source"] = default_sel
+                source_id = source_ids.get(default_sel[0] if default_sel else first_tab, first_tab)
+                rows = list_generic_tab(source_id, source="gsheet")
+                def _row_facility_early(r):
+                    for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+                        v = r.get(k)
+                        if v is not None and str(v).strip():
+                            return str(v).strip()
+                    return ""
+                facility_set_early = sorted({_row_facility_early(r) for r in rows if _row_facility_early(r)})
+                no_fac_early = [r for r in rows if not _row_facility_early(r)]
+                facility_list_early = (["(No facility)"] if no_fac_early else []) + list(facility_set_early)
+                st.caption("**Sheets & facilities** — choose sheets and filter by facility in one place.")
                 col_sel, col_ms = st.columns([1, 4])
                 with col_sel:
                     if st.button("Select all", key="master_select_all_btn"):
@@ -2185,20 +2200,36 @@ def main():
                         st.session_state["master_source"] = [first_tab]
                         _rerun()
                 with col_ms:
-                    default_sel = st.session_state.get("master_source")
-                    if default_sel is None or not all(t in source_options for t in (default_sel or [])):
-                        default_sel = [first_tab]
-                        st.session_state["master_source"] = default_sel
                     chosen_labels = st.multiselect(
-                        "Tab",
+                        "Sheets (tabs)",
                         options=source_options,
                         default=default_sel,
                         key="master_source",
-                        help="Select one or more sheets, or use Select all. Each selected sheet appears in a tab below.",
+                        help="Select one or more sheets.",
                     )
+                if facility_list_early:
+                    col_fac_sel, col_fac_ms = st.columns([1, 4])
+                    with col_fac_sel:
+                        if st.button("Select all", key="master_facility_select_all_btn"):
+                            st.session_state["master_facility_multi"] = list(facility_list_early)
+                            _rerun()
+                        if st.button("Clear", key="master_facility_clear_btn"):
+                            st.session_state["master_facility_multi"] = []
+                            _rerun()
+                    with col_fac_ms:
+                        default_fac = st.session_state.get("master_facility_multi")
+                        if default_fac is None or not all(f in facility_list_early for f in (default_fac or [])):
+                            default_fac = []  # empty = all facilities
+                        chosen_facilities = st.multiselect(
+                            "Facilities (empty = all)",
+                            options=facility_list_early,
+                            default=default_fac if default_fac else [],
+                            key="master_facility_multi",
+                            help="Select specific facilities, or leave empty for all. Use buttons to select all / clear.",
+                        )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
-                source_id = source_ids.get(chosen_labels[0], first_tab)  # used for legacy branch below
+                source_id = source_ids.get(chosen_labels[0], first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
                 is_other_sheet = True
         # Render selected tab(s): when multiple selected, one tab per sheet; otherwise single view
