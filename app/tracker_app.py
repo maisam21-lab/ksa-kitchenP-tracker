@@ -2849,139 +2849,136 @@ def main():
             elif s == "Sold":
                 fac_stats[f]["sold"] += 1
         if fac_stats:
-            st.subheader("Facility leaderboard — where to focus")
-            fac_rows = []
-            for f, counts in fac_stats.items():
-                t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
-                if t == 0:
-                    continue
-                occ_p = (counts["occupied"] / t * 100)
-                sold_rate_p = ((counts["occupied"] + counts["sold"] + counts["churning"]) / t * 100)
-                vac_p = (counts["vacant"] / t * 100)
-                churn_p = (counts["churning"] / t * 100)
-                fac_rows.append({
-                    "Facility": f, "Total": t, "Sold Rate %": round(sold_rate_p, 1), "Occupancy %": round(occ_p, 1),
-                    "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1),
-                    "Vacant": counts["vacant"], "Vacant MRR": round(counts["vacant_mrr"], 0),
-                    "Churning": counts["churning"], "Churn MRR": round(counts["churn_mrr"], 0),
-                    "Occupied": counts["occupied"], "Sold": counts["sold"],
-                })
-            sort_by = st.radio("Sort facilities by", ["Vacant MRR (opportunity)", "Scheduled Churn MRR"], key="facility_sort", horizontal=True)
-            if "Churn" in sort_by:
-                fac_rows.sort(key=lambda x: (-x["Churn MRR"], -x["Total"]))
-            else:
-                fac_rows.sort(key=lambda x: (-x["Vacant MRR"], -x["Total"]))
-            if fac_rows:
-                n_fac = len(fac_rows)
-                top = fac_rows[0]
-                summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn MRR {_curr(top['Churn MRR'])}"
-                st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
-                header = "<tr><th>Facility</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Scheduled Churn MRR</th></tr>"
-                body = "".join(
-                    f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Sold Rate %']}</td><td>{r['Occupancy %']}</td><td>{r['Vacant']}</td><td>{_curr(r['Vacant MRR'])}</td><td>{r['Churning']}</td><td>{_curr(r['Churn MRR'])}</td></tr>"
-                    for r in fac_rows
-                )
-                st.markdown(
-                    f'<div class="dashboard-facility-card"><table class="dashboard-facility-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
-                    unsafe_allow_html=True,
-                )
-                facility_options = ["(Select a facility)"] + [r["Facility"] for r in fac_rows]
-                selected_facility = st.selectbox("Select facility for inventory detail", facility_options, key="dashboard_selected_facility")
-                # —— Inventory to sell: kitchen-level view for selected facility ——
-                if selected_facility and selected_facility != "(Select a facility)":
-                    st.subheader(f"Inventory — {selected_facility}")
-                    facility_rows = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_facility]
-                    status_filter = st.multiselect("Status", ["Vacant", "Churning", "Sold", "Occupied"], default=["Vacant", "Churning"], key="inv_status")
-                    if status_filter:
-                        facility_rows = [r for r in facility_rows if _status_normalized(r) in status_filter]
-                    # Price band (Low/Mid/High by floor price tertiles in this facility)
-                    floor_prices = [(_price(r) or 0) for r in facility_rows]
-                    if floor_prices:
-                        p33 = sorted(floor_prices)[max(0, len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else 0
-                        p66 = sorted(floor_prices)[max(0, 2 * len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else max(floor_prices)
-                    else:
-                        p33 = p66 = 0
-                    price_band = st.radio("Price band", ["All", "Low", "Mid", "High"], key="inv_price_band", horizontal=True)
-                    def _band(r):
-                        p = _price(r) or 0
-                        if p <= p33: return "Low"
-                        if p <= p66: return "Mid"
-                        return "High"
-                    if price_band != "All":
-                        facility_rows = [r for r in facility_rows if _band(r) == price_band]
-                    if facility_rows:
-                        inv_data = []
-                        for r in facility_rows:
-                            st_val = _status_normalized(r) or "Vacant"
-                            floor_val = _price_for_value(r, "Occupied") or _price(r) or 0
-                            list_val = _price_for_value(r, "Vacant") or _price(r) or 0
-                            inv_data.append({
-                                "Kitchen": _kitchen_name(r) or "—",
-                                "Status": st_val or "—",
-                                "Floor (MRR)": floor_val,
-                                "List (MRR)": list_val,
-                                "Facility": _facility(r) or "—",
-                            })
-                        df_inv = pd.DataFrame(inv_data)
-                        st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
-                    else:
-                        st.caption("No kitchens match the filters.")
-                # Bar chart: dynamic by sort + colors aligned with dashboard (red = vacant/opportunity, orange = churn/at-risk)
-                try:
-                    import plotly.express as px
-                    top_for_bar = fac_rows[:15]  # already sorted by sort_by
-                    if top_for_bar:
-                        df_bar = pd.DataFrame(top_for_bar)
-                        if "Churn" in sort_by:
-                            y_col, y_label, title = "Churn MRR", "Scheduled Churn MRR", "Scheduled Churn MRR by facility (top 15)"
-                            color_scale = ["#FFEDD5", "#FED7AA", "#EA580C", "#C2410C"]  # orange gradient (at-risk, like churn card)
+            with st.expander("**Facilities by opportunity and at-risk revenue** — sort by Vacant MRR or Scheduled Churn MRR, view full table and inventory by facility", expanded=False):
+                fac_rows = []
+                for f, counts in fac_stats.items():
+                    t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
+                    if t == 0:
+                        continue
+                    occ_p = (counts["occupied"] / t * 100)
+                    sold_rate_p = ((counts["occupied"] + counts["sold"] + counts["churning"]) / t * 100)
+                    vac_p = (counts["vacant"] / t * 100)
+                    churn_p = (counts["churning"] / t * 100)
+                    fac_rows.append({
+                        "Facility": f, "Total": t, "Sold Rate %": round(sold_rate_p, 1), "Occupancy %": round(occ_p, 1),
+                        "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1),
+                        "Vacant": counts["vacant"], "Vacant MRR": round(counts["vacant_mrr"], 0),
+                        "Churning": counts["churning"], "Churn MRR": round(counts["churn_mrr"], 0),
+                        "Occupied": counts["occupied"], "Sold": counts["sold"],
+                    })
+                sort_by = st.radio("Sort facilities by", ["Vacant MRR (opportunity)", "Scheduled Churn MRR"], key="facility_sort", horizontal=True)
+                if "Churn" in sort_by:
+                    fac_rows.sort(key=lambda x: (-x["Churn MRR"], -x["Total"]))
+                else:
+                    fac_rows.sort(key=lambda x: (-x["Vacant MRR"], -x["Total"]))
+                if fac_rows:
+                    n_fac = len(fac_rows)
+                    top = fac_rows[0]
+                    summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn MRR {_curr(top['Churn MRR'])}"
+                    st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
+                    header = "<tr><th>Facility</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Scheduled Churn MRR</th></tr>"
+                    body = "".join(
+                        f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Sold Rate %']}</td><td>{r['Occupancy %']}</td><td>{r['Vacant']}</td><td>{_curr(r['Vacant MRR'])}</td><td>{r['Churning']}</td><td>{_curr(r['Churn MRR'])}</td></tr>"
+                        for r in fac_rows
+                    )
+                    st.markdown(
+                        f'<div class="dashboard-facility-card"><table class="dashboard-facility-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
+                        unsafe_allow_html=True,
+                    )
+                    facility_options = ["(Select a facility)"] + [r["Facility"] for r in fac_rows]
+                    selected_facility = st.selectbox("Select facility for inventory detail", facility_options, key="dashboard_selected_facility")
+                    # —— Inventory to sell: kitchen-level view for selected facility ——
+                    if selected_facility and selected_facility != "(Select a facility)":
+                        st.subheader(f"Inventory — {selected_facility}")
+                        facility_rows = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_facility]
+                        status_filter = st.multiselect("Status", ["Vacant", "Churning", "Sold", "Occupied"], default=["Vacant", "Churning"], key="inv_status")
+                        if status_filter:
+                            facility_rows = [r for r in facility_rows if _status_normalized(r) in status_filter]
+                        floor_prices = [(_price(r) or 0) for r in facility_rows]
+                        if floor_prices:
+                            p33 = sorted(floor_prices)[max(0, len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else 0
+                            p66 = sorted(floor_prices)[max(0, 2 * len(floor_prices) // 3 - 1)] if len(floor_prices) >= 3 else max(floor_prices)
                         else:
-                            y_col, y_label, title = "Vacant MRR", "Vacant MRR", "Vacant MRR by facility (top 15)"
-                            color_scale = ["#FEE2E2", "#FECACA", "#DC2626", "#B91C1C"]  # red gradient (opportunity, like vacant card)
-                        fig_bar = px.bar(df_bar, x="Facility", y=y_col, title=title, color=y_col, color_continuous_scale=color_scale)
-                        fig_bar.update_layout(
-                            xaxis_title="Facility", yaxis_title=y_label, xaxis_tickangle=-45, height=380,
-                            template="plotly_white", margin=dict(t=50, b=100), font=dict(size=12),
-                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                            coloraxis=dict(colorbar=dict(title=y_label)),
-                        )
-                        st.plotly_chart(fig_bar, use_container_width=True)
-                except Exception:
-                    pass
-                # Action list: top facilities by vacant
-                with st.expander("Focus: top facilities by vacant kitchens", expanded=False):
-                    for r in fac_rows[:5]:
-                        if r["Vacant"] > 0:
-                            st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {_curr(r['Vacant MRR'])} MRR · {r['Occupancy %']}% occupancy")
-        # —— Churn & at-risk block ——
+                            p33 = p66 = 0
+                        price_band = st.radio("Price band", ["All", "Low", "Mid", "High"], key="inv_price_band", horizontal=True)
+                        def _band(r):
+                            p = _price(r) or 0
+                            if p <= p33: return "Low"
+                            if p <= p66: return "Mid"
+                            return "High"
+                        if price_band != "All":
+                            facility_rows = [r for r in facility_rows if _band(r) == price_band]
+                        if facility_rows:
+                            inv_data = []
+                            for r in facility_rows:
+                                st_val = _status_normalized(r) or "Vacant"
+                                floor_val = _price_for_value(r, "Occupied") or _price(r) or 0
+                                list_val = _price_for_value(r, "Vacant") or _price(r) or 0
+                                inv_data.append({
+                                    "Kitchen": _kitchen_name(r) or "—",
+                                    "Status": st_val or "—",
+                                    "Floor (MRR)": floor_val,
+                                    "List (MRR)": list_val,
+                                    "Facility": _facility(r) or "—",
+                                })
+                            df_inv = pd.DataFrame(inv_data)
+                            st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
+                        else:
+                            st.caption("No kitchens match the filters.")
+                    # Bar chart and focus list
+                    try:
+                        import plotly.express as px
+                        top_for_bar = fac_rows[:15]
+                        if top_for_bar:
+                            df_bar = pd.DataFrame(top_for_bar)
+                            if "Churn" in sort_by:
+                                y_col, y_label, title = "Churn MRR", "Scheduled Churn MRR", "Scheduled Churn MRR by facility (top 15)"
+                                color_scale = ["#FFEDD5", "#FED7AA", "#EA580C", "#C2410C"]
+                            else:
+                                y_col, y_label, title = "Vacant MRR", "Vacant MRR", "Vacant MRR by facility (top 15)"
+                                color_scale = ["#FEE2E2", "#FECACA", "#DC2626", "#B91C1C"]
+                            fig_bar = px.bar(df_bar, x="Facility", y=y_col, title=title, color=y_col, color_continuous_scale=color_scale)
+                            fig_bar.update_layout(
+                                xaxis_title="Facility", yaxis_title=y_label, xaxis_tickangle=-45, height=380,
+                                template="plotly_white", margin=dict(t=50, b=100), font=dict(size=12),
+                                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                coloraxis=dict(colorbar=dict(title=y_label)),
+                            )
+                            st.plotly_chart(fig_bar, use_container_width=True)
+                    except Exception:
+                        pass
+                    with st.expander("Focus: top facilities by vacant kitchens", expanded=False):
+                        for r in fac_rows[:5]:
+                            if r["Vacant"] > 0:
+                                st.markdown(f"- **{r['Facility']}**: {r['Vacant']} vacant · {_curr(r['Vacant MRR'])} MRR · {r['Occupancy %']}% occupancy")
+        # —— Churn & at-risk block (expandable) ——
         churning_rows = [r for r in rows_kitchens if _status_normalized(r) == "Churning"]
         if churning_rows:
-            # Sort by churn date (soonest first) when available
             def _churn_date_sort_key(r):
                 s = _churn_date(r)
                 if not s:
                     return "9999-99-99"
                 return s
             churning_rows = sorted(churning_rows, key=_churn_date_sort_key)
-            st.markdown("---")
-            st.subheader("Churn & at-risk — save this revenue")
-            st.caption("**What this means:** These kitchens are still active (paying) today but have a **future churn date** (notice given). The total below is the **monthly revenue we could lose** if we don’t renew or backfill them. The table lists each kitchen, its MRR at risk, and **churn date** (soonest first).")
             churn_mrr_total = sum((_price_for_value(r, "Churning") or 0) for r in churning_rows)
-            st.markdown(
-                f'<div class="dashboard-churn-metric" title="Total monthly revenue at risk from all kitchens with status Churning (future churn date).">'
-                f'<div class="label">Scheduled Churn MRR</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
-                unsafe_allow_html=True,
-            )
-            st.caption("**Table:** Each row is one kitchen with status **Churning**. **Churn date** = when the kitchen is scheduled to churn (table sorted soonest first). **Scheduled Churn MRR** = monthly revenue at risk in **USD**. **Status** = Churning.")
-            header = "<tr><th>Kitchen</th><th>Account / Facility</th><th>Churn date</th><th>Scheduled Churn MRR (USD)</th><th>Status</th></tr>"
-            body = "".join(
-                f"<tr><td>{html.escape(str(_kitchen_name(r) or '—'))}</td><td>{html.escape(str(_facility(r) or '—'))}</td><td>{_churn_date(r) or '—'}</td><td>{_curr(_price_for_value(r, 'Churning') or _price(r) or 0)}</td><td>Churning</td></tr>"
-                for r in churning_rows
-            )
-            st.markdown(
-                f'<div class="dashboard-churn-card"><table class="dashboard-churn-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown("---")
+            with st.expander("**Churn & at-risk — kitchens with a future churn date (revenue to save)** — monthly revenue we could lose; list sorted by churn date soonest first", expanded=False):
+                st.caption("These kitchens are still active (paying) today but have a **future churn date** (notice given). The total is **monthly revenue at risk** if we don’t renew or backfill. Table: each kitchen, MRR at risk, churn date (soonest first).")
+                st.markdown(
+                    f'<div class="dashboard-churn-metric" title="Total monthly revenue at risk from all kitchens with status Churning (future churn date).">'
+                    f'<div class="label">Scheduled Churn MRR</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn MRR (USD) · Status = Churning.")
+                header = "<tr><th>Kitchen</th><th>Account / Facility</th><th>Churn date</th><th>Scheduled Churn MRR (USD)</th><th>Status</th></tr>"
+                body = "".join(
+                    f"<tr><td>{html.escape(str(_kitchen_name(r) or '—'))}</td><td>{html.escape(str(_facility(r) or '—'))}</td><td>{_churn_date(r) or '—'}</td><td>{_curr(_price_for_value(r, 'Churning') or _price(r) or 0)}</td><td>Churning</td></tr>"
+                    for r in churning_rows
+                )
+                st.markdown(
+                    f'<div class="dashboard-churn-card"><table class="dashboard-churn-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
+                    unsafe_allow_html=True,
+                )
         # —— How these numbers are calculated ——
         st.markdown("---")
         with st.expander("How these numbers are calculated", expanded=False):
