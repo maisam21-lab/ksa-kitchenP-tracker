@@ -2908,20 +2908,39 @@ def main():
         st.markdown("---")
         with st.expander("How these numbers are calculated", expanded=False):
             st.markdown("""
-**Status (Kitchen Number)**  
+**Status (what each kitchen state means)**  
 - **Vacant** — No occupancy; available to sell.  
 - **Sold** — Closed Won, access date in the future.  
 - **Occupied** — Closed Won, access date in the past (paying kitchen).  
 - **Churning** — Closed Won with a future churn date (still operating, can resell).
 
-**Counts & rates**  
-- **Total** = Vacant + Churning + Sold + Occupied (sellable only).  
-- **Sold Rate %** = (Occupied + Sold + Churning) / Total — Sales view.  
-- **Occupancy %** = Occupied / Total — Ops view.  
-- **Vacancy %** = Vacant / Total. **Churn %** = Churning / Total.
+---
 
-**Value (MRR/ARR)**  
-- **Vacant MRR** — List/Floor for vacant (sellable upside). **Scheduled Churn MRR** — Monthly recurring revenue from kitchens that are currently active but have a future churn date (notice given). **Occupied MRR** — Floor/actual for occupied (current book).
+**Counts (whole numbers)**  
+- **Total kitchens** = Vacant + Occupied + Sold + Churning  
+- **Vacant** = count of kitchens with status Vacant  
+- **Occupied** = count of kitchens with status Occupied  
+- **Sold** = count of kitchens with status Sold  
+- **Churning** = count of kitchens with status Churning  
+
+---
+
+**Rates (percentages)**  
+- **Sold Rate %** = (Occupied + Sold + Churning) ÷ Total × 100  
+- **Occupancy %** = Occupied ÷ Total × 100  
+- **Vacancy %** = Vacant ÷ Total × 100  
+- **Churn %** = Churning ÷ Total × 100  
+
+---
+
+**Value (MRR = monthly, ARR = annual)**  
+- **MRR** = monthly recurring revenue (per kitchen price, summed).  
+- **ARR** = MRR × 12 (same number shown as a full-year equivalent when you turn “Annualized (ARR)” on).
+
+**Which price is used for each card**  
+- **Vacant MRR** = for each Vacant kitchen we use **List price**, or **Floor price** if List is missing. Sum of those = potential revenue if we fill all vacant.  
+- **Scheduled Churn MRR** = for each Churning kitchen we use **Floor price**, or **List price** if Floor is missing. Sum = monthly revenue at risk from kitchens that are leaving.  
+- **Occupied MRR** = for each Occupied kitchen we use **Floor price**, or **List price** if Floor is missing. Sum = current monthly revenue from occupied kitchens (today’s book).
             """)
         return
 
