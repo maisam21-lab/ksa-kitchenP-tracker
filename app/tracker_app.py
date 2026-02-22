@@ -2704,7 +2704,7 @@ def main():
         </style>
         """, unsafe_allow_html=True)
         st.markdown(
-            f'<div class="dashboard-summary"><strong>KSA at a glance</strong> · {total:,} sellable · Sold Rate {_pct_fmt(sold_rate_pct)} · Occupancy {_pct_fmt(occ_pct)} · {vacant:,} vacant · {churning:,} churning</div>',
+            f'<div class="dashboard-summary"><strong>KSA at a glance</strong> · {total:,} kitchens · {vacant:,} vacant · {occupied:,} occupied · {sold:,} sold</div>',
             unsafe_allow_html=True,
         )
         # —— Scorecard (Sales-first: Sold Rate + Ops Occupancy) ——
@@ -2723,7 +2723,12 @@ def main():
         with sc6:
             st.metric("Sold", f"{sold:,}", help="Closed Won, future access")
         # —— Value: Monthly | Annualized toggle ——
-        value_annualized = st.toggle("Annualized (ARR)", value=False, key="dashboard_value_annualized", help="Show MRR × 12 as ARR")
+        value_annualized = st.toggle(
+            "Annualized (ARR)",
+            value=False,
+            key="dashboard_value_annualized",
+            help="Off = monthly revenue (MRR). On = same revenue × 12 (ARR, annual recurring revenue) so you see a full-year equivalent.",
+        )
         mult = 12 if value_annualized else 1
         value_label = "ARR" if value_annualized else "MRR"
         if has_cost:
