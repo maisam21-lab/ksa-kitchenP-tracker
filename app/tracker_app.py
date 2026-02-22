@@ -2733,17 +2733,21 @@ def main():
         value_label = "ARR" if value_annualized else "MRR"
         if has_cost:
             st.subheader(f"Value — {value_label} ({DASHBOARD_CURRENCY})")
-            st.caption("Vacant/Churn: Floor; Occupied: current book. Hover for details.")
+            st.caption(
+                "**Vacant** = potential revenue if we fill empty kitchens (floor/list price). "
+                "**Scheduled Churn** = revenue we could lose from kitchens that are leaving. "
+                "**Occupied** = revenue we have today from filled kitchens."
+            )
             vac_display = _curr(sum_vacant_val * mult)
             churn_display = _curr(sum_churning_val * mult)
             occ_display = _curr(sum_occupied_val * mult)
             st.markdown(
                 f'<div class="dashboard-value-row">'
-                f'<div class="dashboard-value-card vacant" title="Sellable monthly upside — List/Floor for vacant ({DASHBOARD_CURRENCY})">'
+                f'<div class="dashboard-value-card vacant" title="Potential monthly revenue if all vacant kitchens were filled (using floor/list price).">'
                 f'<div class="label">Vacant {value_label} (opportunity)</div><div class="value">{vac_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
-                f'<div class="dashboard-value-card churning" title="Monthly recurring revenue from kitchens that are currently active but have a future churn date (notice given).">'
+                f'<div class="dashboard-value-card churning" title="Monthly revenue from kitchens that are still paying but have a future churn date — revenue at risk.">'
                 f'<div class="label">Scheduled Churn {value_label}</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
-                f'<div class="dashboard-value-card occupied" title="Current book of business — Floor/actual for occupied ({DASHBOARD_CURRENCY})">'
+                f'<div class="dashboard-value-card occupied" title="Current monthly revenue from occupied kitchens (today\'s book of business).">'
                 f'<div class="label">Occupied {value_label}</div><div class="value">{occ_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
                 f'</div>',
                 unsafe_allow_html=True,
