@@ -2653,20 +2653,75 @@ def main():
                 if p is not None:
                     return p
             return None
-        # Value cards per internal books: Vacant = List then Floor (opportunity); Churning/Occupied = Floor then List (revenue at risk / current fee)
-        def _price_for_value(r, status: str):
-            if status == "Vacant":
-                keys = ("List Price", "List_Price__c", "Sell_Price__c", "Kitchen_Number__c.Sell_Price__c", "Floor Price", "Floor_Price__c", "Kitchen_Number__c.Floor_Price__c", "floor_price")
-            else:
-                keys = ("Floor Price", "Floor_Price__c", "Kitchen_Number__c.Floor_Price__c", "floor_price", "List Price", "List_Price__c", "Sell_Price__c", "Kitchen_Number__c.Sell_Price__c")
-            for k in keys:
+        # Explicit price logic: primary then secondary; track missing for QA (same formulas = same numbers)
+        _LIST_KEYS = ("List Price", "List_Price__c", "Sell_Price__c", "Kitchen_Number__c.Sell_Price__c")
+        _FLOOR_KEYS = ("Floor Price", "Floor_Price__c", "Kitchen_Number__c.Floor_Price__c", "floor_price")
+        def _get_list(r):
+            for k in _LIST_KEYS:
                 p = _parse_price(r.get(k))
                 if p is not None:
                     return p
             return None
-        sum_vacant_val = sum((_price_for_value(r, "Vacant") or 0) for r in rows_kitchens if _status_normalized(r) == "Vacant")
-        sum_churning_val = sum((_price_for_value(r, "Churning") or 0) for r in rows_kitchens if _status_normalized(r) == "Churning")
-        sum_occupied_val = sum((_price_for_value(r, "Occupied") or 0) for r in rows_kitchens if _status_normalized(r) == "Occupied")
+        def _get_floor(r):
+            for k in _FLOOR_KEYS:
+                p = _parse_price(r.get(k))
+                if p is not None:
+                    return p
+            return None
+        def _price_vacant_row(r):
+            """Vacant: List (MSRP) primary, Floor secondary. Returns (value, missing_price)."""
+            p = _get_list(r) or _get_floor(r)
+            return (p or 0.0, p is None)
+        def _price_occupied_row(r):
+            """Occupied: Floor primary, List secondary. Returns (value, missing_price)."""
+            p = _get_floor(r) or _get_list(r)
+            return (p or 0.0, p is None)
+        def _price_churn_row(r):
+            """Churning: Floor primary, List secondary. Returns (value, missing_price)."""
+            p = _get_floor(r) or _get_list(r)
+            return (p or 0.0, p is None)
+        def _price_for_value(r, status: str):
+            """Used elsewhere (facility leaderboard, churn table). Same logic as above."""
+            if status == "Vacant":
+                v, _ = _price_vacant_row(r)
+                return v if v else None
+            if status == "Occupied":
+                v, _ = _price_occupied_row(r)
+                return v if v else None
+            if status == "Churning":
+                v, _ = _price_churn_row(r)
+                return v if v else None
+            return _get_floor(r) or _get_list(r)
+        # Card totals + missing-price counts (numbers unchanged from before)
+        vacant_rows = [r for r in rows_kitchens if _status_normalized(r) == "Vacant"]
+        churning_rows_for_val = [r for r in rows_kitchens if _status_normalized(r) == "Churning"]
+        occupied_rows = [r for r in rows_kitchens if _status_normalized(r) == "Occupied"]
+        sum_vacant_val = 0.0
+        n_vacant_missing = 0
+        for r in vacant_rows:
+            v, missing = _price_vacant_row(r)
+            sum_vacant_val += v
+            if missing:
+                n_vacant_missing += 1
+        sum_churning_val = 0.0
+        n_churn_missing = 0
+        for r in churning_rows_for_val:
+            v, missing = _price_churn_row(r)
+            sum_churning_val += v
+            if missing:
+                n_churn_missing += 1
+        sum_occupied_val = 0.0
+        n_occupied_missing = 0
+        for r in occupied_rows:
+            v, missing = _price_occupied_row(r)
+            sum_occupied_val += v
+            if missing:
+                n_occupied_missing += 1
+        n_floor_gt_list = 0
+        for r in rows_kitchens:
+            fl, li = _get_floor(r), _get_list(r)
+            if fl is not None and li is not None and fl > li:
+                n_floor_gt_list += 1
         has_cost = sum_vacant_val > 0 or sum_churning_val > 0 or sum_occupied_val > 0
         # —— Dashboard styling: summary bar, scorecard, value cards ——
         st.markdown("""
@@ -2752,6 +2807,29 @@ def main():
                 f'</div>',
                 unsafe_allow_html=True,
             )
+            missing_parts = []
+            if n_vacant_missing:
+                missing_parts.append(f"{n_vacant_missing} Vacant")
+            if n_occupied_missing:
+                missing_parts.append(f"{n_occupied_missing} Occupied")
+            if n_churn_missing:
+                missing_parts.append(f"{n_churn_missing} Scheduled Churn")
+            if missing_parts:
+                st.caption(f"**Data quality:** {', '.join(missing_parts)} kitchen(s) have no List or Floor price (included as $0). Review in Kitchen Master Data or source sheet.")
+            with st.expander("Value — data quality (QA)", expanded=False):
+                st.markdown(
+                    f"- **Vacant:** {len(vacant_rows) - n_vacant_missing} of {len(vacant_rows)} have a price; **{n_vacant_missing}** missing (List, else Floor)."
+                )
+                st.markdown(
+                    f"- **Occupied:** {len(occupied_rows) - n_occupied_missing} of {len(occupied_rows)} have a price; **{n_occupied_missing}** missing (Floor, else List)."
+                )
+                st.markdown(
+                    f"- **Scheduled Churn:** {len(churning_rows_for_val) - n_churn_missing} of {len(churning_rows_for_val)} have a price; **{n_churn_missing}** missing (Floor, else List)."
+                )
+                if n_floor_gt_list:
+                    st.warning(f"**{n_floor_gt_list}** row(s) have Floor price > List price. Review in source data — these are still included in the totals.")
+                else:
+                    st.caption("No rows with Floor > List.")
         st.markdown("---")
         # —— Facility leaderboard (where to focus: by Vacant MRR or Scheduled Churn MRR) ——
         fac_stats = {}
@@ -2937,10 +3015,14 @@ def main():
 - **MRR** = monthly recurring revenue (per kitchen price, summed).  
 - **ARR** = MRR × 12 (same number shown as a full-year equivalent when you turn “Annualized (ARR)” on).
 
-**Which price is used for each card**  
-- **Vacant MRR** = for each Vacant kitchen we use **List price**, or **Floor price** if List is missing. Sum of those = potential revenue if we fill all vacant.  
-- **Scheduled Churn MRR** = for each Churning kitchen we use **Floor price**, or **List price** if Floor is missing. Sum = monthly revenue at risk from kitchens that are leaving.  
-- **Occupied MRR** = for each Occupied kitchen we use **Floor price**, or **List price** if Floor is missing. Sum = current monthly revenue from occupied kitchens (today’s book).
+**Which price is used for each card (primary → secondary)**  
+- **Vacant MRR** = for each Vacant kitchen: **List** (Sell_Price__c / List Price) if not blank, else **Floor**. If both missing → $0 and counted in “missing price” in QA.  
+- **Scheduled Churn MRR** = for each Churning kitchen: **Floor** if not blank, else **List**. If both missing → $0 and counted in QA.  
+- **Occupied MRR** = for each Occupied kitchen: **Floor** if not blank, else **List**. If both missing → $0 and counted in QA.  
+
+**Data quality**  
+- Under the value cards we show how many kitchens have no price (included as $0).  
+- Use **Value — data quality (QA)** expander for counts per metric and for rows where Floor > List (review in source).
             """)
         return
 
