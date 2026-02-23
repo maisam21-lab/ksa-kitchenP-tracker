@@ -1858,8 +1858,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
-    # Status color coding for entire row (Vacant=red, Churning=orange, Occupied=green, Sold=blue)
-    _status_colors = {"Vacant": "#FEE2E2", "Churning": "#FED7AA", "Occupied": "#D1FAE5", "Sold": "#DBEAFE"}
+    # Status color coding: match tracker/GSheet (Occupied & Sold = red, Vacant = light green, Churning = gold/amber); no status = dark red
+    _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+    _no_status_bg = "#7F1D1D"  # dark red for rows with no status
     df_display = pd.DataFrame(rows_shown)
     status_col = None
     for c in df_display.columns:
@@ -1869,7 +1870,16 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
     if status_col and not df_display.empty:
         def _row_bg(row):
             v = (str(row[status_col]) if row[status_col] is not None else "").strip()
-            bg = _status_colors.get(v, "")
+            low = v.lower()
+            if not v or low in ("no status", "n/a", "na", "—", "-"):
+                return [f"background-color: {_no_status_bg}; color: white"] * len(row)
+            # Normalize to match GSheet status labels (case-insensitive)
+            key = None
+            if low == "vacant": key = "Vacant"
+            elif low == "churning": key = "Churning"
+            elif low == "occupied": key = "Occupied"
+            elif low == "sold": key = "Sold"
+            bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
             style = f"background-color: {bg}" if bg else ""
             return [style] * len(row)
         styled = df_display.style.apply(_row_bg, axis=1)
@@ -2285,9 +2295,10 @@ def main():
                     for r in sheet_rows:
                         combined_rows.append({"Sheet": label, **r})
                 if not combined_rows:
-                    st.info("No data in the selected sheets yet.")
+                    st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                 else:
                     st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets. Column **Sheet** shows the source.")
+                    st.caption("Tip: For accurate dashboard value totals, ensure **List Price** and **Floor Price** are filled in your source sheets.")
                     cols_combined = list(combined_rows[0].keys()) if combined_rows else []
                     search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
                     rows_shown = combined_rows
@@ -2295,14 +2306,32 @@ def main():
                         term = search_combined.strip().lower()
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
                     st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s).")
-                    st.dataframe(pd.DataFrame(rows_shown), use_container_width=True, hide_index=True)
+                    df_combined = pd.DataFrame(rows_shown)
+                    status_col_combined = None
+                    for c in df_combined.columns:
+                        if str(c).strip().lower() in ("status", "status__c"):
+                            status_col_combined = c
+                            break
+                    if status_col_combined and not df_combined.empty:
+                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                        _ns = "#7F1D1D"
+                        def _row_bg_combined(row):
+                            v = (str(row[status_col_combined]) if row[status_col_combined] is not None else "").strip()
+                            low = v.lower()
+                            if not v or low in ("no status", "n/a", "na", "—", "-"):
+                                return [f"background-color: {_ns}; color: white"] * len(row)
+                            key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                            bg = _sc.get(key, "") if key else _sc.get(v, "")
+                            return [f"background-color: {bg}" if bg else ""] * len(row)
+                        df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
+                    st.dataframe(df_combined, use_container_width=True, hide_index=True)
                     buf = io.StringIO()
                     w = csv.DictWriter(buf, fieldnames=cols_combined, extrasaction="ignore")
                     w.writeheader()
                     w.writerows(rows_shown)
                     st.download_button("Download combined CSV", data=buf.getvalue(), file_name="master_sheets_combined.csv", mime="text/csv", key="dl_master_combined")
         if not rows and not is_other_sheet and chosen_label:
-            st.info(f"No data in **{chosen_label}** yet. Refresh job runs every 15 minutes.")
+            st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
             total = len(rows)
             is_tracker = source_id == "main_tracker"  # superset and Kitchens both use table-like rows
@@ -2554,6 +2583,7 @@ def main():
         else:
             # Always use GSheet for Dashboard so regular users see data (session data_source may default to salesforce)
             rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
+            st.caption("Data source: **Google Sheet (Kitchens / Master Kitchens list)**. Data refreshes every 15 minutes — use **Refresh** in the sidebar if you need the latest.")
         today_str = date.today().isoformat()
         if snapshot_mod and rows_kitchens:
             if not snapshot_mod.snapshot_exists_for_date(today_str):
@@ -2992,7 +3022,7 @@ def main():
 ---
 
 **Counts (whole numbers)**  
-- **Total kitchens** = Vacant + Occupied + Sold + Churning  
+- **Total kitchens** = Vacant + Occupied + Sold + Churning (only rows with one of these four statuses are included; other statuses are excluded).  
 - **Vacant** = count of kitchens with status Vacant  
 - **Occupied** = count of kitchens with status Occupied  
 - **Sold** = count of kitchens with status Sold  
