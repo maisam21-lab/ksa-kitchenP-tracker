@@ -1860,7 +1860,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
     st.divider()
     # Status color coding: match tracker/GSheet (Occupied & Sold = red, Vacant = light green, Churning = gold/amber); no status = dark red
     _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-    _no_status_bg = "#B55233"  # muted brick/terra cotta red for rows with no status
+    _no_status_bg = "#B22222"  # brick red for rows with no status
     df_display = pd.DataFrame(rows_shown)
     status_col = None
     for c in df_display.columns:
@@ -2314,7 +2314,7 @@ def main():
                             break
                     if status_col_combined and not df_combined.empty:
                         _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                        _ns = "#B55233"
+                        _ns = "#B22222"
                         def _row_bg_combined(row):
                             v = (str(row[status_col_combined]) if row[status_col_combined] is not None else "").strip()
                             low = v.lower()
