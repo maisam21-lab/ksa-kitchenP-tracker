@@ -1803,8 +1803,8 @@ def _kitchens_column_order(cols: list[str]) -> list[str]:
     return cols
 
 
-def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
-    """View/filter/download for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source."""
+def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=True):
+    """View/filter/download for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download=False hides CSV download (e.g. Kitchen Master Data)."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if not rows and tab_id == "Kitchens":
@@ -1886,19 +1886,19 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None):
         st.dataframe(styled, use_container_width=True, hide_index=True)
     else:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
-    # Download CSV
-    buf = io.StringIO()
-    if rows_shown:
-        w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows_shown)
-    st.download_button(
-        "Download CSV",
-        data=buf.getvalue(),
-        file_name=f"{tab_id.replace(' ', '_')}.csv",
-        mime="text/csv",
-        key=f"dl_{key_suffix}",
-    )
+    if allow_download and key_suffix != "master_other":
+        buf = io.StringIO()
+        if rows_shown:
+            w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows_shown)
+        st.download_button(
+            "Download CSV",
+            data=buf.getvalue(),
+            file_name=f"{tab_id.replace(' ', '_')}.csv",
+            mime="text/csv",
+            key=f"dl_{key_suffix}",
+        )
 
 
 def main():
@@ -2039,6 +2039,7 @@ def main():
             if _require_verified_signin():
                 st.sidebar.error("Sign-in required")
                 st.sidebar.markdown("Access is restricted. You must **sign in** with your company account.")
+                st.sidebar.info("**New users:** Use your work email to sign in. Do not connect with a Gmail account.")
                 _st_login = getattr(st, "login", None)
                 if callable(_st_login):
                     if st.sidebar.button("Sign in", type="primary", key="gate_sign_in"):
@@ -2057,6 +2058,7 @@ def main():
                 st.info("**You must sign in to use this app.** Use the **Sign in** button in the sidebar, or unlock with a developer key if you have one.")
                 st.stop()
             # Fallback: Sign-in not required — allow typed email (identity not verified)
+            st.sidebar.info("**New users:** Please enter your work email below. Do not connect via a Gmail account.")
             st.sidebar.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
             if not current_user:
@@ -2272,7 +2274,7 @@ def main():
                 _labels_to_use = chosen_labels[:1]
             _show_combined = len(_labels_to_use) > 1
             if not _show_combined:
-                _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet")
+                _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet", allow_download=False)
             else:
                 # Combined view: load every selected sheet and merge into one table
                 combined_rows = []
@@ -2312,11 +2314,6 @@ def main():
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
                     st.dataframe(df_combined, use_container_width=True, hide_index=True)
-                    buf = io.StringIO()
-                    w = csv.DictWriter(buf, fieldnames=cols_combined, extrasaction="ignore")
-                    w.writeheader()
-                    w.writerows(rows_shown)
-                    st.download_button("Download combined CSV", data=buf.getvalue(), file_name="master_sheets_combined.csv", mime="text/csv", key="dl_master_combined")
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -2474,9 +2471,6 @@ def main():
                                     st.json(r)
                                 if len(rows_f) > 50:
                                     st.caption(f"… and {len(rows_f) - 50} more.")
-                            csv_f = export_csv_generic(rows_f)
-                            safe_fac = (fac_name or "facility").replace("/", "-").replace("\\", "-")[:30]
-                            st.download_button("Download CSV", data=csv_f, file_name=f"kitchens_{safe_fac}.csv", mime="text/csv", key=f"master_dl_f_{tab_idx}")
                         else:
                             st.info("No kitchens match filters.")
             if not use_facility_tabs:
@@ -2498,10 +2492,6 @@ def main():
                     st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
                 if len(rows_filtered) > 100:
                     st.caption(f"… and {len(rows_filtered) - 100} more.")
-            if rows_filtered and not use_facility_tabs:
-                csv_data = export_csv(rows_filtered) if is_tracker else export_csv_generic(rows_filtered)
-                safe_name = (chosen_label or "master_kitchens").replace(" ", "_")[:40]
-                st.download_button("Download report (CSV)", data=csv_data, file_name=f"{safe_name}.csv", mime="text/csv", key="master_dl_report_csv")
             if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
                 st.markdown("---")
                 st.subheader("Pivot view")
@@ -2538,11 +2528,6 @@ def main():
                                 pivot["Total"] = pivot.sum(axis=1)
                                 pivot.loc["Total", :] = pivot.sum(axis=0)
                             st.dataframe(pivot, use_container_width=True, hide_index=False)
-                            try:
-                                pivot_csv = pivot.to_csv()
-                                st.download_button("Download pivot (CSV)", data=pivot_csv, file_name="master_kitchens_pivot.csv", mime="text/csv", key="master_dl_pivot_csv")
-                            except Exception:
-                                pass
                             try:
                                 import plotly.graph_objects as go
                                 fig = go.Figure(data=go.Heatmap(
