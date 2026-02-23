@@ -2242,7 +2242,7 @@ def main():
                 rows = list_generic_tab(source_id, source="gsheet")
                 cap_col, btn_col = st.columns([3, 1])
                 with cap_col:
-                    st.caption("Select **one facility** or **multiple facilities** (sheets). One selection shows that facility; multiple show a combined table with a **Sheet** column.")
+                    st.caption("Select **one facility** or **multiple facilities** (sheets). One selected → that facility only; multiple selected → combined table with a **Sheet** column.")
                 with btn_col:
                     sel_col, clr_col = st.columns(2)
                     with sel_col:
@@ -2265,24 +2265,10 @@ def main():
                 source_id = source_ids.get(chosen_labels[0], first_tab)
                 rows = list_generic_tab(source_id, source="gsheet")
                 is_other_sheet = True
-        # Render: single sheet or combined (user can force "Combined" when multiple selected)
+        # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
         if is_other_sheet and chosen_labels:
-            _n = len(chosen_labels)
-            _n_in_state = len(st.session_state.get("master_sheets_selection") or [])
-            _view_mode = st.radio(
-                "View",
-                ["One facility (first selected)", "All selected facilities (combined table)"],
-                index=1 if (_n > 1 or _n_in_state > 1) else 0,
-                key="master_view_mode",
-                horizontal=True,
-                help="One facility = show only the first selected. Combined = merge all selected into one table with a Sheet column.",
-            )
-            # When "Combined" use session_state list (multiselect can lag); otherwise first only
-            if _view_mode.startswith("Combined"):
-                _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
-                if not _labels_to_use:
-                    _labels_to_use = chosen_labels[:1]
-            else:
+            _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
+            if not _labels_to_use:
                 _labels_to_use = chosen_labels[:1]
             _show_combined = len(_labels_to_use) > 1
             if not _show_combined:
