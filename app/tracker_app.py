@@ -2242,7 +2242,7 @@ def main():
                 rows = list_generic_tab(source_id, source="gsheet")
                 cap_col, btn_col = st.columns([3, 1])
                 with cap_col:
-                    st.caption("**Sheets** — choose one or more sheets. Multiple selection shows one combined table with a **Sheet** column.")
+                    st.caption("Select **one facility** or **multiple facilities** (sheets). One selection shows that facility; multiple show a combined table with a **Sheet** column.")
                 with btn_col:
                     sel_col, clr_col = st.columns(2)
                     with sel_col:
@@ -2254,10 +2254,10 @@ def main():
                             st.session_state[_sel_key] = [first_tab]
                             _rerun()
                 chosen_labels = st.multiselect(
-                    "Sheets (tabs)",
+                    "Facilities (sheets)",
                     options=source_options,
                     key=_sel_key,
-                    help="Select one or more sheets. Use **Select all** above to add every sheet.",
+                    help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
                 )
                 if not chosen_labels:
                     chosen_labels = [first_tab]
@@ -2271,10 +2271,11 @@ def main():
             _n_in_state = len(st.session_state.get("master_sheets_selection") or [])
             _view_mode = st.radio(
                 "View",
-                ["Single sheet (first selected)", "Combined table (all selected)"],
+                ["One facility (first selected)", "All selected facilities (combined table)"],
                 index=1 if (_n > 1 or _n_in_state > 1) else 0,
                 key="master_view_mode",
                 horizontal=True,
+                help="One facility = show only the first selected. Combined = merge all selected into one table with a Sheet column.",
             )
             # When "Combined" use session_state list (multiselect can lag); otherwise first only
             if _view_mode.startswith("Combined"):
