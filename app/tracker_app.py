@@ -3006,6 +3006,19 @@ def main():
                                     "Facility": _facility(r) or "—",
                                 })
                             df_inv = pd.DataFrame(inv_data)
+                            # Status color coding (same as Kitchen Master Data): Vacant=green, Churning=amber, Occupied/Sold=red, no status=dark red
+                            _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                            _no_status_bg = "#B22222"
+                            if "Status" in df_inv.columns and not df_inv.empty:
+                                def _inv_row_bg(row):
+                                    v = (str(row["Status"]) if row["Status"] is not None else "").strip()
+                                    low = v.lower()
+                                    if not v or low in ("no status", "n/a", "na", "—", "-"):
+                                        return [f"background-color: {_no_status_bg}; color: white"] * len(row)
+                                    key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                                    bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
+                                    return [f"background-color: {bg}" if bg else ""] * len(row)
+                                df_inv = df_inv.style.apply(_inv_row_bg, axis=1)
                             st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
                         else:
                             st.caption("No kitchens match the filters.")
@@ -3053,7 +3066,7 @@ def main():
                     f'<div class="label">Scheduled Churn RRL</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort. Rows colored by Hot/Cold.")
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort. Row colors match Kitchen Master Data (Churning = amber).")
                 # Sortable table: default order by churn date soonest first; user can click headers to sort by any column
                 def _churn_date_display(iso_date: str) -> str:
                     """Format YYYY-MM-DD as DD/MM/YYYY for display."""
@@ -3075,17 +3088,18 @@ def main():
                     for r in churning_rows
                 ]
                 df_churn = pd.DataFrame(churn_table_rows)
-                # Hot/Cold row color coding (same idea as status coding elsewhere)
-                _hot_bg = "#FEE2E2"   # light red/warm for Hot
-                _cold_bg = "#E0F2FE"   # light blue/cool for Cold
-                if "Kitchen" in df_churn.columns and not df_churn.empty:
+                # Status color coding (same as Kitchen Master Data): Occupied/Sold=red, Vacant=green, Churning=amber, no status=dark red
+                _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                _no_status_bg = "#B22222"
+                if "Status" in df_churn.columns and not df_churn.empty:
                     def _churn_row_bg(row):
-                        kitchen_val = str(row.get("Kitchen") or "")
-                        if "(Hot)" in kitchen_val:
-                            return [f"background-color: {_hot_bg}"] * len(row)
-                        if "(Cold)" in kitchen_val:
-                            return [f"background-color: {_cold_bg}"] * len(row)
-                        return [""] * len(row)
+                        v = (str(row["Status"]) if row["Status"] is not None else "").strip()
+                        low = v.lower()
+                        if not v or low in ("no status", "n/a", "na", "—", "-"):
+                            return [f"background-color: {_no_status_bg}; color: white"] * len(row)
+                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                        bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
+                        return [f"background-color: {bg}" if bg else ""] * len(row)
                     df_churn = df_churn.style.apply(_churn_row_bg, axis=1)
                 st.dataframe(
                     df_churn,
