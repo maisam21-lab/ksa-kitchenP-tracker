@@ -2000,6 +2000,13 @@ def main():
         </style>
         """, unsafe_allow_html=True)
 
+    # Hide dataframe toolbar (eye, download, search, fullscreen) app-wide
+    st.markdown("""
+    <style>
+    [data-testid="stElementToolbar"] { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Sidebar (KitchenPark-style: logo + header)
     logo_path = _logo_path()
     if logo_path:
@@ -2620,13 +2627,26 @@ def main():
                 except Exception:
                     return s[:10] if len(s) >= 10 else s
             return ""
+        def _opportunity_name(r):
+            for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c"):
+                v = r.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            return ""
+        def _is_vacant_approved_deal(r):
+            """True if status is Vacant and Opportunity name is 'approved deal' (case-insensitive)."""
+            if _status_normalized(r) != "Vacant":
+                return False
+            name = _opportunity_name(r).strip().lower()
+            return name == "approved deal" or "approved deal" in name
         vacant = sum(1 for r in rows_kitchens if _status_normalized(r) == "Vacant")
         churning = sum(1 for r in rows_kitchens if _status_normalized(r) == "Churning")
         occupied = sum(1 for r in rows_kitchens if _status_normalized(r) == "Occupied")
         sold = sum(1 for r in rows_kitchens if _status_normalized(r) == "Sold")
+        vacant_approved_deal = sum(1 for r in rows_kitchens if _is_vacant_approved_deal(r))
         total = vacant + churning + occupied + sold
         occ_pct = (occupied / total * 100) if total else 0
-        sold_rate_pct = ((occupied + sold + churning) / total * 100) if total else 0  # Sales view: (Occupied + Sold + Churning) / Total
+        sold_rate_pct = ((occupied + sold + churning + vacant_approved_deal) / total * 100) if total else 0  # Sales view: includes Vacant with Opportunity name "approved deal"
         vac_pct = (vacant / total * 100) if total else 0
         churn_pct = (churning / total * 100) if total else 0
         sold_pct = (sold / total * 100) if total else 0
@@ -2770,7 +2790,7 @@ def main():
         with sc1:
             st.metric("Total kitchens", f"{total:,}", help="Sellable only (Vacant+Sold+Occupied+Churning)")
         with sc2:
-            st.metric("Sold Rate %", _pct_fmt(sold_rate_pct), help="(Occupied + Sold + Churning) / Total — Sales view")
+            st.metric("Sold Rate %", _pct_fmt(sold_rate_pct), help="(Occupied + Sold + Churning + Vacant approved deal) / Total — Sales view. Vacant with Opportunity name 'approved deal' count toward sold.")
         with sc3:
             st.metric("Occupancy % (Ops)", _pct_fmt(occ_pct), help="Occupied / Total")
         with sc4:
@@ -2838,10 +2858,12 @@ def main():
         for r in rows_kitchens:
             f = _facility(r) or "(No facility)"
             if f not in fac_stats:
-                fac_stats[f] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0, "vacant_mrr": 0.0, "churn_mrr": 0.0}
+                fac_stats[f] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0, "vacant_approved_deal": 0, "vacant_mrr": 0.0, "churn_mrr": 0.0}
             s = _status_normalized(r)
             if s == "Vacant":
                 fac_stats[f]["vacant"] += 1
+                if _is_vacant_approved_deal(r):
+                    fac_stats[f]["vacant_approved_deal"] += 1
                 fac_stats[f]["vacant_mrr"] += _price_for_value(r, "Vacant") or 0
             elif s == "Churning":
                 fac_stats[f]["churning"] += 1
@@ -2858,7 +2880,7 @@ def main():
                     if t == 0:
                         continue
                     occ_p = (counts["occupied"] / t * 100)
-                    sold_rate_p = ((counts["occupied"] + counts["sold"] + counts["churning"]) / t * 100)
+                    sold_rate_p = ((counts["occupied"] + counts["sold"] + counts["churning"] + counts.get("vacant_approved_deal", 0)) / t * 100)
                     vac_p = (counts["vacant"] / t * 100)
                     churn_p = (counts["churning"] / t * 100)
                     fac_rows.append({
@@ -3003,7 +3025,7 @@ def main():
 ---
 
 **Rates (percentages)**  
-- **Sold Rate %** = (Occupied + Sold + Churning) ÷ Total × 100  
+- **Sold Rate %** = (Occupied + Sold + Churning + Vacant approved deal) ÷ Total × 100. **Vacant approved deal** = Vacant kitchens whose Opportunity name is "approved deal" (counted in Sold Rate only).  
 - **Occupancy %** = Occupied ÷ Total × 100  
 - **Vacancy %** = Vacant ÷ Total × 100  
 - **Churn %** = Churning ÷ Total × 100  
