@@ -2960,9 +2960,25 @@ def main():
                     top = fac_rows[0]
                     summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn RRL {_curr(top['Churn RRL'])}"
                     st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
-                    # Sortable table: use st.dataframe so users can click column headers to sort
+                    # Sortable table with row color coding: Vacant > 0 = green (opportunity), Churning > 0 = amber (at risk)
                     display_cols = ["Facility", "Total", "Sold Rate %", "Occupancy %", "Vacant", "Vacant MRR", "Churning", "Churn RRL"]
                     df_fac = pd.DataFrame(fac_rows)[[c for c in display_cols if c in (fac_rows[0].keys() if fac_rows else [])]]
+                    if not df_fac.empty and "Vacant" in df_fac.columns and "Churning" in df_fac.columns:
+                        def _fac_row_bg(row):
+                            vac = row.get("Vacant") or 0
+                            churn = row.get("Churning") or 0
+                            try:
+                                vac, churn = int(vac), int(churn)
+                            except (TypeError, ValueError):
+                                vac, churn = 0, 0
+                            if vac > 0 and churn == 0:
+                                return [f"background-color: #D1FAE5"] * len(row)  # green = opportunity
+                            if churn > 0 and vac == 0:
+                                return [f"background-color: #FDE68A"] * len(row)  # amber = at risk
+                            if vac > 0 and churn > 0:
+                                return [f"background-color: #D1FAE5"] * len(row)  # green (opportunity primary)
+                            return [""] * len(row)
+                        df_fac = df_fac.style.apply(_fac_row_bg, axis=1)
                     st.dataframe(
                         df_fac,
                         use_container_width=True,
@@ -3069,7 +3085,7 @@ def main():
                     f'<div class="label">Scheduled Churn RRL</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort. Row colors match Kitchen Master Data (Churning = amber).")
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort. Rows: Hot = light red, Cold = light blue, else amber.")
                 # Sortable table: default order by churn date soonest first; user can click headers to sort by any column
                 def _churn_date_display(iso_date: str) -> str:
                     """Format YYYY-MM-DD as DD/MM/YYYY for display."""
@@ -3091,18 +3107,15 @@ def main():
                     for r in churning_rows
                 ]
                 df_churn = pd.DataFrame(churn_table_rows)
-                # Status color coding (same as Kitchen Master Data): Occupied/Sold=red, Vacant=green, Churning=amber, no status=dark red
-                _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                _no_status_bg = "#B22222"
-                if "Status" in df_churn.columns and not df_churn.empty:
+                # Row color coding: Hot = light red, Cold = light blue, else Churning = amber (match Kitchen Master Data)
+                if "Kitchen" in df_churn.columns and not df_churn.empty:
                     def _churn_row_bg(row):
-                        v = (str(row["Status"]) if row["Status"] is not None else "").strip()
-                        low = v.lower()
-                        if not v or low in ("no status", "n/a", "na", "—", "-"):
-                            return [f"background-color: {_no_status_bg}; color: white"] * len(row)
-                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
-                        bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
-                        return [f"background-color: {bg}" if bg else ""] * len(row)
+                        kitchen_val = str(row.get("Kitchen") or "")
+                        if "(Hot)" in kitchen_val:
+                            return [f"background-color: #FEE2E2"] * len(row)  # light red
+                        if "(Cold)" in kitchen_val:
+                            return [f"background-color: #E0F2FE"] * len(row)  # light blue
+                        return [f"background-color: #FDE68A"] * len(row)  # amber = Churning
                     df_churn = df_churn.style.apply(_churn_row_bg, axis=1)
                 st.dataframe(
                     df_churn,
