@@ -2847,6 +2847,8 @@ def main():
         .dashboard-churn-metric { background: linear-gradient(145deg, #FFEDD5 0%, #FED7AA 100%); border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; border-left: 4px solid #EA580C; display: inline-block; min-width: 200px; }
         .dashboard-churn-metric .label { font-size: 0.85rem; color: #9a3412; font-weight: 600; margin-bottom: 4px; }
         .dashboard-churn-metric .value { font-size: 1.35rem; font-weight: 700; color: #111827; }
+        div[data-testid="stDataFrame"] { border-radius: 10px; box-shadow: 0 2px 8px rgba(15,118,110,0.08); border: 1px solid rgba(15,118,110,0.2); overflow: hidden; }
+        div[data-testid="stDataFrame"]:hover { box-shadow: 0 4px 14px rgba(15,118,110,0.12); }
         </style>
         """, unsafe_allow_html=True)
         st.markdown(
@@ -2960,25 +2962,9 @@ def main():
                     top = fac_rows[0]
                     summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn RRL {_curr(top['Churn RRL'])}"
                     st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
-                    # Sortable table with row color coding: Vacant > 0 = green (opportunity), Churning > 0 = amber (at risk)
+                    # Sortable table (clean, eye-catching)
                     display_cols = ["Facility", "Total", "Sold Rate %", "Occupancy %", "Vacant", "Vacant MRR", "Churning", "Churn RRL"]
                     df_fac = pd.DataFrame(fac_rows)[[c for c in display_cols if c in (fac_rows[0].keys() if fac_rows else [])]]
-                    if not df_fac.empty and "Vacant" in df_fac.columns and "Churning" in df_fac.columns:
-                        def _fac_row_bg(row):
-                            vac = row.get("Vacant") or 0
-                            churn = row.get("Churning") or 0
-                            try:
-                                vac, churn = int(vac), int(churn)
-                            except (TypeError, ValueError):
-                                vac, churn = 0, 0
-                            if vac > 0 and churn == 0:
-                                return [f"background-color: #D1FAE5"] * len(row)  # green = opportunity
-                            if churn > 0 and vac == 0:
-                                return [f"background-color: #FDE68A"] * len(row)  # amber = at risk
-                            if vac > 0 and churn > 0:
-                                return [f"background-color: #D1FAE5"] * len(row)  # green (opportunity primary)
-                            return [""] * len(row)
-                        df_fac = df_fac.style.apply(_fac_row_bg, axis=1)
                     st.dataframe(
                         df_fac,
                         use_container_width=True,
@@ -3085,7 +3071,7 @@ def main():
                     f'<div class="label">Scheduled Churn RRL</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort. Rows: Hot = light red, Cold = light blue, else amber.")
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort.")
                 # Sortable table: default order by churn date soonest first; user can click headers to sort by any column
                 def _churn_date_display(iso_date: str) -> str:
                     """Format YYYY-MM-DD as DD/MM/YYYY for display."""
@@ -3107,16 +3093,6 @@ def main():
                     for r in churning_rows
                 ]
                 df_churn = pd.DataFrame(churn_table_rows)
-                # Row color coding: Hot = light red, Cold = light blue, else Churning = amber (match Kitchen Master Data)
-                if "Kitchen" in df_churn.columns and not df_churn.empty:
-                    def _churn_row_bg(row):
-                        kitchen_val = str(row.get("Kitchen") or "")
-                        if "(Hot)" in kitchen_val:
-                            return [f"background-color: #FEE2E2"] * len(row)  # light red
-                        if "(Cold)" in kitchen_val:
-                            return [f"background-color: #E0F2FE"] * len(row)  # light blue
-                        return [f"background-color: #FDE68A"] * len(row)  # amber = Churning
-                    df_churn = df_churn.style.apply(_churn_row_bg, axis=1)
                 st.dataframe(
                     df_churn,
                     use_container_width=True,
