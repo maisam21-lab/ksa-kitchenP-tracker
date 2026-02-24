@@ -2694,6 +2694,7 @@ def main():
                     return str(v).strip()
             return ""
         def _churn_date(r):
+            """Return churn date normalized to YYYY-MM-DD for sorting; raw for display may be DD/MM/YYYY."""
             for k in ("Churn Date", "Churn_Date__c", "Opportunity__r.Churn_Date__c", "churn_date"):
                 v = r.get(k)
                 if v is None:
@@ -2705,10 +2706,14 @@ def main():
                     if "T" in s:
                         d = datetime.fromisoformat(s.replace("Z", "+00:00"))
                     else:
-                        d = datetime.strptime(s[:10], "%Y-%m-%d")
+                        raw = s[:10]
+                        try:
+                            d = datetime.strptime(raw, "%Y-%m-%d")
+                        except Exception:
+                            d = datetime.strptime(raw, "%d/%m/%Y")
                     return d.strftime("%Y-%m-%d")
                 except Exception:
-                    return s[:10] if len(s) >= 10 else s
+                    pass
             return ""
         def _opportunity_name(r):
             # Explicit keys first (SF / report column names)
@@ -3048,19 +3053,40 @@ def main():
                     f'<div class="label">Scheduled Churn RRL</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort.")
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort. Rows colored by Hot/Cold.")
                 # Sortable table: default order by churn date soonest first; user can click headers to sort by any column
+                def _churn_date_display(iso_date: str) -> str:
+                    """Format YYYY-MM-DD as DD/MM/YYYY for display."""
+                    if not iso_date or iso_date == "—":
+                        return iso_date or "—"
+                    try:
+                        d = datetime.strptime(iso_date[:10], "%Y-%m-%d")
+                        return d.strftime("%d/%m/%Y")
+                    except Exception:
+                        return iso_date
                 churn_table_rows = [
                     {
                         "Kitchen": _kitchen_name(r) or "—",
                         "Account / Facility": _facility(r) or "—",
-                        "Churn date": _churn_date(r) or "—",
+                        "Churn date": _churn_date_display(_churn_date(r)),
                         "Scheduled Churn RRL (USD)": _price_for_value(r, "Churning") or _price(r) or 0,
                         "Status": "Churning",
                     }
                     for r in churning_rows
                 ]
                 df_churn = pd.DataFrame(churn_table_rows)
+                # Hot/Cold row color coding (same idea as status coding elsewhere)
+                _hot_bg = "#FEE2E2"   # light red/warm for Hot
+                _cold_bg = "#E0F2FE"   # light blue/cool for Cold
+                if "Kitchen" in df_churn.columns and not df_churn.empty:
+                    def _churn_row_bg(row):
+                        kitchen_val = str(row.get("Kitchen") or "")
+                        if "(Hot)" in kitchen_val:
+                            return [f"background-color: {_hot_bg}"] * len(row)
+                        if "(Cold)" in kitchen_val:
+                            return [f"background-color: {_cold_bg}"] * len(row)
+                        return [""] * len(row)
+                    df_churn = df_churn.style.apply(_churn_row_bg, axis=1)
                 st.dataframe(
                     df_churn,
                     use_container_width=True,
