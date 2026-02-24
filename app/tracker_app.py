@@ -1873,9 +1873,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
-    # Status color coding (app-wide): Vacant = green, Occupied = red, Sold = red, Churning = amber, no status = dark red
+    # Status color coding (match sheet/dashboard reference): Vacant = light green, Occupied = light red, Sold = light red, Churning = amber, no status/NA/empty = dark red
     _status_colors = {"Vacant": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
-    _no_status_bg = "#B22222"  # dark red for rows with no status
+    _no_status_bg = "#B22222"  # dark red for no status, NA, or empty
     df_display = pd.DataFrame(rows_shown)
     status_col = None
     for c in df_display.columns:
