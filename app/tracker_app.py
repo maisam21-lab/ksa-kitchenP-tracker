@@ -3033,10 +3033,10 @@ def main():
                             df_bar = pd.DataFrame(top_for_bar)
                             if "Churn" in sort_by:
                                 y_col, y_label, title = "Churn RRL", "Scheduled Churn RRL", "Scheduled Churn RRL by facility (top 15)"
-                                color_scale = ["#FFEDD5", "#FED7AA", "#EA580C", "#C2410C"]
+                                color_scale = ["#FFEDD5", "#FED7AA", "#EA580C", "#C2410C"]  # amber for Churn
                             else:
                                 y_col, y_label, title = "Vacant MRR", "Vacant MRR", "Vacant MRR by facility (top 15)"
-                                color_scale = ["#FEE2E2", "#FECACA", "#DC2626", "#B91C1C"]
+                                color_scale = ["#D1FAE5", "#A7F3D0", "#059669", "#047857"]  # green for Vacant
                             fig_bar = px.bar(df_bar, x="Facility", y=y_col, title=title, color=y_col, color_continuous_scale=color_scale)
                             fig_bar.update_layout(
                                 xaxis_title="Facility", yaxis_title=y_label, xaxis_tickangle=-45, height=380,
