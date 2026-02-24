@@ -3071,8 +3071,6 @@ def main():
                     f'<div class="label">Scheduled Churn RRL</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort.")
-                # Sortable table: default order by churn date soonest first; user can click headers to sort by any column
                 def _churn_date_display(iso_date: str) -> str:
                     """Format YYYY-MM-DD as DD/MM/YYYY for display."""
                     if not iso_date or iso_date == "—":
@@ -3082,6 +3080,49 @@ def main():
                         return d.strftime("%d/%m/%Y")
                     except Exception:
                         return iso_date
+                # Monthly view: group by churn month (YYYY-MM) and compute count + RRL per month
+                month_to_rows: dict[str, list] = {}
+                for r in churning_rows:
+                    iso = _churn_date(r)
+                    if iso and len(iso) >= 7:
+                        ym = iso[:7]  # YYYY-MM
+                        month_to_rows.setdefault(ym, []).append(r)
+                month_labels = []
+                for ym in sorted(month_to_rows.keys()):
+                    try:
+                        d = datetime.strptime(ym + "-01", "%Y-%m-%d")
+                        month_labels.append((ym, d.strftime("%b %Y")))  # e.g. Feb 2026
+                    except Exception:
+                        month_labels.append((ym, ym))
+                # Monthly filter
+                filter_options = ["All"] + [label for _, label in month_labels]
+                selected_month_label = st.selectbox("Filter by churn month", options=filter_options, key="churn_month_filter", help="Show only kitchens churning in the selected month, or All.")
+                if selected_month_label and selected_month_label != "All":
+                    ym_selected = next((ym for ym, label in month_labels if label == selected_month_label), None)
+                    if ym_selected:
+                        churning_rows_filtered = month_to_rows.get(ym_selected, [])
+                    else:
+                        churning_rows_filtered = churning_rows
+                else:
+                    churning_rows_filtered = churning_rows
+                # Monthly view summary (count + RRL per month)
+                st.subheader("By month")
+                monthly_summary = []
+                for ym, label in month_labels:
+                    rows_m = month_to_rows.get(ym, [])
+                    mrr = sum((_price_for_value(r, "Churning") or _price(r) or 0) for r in rows_m)
+                    monthly_summary.append({"Month": label, "Kitchens": len(rows_m), "Scheduled Churn RRL (USD)": round(mrr, 0)})
+                if monthly_summary:
+                    df_monthly = pd.DataFrame(monthly_summary)
+                    st.dataframe(
+                        df_monthly,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Scheduled Churn RRL (USD)": st.column_config.NumberColumn(format="$%.0f"),
+                        },
+                    )
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort.")
                 churn_table_rows = [
                     {
                         "Kitchen": _kitchen_name(r) or "—",
@@ -3090,7 +3131,7 @@ def main():
                         "Scheduled Churn RRL (USD)": _price_for_value(r, "Churning") or _price(r) or 0,
                         "Status": "Churning",
                     }
-                    for r in churning_rows
+                    for r in churning_rows_filtered
                 ]
                 df_churn = pd.DataFrame(churn_table_rows)
                 st.dataframe(
