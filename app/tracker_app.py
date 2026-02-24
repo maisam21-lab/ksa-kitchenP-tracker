@@ -2898,7 +2898,7 @@ def main():
             elif s == "Sold":
                 fac_stats[f]["sold"] += 1
         if fac_stats:
-            with st.expander("**Facilities by opportunity and at-risk revenue** — sort by Vacant MRR or Scheduled Churn RRL, view full table and inventory by facility", expanded=False):
+            with st.expander("**Facilities by opportunity and at-risk revenue** — sort by Vacant MRR or Scheduled Churn RRL, view full table and inventory by facility", expanded=True):
                 fac_rows = []
                 for f, counts in fac_stats.items():
                     t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
@@ -3014,22 +3014,33 @@ def main():
             churning_rows = sorted(churning_rows, key=_churn_date_sort_key)
             churn_mrr_total = sum((_price_for_value(r, "Churning") or 0) for r in churning_rows)
             st.markdown("---")
-            with st.expander("**Churn & at-risk — kitchens with a future churn date (revenue to save)** — monthly revenue we could lose; list sorted by churn date soonest first", expanded=False):
+            with st.expander("**Churn & at-risk — kitchens with a future churn date (revenue to save)** — monthly revenue we could lose; list sorted by churn date soonest first", expanded=True):
                 st.caption("These kitchens are still active (paying) today but have a **future churn date** (notice given). The total is **monthly revenue at risk** if we don’t renew or backfill. Table: each kitchen, MRR at risk, churn date (soonest first).")
                 st.markdown(
                     f'<div class="dashboard-churn-metric" title="Total monthly revenue at risk from all kitchens with status Churning (future churn date).">'
                     f'<div class="label">Scheduled Churn RRL</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning.")
-                header = "<tr><th>Kitchen</th><th>Account / Facility</th><th>Churn date</th><th>Scheduled Churn RRL (USD)</th><th>Status</th></tr>"
-                body = "".join(
-                    f"<tr><td>{html.escape(str(_kitchen_name(r) or '—'))}</td><td>{html.escape(str(_facility(r) or '—'))}</td><td>{_churn_date(r) or '—'}</td><td>{_curr(_price_for_value(r, 'Churning') or _price(r) or 0)}</td><td>Churning</td></tr>"
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort.")
+                # Sortable table: default order by churn date soonest first; user can click headers to sort by any column
+                churn_table_rows = [
+                    {
+                        "Kitchen": _kitchen_name(r) or "—",
+                        "Account / Facility": _facility(r) or "—",
+                        "Churn date": _churn_date(r) or "—",
+                        "Scheduled Churn RRL (USD)": _price_for_value(r, "Churning") or _price(r) or 0,
+                        "Status": "Churning",
+                    }
                     for r in churning_rows
-                )
-                st.markdown(
-                    f'<div class="dashboard-churn-card"><table class="dashboard-churn-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
-                    unsafe_allow_html=True,
+                ]
+                df_churn = pd.DataFrame(churn_table_rows)
+                st.dataframe(
+                    df_churn,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Scheduled Churn RRL (USD)": st.column_config.NumberColumn(format="$%.0f"),
+                    },
                 )
         # —— How these numbers are calculated ——
         st.markdown("---")
