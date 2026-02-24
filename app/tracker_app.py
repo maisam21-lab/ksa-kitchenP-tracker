@@ -58,7 +58,8 @@ try:
 except ImportError:
     HAS_EXCEL = False
 
-# Online sheet: same ID as the workbook
+# Online sheet: same ID as the workbook (docs.google.com/.../d/SHEET_ID/edit?gid=...)
+# Same logic as the sheet: country merge (SA/regions → Saudi Arabia, BH → Bahrain), status color coding.
 SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
 
 # Rerun works in Streamlit 1.27+; fallback for older versions
@@ -1679,6 +1680,8 @@ def _refresh_from_online_sheet():
                 upsert_row(row)
             loaded.append(f"{tab_id} ({len(rows)} rows)")
         else:
+            # Apply same logic as the Google Sheet: country merge (SA/regions → Saudi Arabia, BH → Bahrain) for all tabs
+            rows = _ensure_account_country_in_kitchens(rows)
             save_generic_tab(tab_id, rows, source="gsheet")
             loaded.append(f"{tab_id} ({len(rows)} rows)")
         # Record tab order (skip exec log so Data tabs match sheet tabs)
