@@ -2777,16 +2777,9 @@ def main():
             st.metric("Churn %", _pct_fmt(churn_pct), help="Churning / Total")
         with sc6:
             st.metric("Sold", f"{sold:,}", help="Closed Won, future access")
-        st.caption(f"Sold Rate includes **{vacant_approved_deal}** Vacant kitchen(s) with **Opportunity Name** filled (approved deal) in the numerator.")
-        # —— Value: Monthly | Annualized toggle ——
-        value_annualized = st.toggle(
-            "Annualized (ARR)",
-            value=False,
-            key="dashboard_value_annualized",
-            help="Off = monthly revenue (MRR). On = same revenue × 12 (ARR, annual recurring revenue) so you see a full-year equivalent.",
-        )
-        mult = 12 if value_annualized else 1
-        value_label = "ARR" if value_annualized else "MRR"
+        # —— Value: MRR only (no ARR toggle) ——
+        mult = 1
+        value_label = "MRR"
         if has_cost:
             st.subheader(f"Value — {value_label} ({DASHBOARD_CURRENCY})")
             st.caption(
@@ -2829,7 +2822,7 @@ def main():
                 )
                 st.caption("All value calculations use **List price** only.")
         st.markdown("---")
-        # —— Facility leaderboard (where to focus: by Vacant MRR or Scheduled Churn MRR) ——
+        # —— Facility leaderboard (where to focus: by Vacant MRR or Scheduled Churn RRL) ——
         fac_stats = {}
         for r in rows_kitchens:
             f = _facility(r) or "(No facility)"
@@ -2849,7 +2842,7 @@ def main():
             elif s == "Sold":
                 fac_stats[f]["sold"] += 1
         if fac_stats:
-            with st.expander("**Facilities by opportunity and at-risk revenue** — sort by Vacant MRR or Scheduled Churn MRR, view full table and inventory by facility", expanded=False):
+            with st.expander("**Facilities by opportunity and at-risk revenue** — sort by Vacant MRR or Scheduled Churn RRL, view full table and inventory by facility", expanded=False):
                 fac_rows = []
                 for f, counts in fac_stats.items():
                     t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
@@ -2863,22 +2856,22 @@ def main():
                         "Facility": f, "Total": t, "Sold Rate %": round(sold_rate_p, 1), "Occupancy %": round(occ_p, 1),
                         "Vacancy %": round(vac_p, 1), "In churn %": round(churn_p, 1),
                         "Vacant": counts["vacant"], "Vacant MRR": round(counts["vacant_mrr"], 0),
-                        "Churning": counts["churning"], "Churn MRR": round(counts["churn_mrr"], 0),
+                        "Churning": counts["churning"], "Churn RRL": round(counts["churn_mrr"], 0),
                         "Occupied": counts["occupied"], "Sold": counts["sold"],
                     })
-                sort_by = st.radio("Sort facilities by", ["Vacant MRR (opportunity)", "Scheduled Churn MRR"], key="facility_sort", horizontal=True)
+                sort_by = st.radio("Sort facilities by", ["Vacant MRR (opportunity)", "Scheduled Churn RRL"], key="facility_sort", horizontal=True)
                 if "Churn" in sort_by:
-                    fac_rows.sort(key=lambda x: (-x["Churn MRR"], -x["Total"]))
+                    fac_rows.sort(key=lambda x: (-x["Churn RRL"], -x["Total"]))
                 else:
                     fac_rows.sort(key=lambda x: (-x["Vacant MRR"], -x["Total"]))
                 if fac_rows:
                     n_fac = len(fac_rows)
                     top = fac_rows[0]
-                    summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn MRR {_curr(top['Churn MRR'])}"
+                    summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn RRL {_curr(top['Churn RRL'])}"
                     st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
-                    header = "<tr><th>Facility</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Scheduled Churn MRR</th></tr>"
+                    header = "<tr><th>Facility</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Scheduled Churn RRL</th></tr>"
                     body = "".join(
-                        f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Sold Rate %']}</td><td>{r['Occupancy %']}</td><td>{r['Vacant']}</td><td>{_curr(r['Vacant MRR'])}</td><td>{r['Churning']}</td><td>{_curr(r['Churn MRR'])}</td></tr>"
+                        f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Sold Rate %']}</td><td>{r['Occupancy %']}</td><td>{r['Vacant']}</td><td>{_curr(r['Vacant MRR'])}</td><td>{r['Churning']}</td><td>{_curr(r['Churn RRL'])}</td></tr>"
                         for r in fac_rows
                     )
                     st.markdown(
@@ -2932,7 +2925,7 @@ def main():
                         if top_for_bar:
                             df_bar = pd.DataFrame(top_for_bar)
                             if "Churn" in sort_by:
-                                y_col, y_label, title = "Churn MRR", "Scheduled Churn MRR", "Scheduled Churn MRR by facility (top 15)"
+                                y_col, y_label, title = "Churn RRL", "Scheduled Churn RRL", "Scheduled Churn RRL by facility (top 15)"
                                 color_scale = ["#FFEDD5", "#FED7AA", "#EA580C", "#C2410C"]
                             else:
                                 y_col, y_label, title = "Vacant MRR", "Vacant MRR", "Vacant MRR by facility (top 15)"
@@ -2966,11 +2959,11 @@ def main():
                 st.caption("These kitchens are still active (paying) today but have a **future churn date** (notice given). The total is **monthly revenue at risk** if we don’t renew or backfill. Table: each kitchen, MRR at risk, churn date (soonest first).")
                 st.markdown(
                     f'<div class="dashboard-churn-metric" title="Total monthly revenue at risk from all kitchens with status Churning (future churn date).">'
-                    f'<div class="label">Scheduled Churn MRR</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
+                    f'<div class="label">Scheduled Churn RRL</div><div class="value">{_curr(churn_mrr_total)}</div><div class="currency-hint" style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Monthly revenue at risk</div></div>',
                     unsafe_allow_html=True,
                 )
-                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn MRR (USD) · Status = Churning.")
-                header = "<tr><th>Kitchen</th><th>Account / Facility</th><th>Churn date</th><th>Scheduled Churn MRR (USD)</th><th>Status</th></tr>"
+                st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning.")
+                header = "<tr><th>Kitchen</th><th>Account / Facility</th><th>Churn date</th><th>Scheduled Churn RRL (USD)</th><th>Status</th></tr>"
                 body = "".join(
                     f"<tr><td>{html.escape(str(_kitchen_name(r) or '—'))}</td><td>{html.escape(str(_facility(r) or '—'))}</td><td>{_churn_date(r) or '—'}</td><td>{_curr(_price_for_value(r, 'Churning') or _price(r) or 0)}</td><td>Churning</td></tr>"
                     for r in churning_rows
@@ -3008,12 +3001,12 @@ def main():
 
 ---
 
-**Value (MRR = monthly, ARR = annual)**  
+**Value (MRR)**  
 - **MRR** = monthly recurring revenue (per kitchen price, summed).  
-- **ARR** = MRR × 12 (same number shown as a full-year equivalent when you turn “Annualized (ARR)” on).
+- Values are shown as MRR only.“Annualized (ARR)” on).
 
 **Which price is used**  
-- All value calculations (Vacant MRR, Scheduled Churn MRR, Occupied MRR, facility leaderboard, churn table) use **List price** only (List Price / Sell_Price__c). If List price is missing → $0 and counted in QA.
+- All value calculations (Vacant MRR, Scheduled Churn RRL, Occupied MRR, facility leaderboard, churn table) use **List price** only (List Price / Sell_Price__c). If List price is missing → $0 and counted in QA.
 
 **Data quality**  
 - Under the value cards we show how many kitchens have no List price (included as $0).  
