@@ -1709,9 +1709,11 @@ _COUNTRY_HEADERS = (
 _ACCOUNT_NAME_HEADERS = (
     "account.name", "account__r.name", "account name", "account_name",
 )
+# Account/facility name prefix (before " - ") → country. SA = Saudi Arabia, BH = Bahrain.
 _COUNTRY_FROM_PREFIX = {
     "sa": "Saudi Arabia", "ksa": "Saudi Arabia", "ksa ": "Saudi Arabia",
-    "uae": "UAE", "kwt": "Kuwait", "bhr": "Bahrain", "qat": "Qatar",
+    "bh": "Bahrain", "bhr": "Bahrain",
+    "uae": "UAE", "kwt": "Kuwait", "qat": "Qatar",
 }
 
 
@@ -1731,11 +1733,19 @@ def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
         if h in keys_lower:
             account_name_key = keys_lower[h]
             break
+    # Normalize country codes (SA → Saudi Arabia, BH → Bahrain) when they appear in a country column
+    def _normalize_country_value(val: str) -> str:
+        v = (val or "").strip().lower()
+        if v in ("sa", "ksa"):
+            return "Saudi Arabia"
+        if v in ("bh", "bhr"):
+            return "Bahrain"
+        return (val or "").strip()
     out = []
     for r in rows:
         row = dict(r)
         if country_key and (row.get(country_key) or "").strip():
-            row["Account Country"] = str(row.get(country_key, "")).strip()
+            row["Account Country"] = _normalize_country_value(str(row.get(country_key, "")))
         elif account_name_key:
             name = str(row.get(account_name_key, "") or "").strip()
             if " - " in name:
