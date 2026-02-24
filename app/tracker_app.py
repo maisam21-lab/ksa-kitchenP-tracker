@@ -2925,14 +2925,17 @@ def main():
                     top = fac_rows[0]
                     summary_line = f"<strong>{n_fac}</strong> facilities · Top: <strong>{html.escape(top['Facility'])}</strong> — Vacant MRR {_curr(top['Vacant MRR'])} · Scheduled Churn RRL {_curr(top['Churn RRL'])}"
                     st.markdown(f'<div class="dashboard-facility-summary">{summary_line}</div>', unsafe_allow_html=True)
-                    header = "<tr><th>Facility</th><th>Total</th><th>Sold Rate %</th><th>Occupancy %</th><th>Vacant</th><th>Vacant MRR</th><th>Churning</th><th>Scheduled Churn RRL</th></tr>"
-                    body = "".join(
-                        f"<tr><td>{html.escape(r['Facility'])}</td><td>{r['Total']}</td><td>{r['Sold Rate %']}</td><td>{r['Occupancy %']}</td><td>{r['Vacant']}</td><td>{_curr(r['Vacant MRR'])}</td><td>{r['Churning']}</td><td>{_curr(r['Churn RRL'])}</td></tr>"
-                        for r in fac_rows
-                    )
-                    st.markdown(
-                        f'<div class="dashboard-facility-card"><table class="dashboard-facility-table"><thead>{header}</thead><tbody>{body}</tbody></table></div>',
-                        unsafe_allow_html=True,
+                    # Sortable table: use st.dataframe so users can click column headers to sort
+                    display_cols = ["Facility", "Total", "Sold Rate %", "Occupancy %", "Vacant", "Vacant MRR", "Churning", "Churn RRL"]
+                    df_fac = pd.DataFrame(fac_rows)[[c for c in display_cols if c in (fac_rows[0].keys() if fac_rows else [])]]
+                    st.dataframe(
+                        df_fac,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Vacant MRR": st.column_config.NumberColumn(format="$%.0f"),
+                            "Churn RRL": st.column_config.NumberColumn(format="$%.0f"),
+                        },
                     )
                     facility_options = ["(Select a facility)"] + [r["Facility"] for r in fac_rows]
                     selected_facility = st.selectbox("Select facility for inventory detail", facility_options, key="dashboard_selected_facility")
