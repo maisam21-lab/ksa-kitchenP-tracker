@@ -2628,17 +2628,21 @@ def main():
                     return s[:10] if len(s) >= 10 else s
             return ""
         def _opportunity_name(r):
-            for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c"):
+            # Explicit keys first (SF / report column names)
+            for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c", "Opportunity name", "opportunity_name", "opportunity name"):
                 v = r.get(k)
                 if v is not None and str(v).strip():
                     return str(v).strip()
+            # Fallback: any key containing "opportunity" (e.g. from GSheet headers)
+            for k, v in (r or {}).items():
+                if v is not None and str(v).strip() and "opportunity" in str(k).lower():
+                    return str(v).strip()
             return ""
         def _is_vacant_approved_deal(r):
-            """True if status is Vacant and Opportunity name is 'approved deal' (case-insensitive)."""
+            """True if status is Vacant and Opportunity Name column has any value (approved deal = vacant with an opportunity)."""
             if _status_normalized(r) != "Vacant":
                 return False
-            name = _opportunity_name(r).strip().lower()
-            return name == "approved deal" or "approved deal" in name
+            return bool(_opportunity_name(r).strip())
         vacant = sum(1 for r in rows_kitchens if _status_normalized(r) == "Vacant")
         churning = sum(1 for r in rows_kitchens if _status_normalized(r) == "Churning")
         occupied = sum(1 for r in rows_kitchens if _status_normalized(r) == "Occupied")
@@ -2790,7 +2794,7 @@ def main():
         with sc1:
             st.metric("Total kitchens", f"{total:,}", help="Sellable only (Vacant+Sold+Occupied+Churning)")
         with sc2:
-            st.metric("Sold Rate %", _pct_fmt(sold_rate_pct), help="(Occupied + Sold + Churning + Vacant approved deal) / Total — Sales view. Vacant with Opportunity name 'approved deal' count toward sold.")
+            st.metric("Sold Rate %", _pct_fmt(sold_rate_pct), help=f"(Occupied + Sold + Churning + Vacant with Opportunity Name) ÷ Total. **{vacant_approved_deal}** Vacant kitchens with Opportunity Name filled are included.")
         with sc3:
             st.metric("Occupancy % (Ops)", _pct_fmt(occ_pct), help="Occupied / Total")
         with sc4:
@@ -2799,6 +2803,7 @@ def main():
             st.metric("Churn %", _pct_fmt(churn_pct), help="Churning / Total")
         with sc6:
             st.metric("Sold", f"{sold:,}", help="Closed Won, future access")
+        st.caption(f"Sold Rate includes **{vacant_approved_deal}** Vacant kitchen(s) with **Opportunity Name** filled (approved deal) in the numerator.")
         # —— Value: Monthly | Annualized toggle ——
         value_annualized = st.toggle(
             "Annualized (ARR)",
@@ -3025,7 +3030,7 @@ def main():
 ---
 
 **Rates (percentages)**  
-- **Sold Rate %** = (Occupied + Sold + Churning + Vacant approved deal) ÷ Total × 100. **Vacant approved deal** = Vacant kitchens whose Opportunity name is "approved deal" (counted in Sold Rate only).  
+- **Sold Rate %** = (Occupied + Sold + Churning + Vacant with Opportunity Name) ÷ Total × 100. **Vacant with Opportunity Name** = Vacant kitchens that have any value in the Opportunity Name column (counted in Sold Rate only).  
 - **Occupancy %** = Occupied ÷ Total × 100  
 - **Vacancy %** = Vacant ÷ Total × 100  
 - **Churn %** = Churning ÷ Total × 100  
