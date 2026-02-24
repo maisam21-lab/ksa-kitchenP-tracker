@@ -2847,6 +2847,11 @@ def main():
         .dashboard-churn-metric { background: linear-gradient(145deg, #FFEDD5 0%, #FED7AA 100%); border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; border-left: 4px solid #EA580C; display: inline-block; min-width: 200px; }
         .dashboard-churn-metric .label { font-size: 0.85rem; color: #9a3412; font-weight: 600; margin-bottom: 4px; }
         .dashboard-churn-metric .value { font-size: 1.35rem; font-weight: 700; color: #111827; }
+        .churn-section-panel { background: linear-gradient(180deg, #FFFBEB 0%, #FFF7ED 50%, #FEF3C7 100%); border-radius: 12px; padding: 20px 24px; margin: 16px 0; border-left: 4px solid #EA580C; box-shadow: 0 2px 12px rgba(234,88,12,0.08); }
+        .churn-month-card { background: white; border-radius: 10px; padding: 14px 18px; margin: 8px 0; border: 1px solid rgba(234,88,12,0.25); box-shadow: 0 1px 4px rgba(0,0,0,0.06); transition: box-shadow 0.2s ease; }
+        .churn-month-card:hover { box-shadow: 0 4px 12px rgba(234,88,12,0.15); }
+        .churn-month-card .month-name { font-weight: 700; color: #9a3412; font-size: 1rem; margin-bottom: 4px; }
+        .churn-month-card .month-stats { font-size: 0.9rem; color: #374151; }
         div[data-testid="stDataFrame"] { border-radius: 10px; box-shadow: 0 2px 8px rgba(15,118,110,0.08); border: 1px solid rgba(15,118,110,0.2); overflow: hidden; }
         div[data-testid="stDataFrame"]:hover { box-shadow: 0 4px 14px rgba(15,118,110,0.12); }
         </style>
@@ -3094,6 +3099,7 @@ def main():
                         month_labels.append((ym, d.strftime("%b %Y")))  # e.g. Feb 2026
                     except Exception:
                         month_labels.append((ym, ym))
+                st.markdown('<div class="churn-section-panel">', unsafe_allow_html=True)
                 # Monthly filter
                 filter_options = ["All"] + [label for _, label in month_labels]
                 selected_month_label = st.selectbox("Filter by churn month", options=filter_options, key="churn_month_filter", help="Show only kitchens churning in the selected month, or All.")
@@ -3105,7 +3111,7 @@ def main():
                         churning_rows_filtered = churning_rows
                 else:
                     churning_rows_filtered = churning_rows
-                # Monthly view summary (count + RRL per month)
+                # Monthly view: cards + table
                 st.subheader("By month")
                 monthly_summary = []
                 for ym, label in month_labels:
@@ -3113,6 +3119,24 @@ def main():
                     mrr = sum((_price_for_value(r, "Churning") or _price(r) or 0) for r in rows_m)
                     monthly_summary.append({"Month": label, "Kitchens": len(rows_m), "Scheduled Churn RRL (USD)": round(mrr, 0)})
                 if monthly_summary:
+                    # Month cards row (eye-catching)
+                    n_cards = len(monthly_summary)
+                    n_cols = min(n_cards, 6)
+                    cols = st.columns(n_cols)
+                    for i, row in enumerate(monthly_summary[:12]):  # cap at 12 months
+                        if i > 0 and i % 6 == 0:
+                            cols = st.columns(n_cols)
+                        with cols[i % n_cols]:
+                            st.markdown(
+                                f'<div class="churn-month-card">'
+                                f'<div class="month-name">{html.escape(row["Month"])}</div>'
+                                f'<div class="month-stats">{row["Kitchens"]} kitchens · {_curr(row["Scheduled Churn RRL (USD)"])} RRL</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                    if n_cards > 6:
+                        st.caption(f"All {n_cards} months in table below.")
+                    st.markdown("")
                     df_monthly = pd.DataFrame(monthly_summary)
                     st.dataframe(
                         df_monthly,
@@ -3122,6 +3146,7 @@ def main():
                             "Scheduled Churn RRL (USD)": st.column_config.NumberColumn(format="$%.0f"),
                         },
                     )
+                st.markdown("---")
                 st.caption("**Table:** Kitchen · Account/Facility · Churn date · Scheduled Churn RRL (USD) · Status = Churning. Click column headers to sort.")
                 churn_table_rows = [
                     {
@@ -3142,6 +3167,7 @@ def main():
                         "Scheduled Churn RRL (USD)": st.column_config.NumberColumn(format="$%.0f"),
                     },
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
         # —— How these numbers are calculated ——
         st.markdown("---")
         with st.expander("How these numbers are calculated", expanded=False):
