@@ -2570,6 +2570,56 @@ def main():
                     snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
                 except Exception:
                     pass
+        # Ensure Account Country for filtering (Kitchens / Master list may use County or other keys)
+        rows_kitchens = _ensure_account_country_in_kitchens(rows_kitchens)
+        def _country(r):
+            """Country for a row (Account Country, County, or other country header)."""
+            for k in ("Account Country", "County", "Account__r.Country__c", "Country__c", "Country", "account country", "county"):
+                v = r.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            return ""
+        def _facility(r):
+            for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+                v = r.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            return ""
+        # —— Country & Facility filters (drive all dashboard data) ——
+        unique_countries = sorted({(_country(r) or "(No country)") for r in rows_kitchens})
+        if not unique_countries:
+            unique_countries = ["(No country)"]
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            selected_country = st.selectbox(
+                "Country",
+                options=["All"] + unique_countries,
+                key="dashboard_country",
+                help="Filter all dashboard metrics and tables by country.",
+            )
+        with filter_col2:
+            # Facilities depend on selected country
+            if selected_country and selected_country != "All":
+                rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
+            else:
+                rows_for_facilities = rows_kitchens
+            facility_set = sorted({(_facility(r) or "(No facility)") for r in rows_for_facilities})
+            facility_set = [f for f in facility_set if f]
+            if not facility_set:
+                facility_set = ["(No facility)"]
+            selected_facility = st.selectbox(
+                "Facility",
+                options=["All"] + facility_set,
+                key="dashboard_facility",
+                help="Filter by facility within the selected country.",
+            )
+        # Apply filters
+        if selected_country and selected_country != "All":
+            rows_kitchens = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
+        if selected_facility and selected_facility != "All":
+            rows_kitchens = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_facility]
+        st.caption(f"Showing data for **{selected_country or 'All'}** · **{selected_facility or 'All'}** facilities ({len(rows_kitchens):,} kitchens).")
+        st.divider()
         def _s(r):
             v = None
             for k in ("Status", "Status__c", "status", "Kitchen_Status__c", "state", "Kitchen_Number__c.Status__c"):
@@ -2598,12 +2648,6 @@ def main():
             if low == "sold":
                 return "Sold"
             return raw  # keep as-is so it won't match and will fall into "other" (not counted)
-        def _facility(r):
-            for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
-                v = r.get(k)
-                if v is not None and str(v).strip():
-                    return str(v).strip()
-            return ""
         def _kitchen_name(r):
             for k in ("Kitchen Number", "Name", "Kitchen_Number_ID_18__c", "Kitchen Number Name", "Kitchen_Number__c.Name"):
                 v = r.get(k)
