@@ -1873,9 +1873,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
-    # Status color coding: match tracker/GSheet (Occupied & Sold = red, Vacant = light green, Churning = gold/amber); no status = dark red
-    _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-    _no_status_bg = "#B22222"  # brick red for rows with no status
+    # Status color coding (app-wide): Vacant = green, Occupied = red, Sold = red, Churning = amber, no status = dark red
+    _status_colors = {"Vacant": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
+    _no_status_bg = "#B22222"  # dark red for rows with no status
     df_display = pd.DataFrame(rows_shown)
     status_col = None
     for c in df_display.columns:
@@ -2823,9 +2823,9 @@ def main():
         .dashboard-value-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
         .dashboard-value-card { flex: 1; min-width: 160px; border-radius: 12px; padding: 16px 18px; transition: transform 0.2s ease, box-shadow 0.2s ease; cursor: default; }
         .dashboard-value-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.12); }
-        .dashboard-value-card.vacant { background: linear-gradient(145deg, #FEE2E2 0%, #FECACA 100%); border-left: 4px solid #DC2626; }
+        .dashboard-value-card.vacant { background: linear-gradient(145deg, #D1FAE5 0%, #A7F3D0 100%); border-left: 4px solid #059669; }
         .dashboard-value-card.churning { background: linear-gradient(145deg, #FFEDD5 0%, #FED7AA 100%); border-left: 4px solid #EA580C; }
-        .dashboard-value-card.occupied { background: linear-gradient(145deg, #D1FAE5 0%, #A7F3D0 100%); border-left: 4px solid #059669; }
+        .dashboard-value-card.occupied { background: linear-gradient(145deg, #FEE2E2 0%, #FECACA 100%); border-left: 4px solid #DC2626; }
         .dashboard-value-card .label { font-size: 0.85rem; color: #374151; font-weight: 600; margin-bottom: 4px; }
         .dashboard-value-card .value { font-size: 1.35rem; font-weight: 700; color: #111827; }
         .dashboard-value-card .currency-hint { font-size: 0.75rem; color: #6B7280; margin-top: 4px; }
