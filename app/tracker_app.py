@@ -2795,7 +2795,7 @@ def main():
                 f'<div class="dashboard-value-card vacant" title="Potential monthly revenue if all vacant kitchens were filled (List price only).">'
                 f'<div class="label">Vacant {value_label} (opportunity)</div><div class="value">{vac_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
                 f'<div class="dashboard-value-card churning" title="Monthly revenue from kitchens that are still paying but have a future churn date — revenue at risk.">'
-                f'<div class="label">Scheduled Churn {value_label}</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
+                f'<div class="label">Scheduled Churn RRL</div><div class="value">{churn_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
                 f'<div class="dashboard-value-card occupied" title="Current monthly revenue from occupied kitchens (today\'s book of business).">'
                 f'<div class="label">Occupied {value_label}</div><div class="value">{occ_display}</div><div class="currency-hint">{DASHBOARD_CURRENCY}</div></div>'
                 f'</div>',
