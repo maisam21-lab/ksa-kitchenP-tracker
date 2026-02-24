@@ -2484,7 +2484,21 @@ def main():
                             if not cols_show_f:
                                 cols_show_f = all_cols_f
                             if HAS_EXCEL:
-                                st.dataframe(pd.DataFrame(rows_f)[cols_show_f] if cols_show_f else pd.DataFrame(rows_f), use_container_width=True, hide_index=True)
+                                display_f = pd.DataFrame(rows_f)[cols_show_f] if cols_show_f else pd.DataFrame(rows_f)
+                                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                                _ns = "#B22222"
+                                status_col_f = next((c for c in display_f.columns if str(c).strip().lower() in ("status", "status__c")), None)
+                                if status_col_f and not display_f.empty:
+                                    def _row_bg_f(row):
+                                        v = (str(row[status_col_f]) if row[status_col_f] is not None else "").strip()
+                                        low = v.lower()
+                                        if not v or low in ("no status", "n/a", "na", "—", "-"):
+                                            return [f"background-color: {_ns}; color: white"] * len(row)
+                                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                                        bg = _sc.get(key, "") if key else _sc.get(v, "")
+                                        return [f"background-color: {bg}" if bg else ""] * len(row)
+                                    display_f = display_f.style.apply(_row_bg_f, axis=1)
+                                st.dataframe(display_f, use_container_width=True, hide_index=True)
                             else:
                                 for r in rows_f[:50]:
                                     st.json(r)
@@ -2505,6 +2519,19 @@ def main():
                     cols_to_show = all_cols
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_filtered)[cols_to_show] if cols_to_show else pd.DataFrame(rows_filtered)
+                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                _ns = "#B22222"
+                status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
+                if status_col_m and not display_df.empty:
+                    def _row_bg_m(row):
+                        v = (str(row[status_col_m]) if row[status_col_m] is not None else "").strip()
+                        low = v.lower()
+                        if not v or low in ("no status", "n/a", "na", "—", "-"):
+                            return [f"background-color: {_ns}; color: white"] * len(row)
+                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                        bg = _sc.get(key, "") if key else _sc.get(v, "")
+                        return [f"background-color: {bg}" if bg else ""] * len(row)
+                    display_df = display_df.style.apply(_row_bg_m, axis=1)
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
             elif rows_filtered and not use_facility_tabs:
                 for r in rows_filtered[:100]:
