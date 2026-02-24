@@ -1709,12 +1709,11 @@ _COUNTRY_HEADERS = (
 _ACCOUNT_NAME_HEADERS = (
     "account.name", "account__r.name", "account name", "account_name",
 )
-# Account/facility name prefix (before " - ") → country. SA = Saudi Arabia, BH = Bahrain.
+# Merge all entries with Saudi Arabia except Bahrain. SA/regions (North, South, etc.) → Saudi Arabia; BH → Bahrain.
 _COUNTRY_FROM_PREFIX = {
-    "sa": "Saudi Arabia", "ksa": "Saudi Arabia", "ksa ": "Saudi Arabia",
     "bh": "Bahrain", "bhr": "Bahrain",
-    "uae": "UAE", "kwt": "Kuwait", "qat": "Qatar",
 }
+# Any other prefix (sa, ksa, north, south, etc.) → Saudi Arabia via .get(prefix, "Saudi Arabia")
 
 
 def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
@@ -1733,14 +1732,15 @@ def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
         if h in keys_lower:
             account_name_key = keys_lower[h]
             break
-    # Normalize country codes (SA → Saudi Arabia, BH → Bahrain) when they appear in a country column
+    # Merge all with Saudi Arabia except Bahrain (North, South, SA, Last, etc. → Saudi Arabia; only BH → Bahrain)
     def _normalize_country_value(val: str) -> str:
-        v = (val or "").strip().lower()
-        if v in ("sa", "ksa"):
-            return "Saudi Arabia"
-        if v in ("bh", "bhr"):
+        v = (val or "").strip()
+        if not v:
+            return v
+        v_lower = v.lower()
+        if v_lower in ("bh", "bhr", "bahrain"):
             return "Bahrain"
-        return (val or "").strip()
+        return "Saudi Arabia"
     out = []
     for r in rows:
         row = dict(r)
@@ -1750,11 +1750,13 @@ def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
             name = str(row.get(account_name_key, "") or "").strip()
             if " - " in name:
                 prefix = name.split(" - ")[0].strip().lower()
-                row["Account Country"] = _COUNTRY_FROM_PREFIX.get(prefix, prefix.upper() if prefix else "")
+                row["Account Country"] = _COUNTRY_FROM_PREFIX.get(prefix, "Saudi Arabia")
             else:
-                row["Account Country"] = row.get("Account Country", "")
+                raw = row.get("Account Country", "") or ""
+                row["Account Country"] = _normalize_country_value(str(raw)) if raw else ""
         else:
-            row["Account Country"] = row.get("Account Country", "")
+            raw = row.get("Account Country", "") or ""
+            row["Account Country"] = _normalize_country_value(str(raw)) if raw else ""
         out.append(row)
     return out
 
