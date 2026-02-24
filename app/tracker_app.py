@@ -2785,7 +2785,7 @@ def main():
         </style>
         """, unsafe_allow_html=True)
         st.markdown(
-            f'<div class="dashboard-summary"><strong>KSA at a glance</strong> · {total:,} kitchens · {vacant:,} vacant · {occupied:,} occupied · {sold:,} sold</div>',
+            f'<div class="dashboard-summary"><strong>KSA at a glance</strong> · {total:,} kitchens · {vacant:,} vacant · {occupied:,} occupied · {sold:,} sold · {vacant_approved_deal:,} approved deal{"s" if vacant_approved_deal != 1 else ""}</div>',
             unsafe_allow_html=True,
         )
         # —— Scorecard (Sales-first: Sold Rate + Ops Occupancy) ——
