@@ -2649,7 +2649,7 @@ def main():
         sold = sum(1 for r in rows_kitchens if _status_normalized(r) == "Sold")
         vacant_approved_deal = sum(1 for r in rows_kitchens if _is_vacant_approved_deal(r))
         total = vacant + churning + occupied + sold
-        occ_pct = (occupied / total * 100) if total else 0
+        occ_pct = ((occupied + churning) / total * 100) if total else 0  # Occupancy = Churning + Occupied
         sold_rate_pct = ((occupied + sold + churning + vacant_approved_deal) / total * 100) if total else 0  # Sales view: includes Vacant with Opportunity name "approved deal"
         vac_pct = (vacant / total * 100) if total else 0
         churn_pct = (churning / total * 100) if total else 0
@@ -2770,7 +2770,7 @@ def main():
         with sc2:
             st.metric("Sold Rate %", _pct_fmt(sold_rate_pct), help=f"(Occupied + Sold + Churning + Vacant with Opportunity Name) ÷ Total. **{vacant_approved_deal}** Vacant kitchens with Opportunity Name filled are included.")
         with sc3:
-            st.metric("Occupancy % (Ops)", _pct_fmt(occ_pct), help="Occupied / Total")
+            st.metric("Occupancy % (Ops)", _pct_fmt(occ_pct), help="(Occupied + Churning) / Total")
         with sc4:
             st.metric("Vacancy %", _pct_fmt(vac_pct), help="Vacant / Total")
         with sc5:
@@ -2855,7 +2855,7 @@ def main():
                     t = counts["vacant"] + counts["churning"] + counts["occupied"] + counts["sold"]
                     if t == 0:
                         continue
-                    occ_p = (counts["occupied"] / t * 100)
+                    occ_p = ((counts["occupied"] + counts["churning"]) / t * 100)
                     sold_rate_p = ((counts["occupied"] + counts["sold"] + counts["churning"] + counts.get("vacant_approved_deal", 0)) / t * 100)
                     vac_p = (counts["vacant"] / t * 100)
                     churn_p = (counts["churning"] / t * 100)
@@ -3002,7 +3002,7 @@ def main():
 
 **Rates (percentages)**  
 - **Sold Rate %** = (Occupied + Sold + Churning + Vacant with Opportunity Name) ÷ Total × 100. **Vacant with Opportunity Name** = Vacant kitchens that have any value in the Opportunity Name column (counted in Sold Rate only).  
-- **Occupancy %** = Occupied ÷ Total × 100  
+- **Occupancy %** = (Occupied + Churning) ÷ Total × 100  
 - **Vacancy %** = Vacant ÷ Total × 100  
 - **Churn %** = Churning ÷ Total × 100  
 
