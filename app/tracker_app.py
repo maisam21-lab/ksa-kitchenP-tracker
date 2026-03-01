@@ -2333,6 +2333,9 @@ def main():
     <style>
     /* Keep dataframe toolbar visible (Fullscreen, search, download, etc.) */
     [data-testid="stElementToolbar"] { display: flex !important; }
+    /* Remove space above section tabs and shift main content up */
+    [data-testid="stAppViewContainer"] > div { padding-top: 0.5rem !important; }
+    [data-testid="stVerticalBlock"] > div:first-child { padding-top: 0 !important; margin-top: 0 !important; }
     /* Slightly smaller base font app-wide */
     .stApp h1 { font-size: 1.4rem !important; }
     .stApp h2 { font-size: 1.15rem !important; }
@@ -2343,8 +2346,8 @@ def main():
         color: white !important;
         font-size: 1.5rem !important;
         font-weight: 700 !important;
-        padding: 20px 28px !important;
-        margin: 0 0 1.5rem 0 !important;
+        padding: 14px 28px !important;
+        margin: 0 0 1rem 0 !important;
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 2px 4px rgba(15,118,110,0.2);
     }
