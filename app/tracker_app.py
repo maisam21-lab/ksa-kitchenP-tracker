@@ -2295,12 +2295,10 @@ def main():
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
         div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
-        /* Section nav tabs (dark mode) — light text, circles unchanged */
+        /* Section nav tabs (dark mode) — text tabs, no dots, active = teal underline */
         #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: #1e293b !important; border-color: #334155 !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #cbd5e1 !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]::before { border-color: #64748b !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { color: #f1f5f9 !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked)::before { background: #0f766e !important; border-color: #0f766e !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #94a3b8 !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { color: #f1f5f9 !important; border-bottom-color: #0f766e !important; }
         .section-title-banner { background: #0f766e !important; color: white !important; }
         </style>
         """, unsafe_allow_html=True)
@@ -2335,51 +2333,39 @@ def main():
         """, unsafe_allow_html=True)
 
     # Hide dataframe toolbar (eye, download, search, fullscreen) app-wide
-    # Section nav: tab names with circle indicators (filled green = active, hollow = inactive), then teal title banner
+    # Section nav: text-only tabs (no dots), active tab with underline
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
-    /* Section nav — tab names with circle before each: filled green active, hollow grey inactive */
+    /* Section nav — tabs only, no circles; active = teal underline */
     #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] {
         display: flex !important;
         flex-wrap: wrap;
-        gap: 0 4px !important;
+        gap: 0 8px !important;
         background: #f8fafc !important;
-        padding: 10px 12px 10px 16px !important;
+        padding: 12px 16px 10px !important;
         border-radius: 8px 8px 0 0;
         overflow-x: auto;
         border: 1px solid #e2e8f0;
         border-bottom: none;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] {
-        margin: 0 4px 0 0 !important;
-        padding: 8px 14px !important;
-        border-radius: 6px !important;
+        margin: 0 !important;
+        padding: 8px 12px 10px !important;
+        border-radius: 4px 4px 0 0 !important;
         font-weight: 500 !important;
-        color: #334155 !important;
+        color: #475569 !important;
         background: transparent !important;
         border: none !important;
-        display: inline-flex !important;
-        align-items: center !important;
+        border-bottom: 3px solid transparent !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]::before {
-        content: "" !important;
-        display: inline-block !important;
-        width: 10px !important;
-        height: 10px !important;
-        border-radius: 50% !important;
-        margin-right: 10px !important;
-        flex-shrink: 0 !important;
-        border: 2px solid #94a3b8 !important;
-        background: transparent !important;
-    }
-    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked)::before {
-        background: #0f766e !important;
-        border-color: #0f766e !important;
+        display: none !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) {
         color: #0f172a !important;
         font-weight: 600 !important;
+        border-bottom-color: #0f766e !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] span {
         color: inherit !important;
