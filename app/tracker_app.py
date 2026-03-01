@@ -3,6 +3,7 @@ KSA Kitchens Tracker — web app. Run: streamlit run app/tracker_app.py
 All sheet tabs in tool form: view, filter, add/edit, export. Single source of truth.
 Accepts CSV or Excel (.xlsx) uploads. Can refresh directly from the online Google Sheet.
 """
+import base64
 import csv
 import html
 import io
@@ -612,6 +613,70 @@ def _allowlist_enabled() -> bool:
         v = os.environ.get("ALLOWLIST_ENABLED", "")
     return str(v).strip().lower() in ("1", "true", "yes")
 
+
+# Session persistence: remember user across browser refresh for several hours (via URL params)
+SESSION_PERSISTENCE_HOURS = 6
+_TRACKER_PARAM_USER = "u"
+_TRACKER_PARAM_EXPIRY = "e"
+
+
+def _restore_session_from_params() -> bool:
+    """If URL has valid tracker session params, restore user_display_name and return True."""
+    try:
+        q = getattr(st, "query_params", None) or getattr(st, "experimental_get_query_params", lambda: {})()
+        if callable(q):
+            q = q()
+        if not q:
+            return False
+        u = q.get(_TRACKER_PARAM_USER)
+        e = q.get(_TRACKER_PARAM_EXPIRY)
+        if not u or not e:
+            return False
+        u = u[0] if isinstance(u, list) else u
+        e = e[0] if isinstance(e, list) else e
+        try:
+            expiry_ts = int(e)
+        except (TypeError, ValueError):
+            return False
+        import time
+        if time.time() > expiry_ts:
+            return False
+        try:
+            email = base64.b64decode(u.encode()).decode()
+        except Exception:
+            return False
+        if email and "@" in email:
+            st.session_state["user_display_name"] = email
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _persist_session_to_params(user: str) -> None:
+    """Store user in URL params so next refresh restores session (expiry in SESSION_PERSISTENCE_HOURS)."""
+    if not (user or "").strip():
+        return
+    try:
+        import time
+        expiry_ts = int(time.time()) + (SESSION_PERSISTENCE_HOURS * 3600)
+        u = base64.b64encode((user or "").strip().encode()).decode()
+        qp = getattr(st, "query_params", None)
+        if qp is not None:
+            qp[_TRACKER_PARAM_USER] = u
+            qp[_TRACKER_PARAM_EXPIRY] = str(expiry_ts)
+    except Exception:
+        pass
+
+
+def _clear_session_params() -> None:
+    """Remove session params from URL."""
+    try:
+        qp = getattr(st, "query_params", None)
+        if qp is not None:
+            qp.clear()
+    except Exception:
+        pass
 
 def list_allowed_users():
     """Return list of allowed identifiers with role: [{identifier, added_at, role}, ...]."""
@@ -2294,6 +2359,10 @@ def main():
         pulse_display = "—"
     st.sidebar.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
 
+    # Restore session from URL params so user is remembered across refresh for SESSION_PERSISTENCE_HOURS
+    if not _verified_email:
+        _restore_session_from_params()
+
     # When allowlist is on: require verified sign-in, developer key, or (if fallback allowed) typed email
     def _require_verified_signin() -> bool:
         """If true, only verified sign-in or developer key; no typed email. Set ALLOWLIST_REQUIRE_VERIFIED_SIGNIN=1 for strict."""
@@ -2308,7 +2377,6 @@ def main():
             if _require_verified_signin():
                 st.sidebar.error("Sign-in required")
                 st.sidebar.markdown("Access is restricted. You must **sign in** with your company account.")
-                st.sidebar.info("**New users:** Use your work email to sign in. Do not connect with a Gmail account.")
                 _st_login = getattr(st, "login", None)
                 if callable(_st_login):
                     if st.sidebar.button("Sign in", type="primary", key="gate_sign_in"):
@@ -2327,8 +2395,11 @@ def main():
                 st.info("**You must sign in to use this app.** Use the **Sign in** button in the sidebar, or unlock with a developer key if you have one.")
                 st.stop()
             # Fallback: Sign-in not required — allow typed email (identity not verified)
-            st.sidebar.info("**New users:** Please enter your work email below. Do not connect via a Gmail account.")
-            st.sidebar.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
+            _prefill = (st.session_state.get("user_display_name") or "").strip()
+            if _prefill:
+                st.sidebar.caption(f"Signed in as **{_prefill}**")
+            else:
+                st.sidebar.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
             if not current_user:
                 st.sidebar.warning("Enter your email to continue.")
@@ -2341,7 +2412,7 @@ def main():
             if _verified_email:
                 st.session_state["user_display_name"] = _verified_email
                 current_user = _verified_email
-                st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True, help="Verified via Sign in with Google. Used for access and comments.")
+                st.sidebar.caption(f"Signed in as **{_verified_email}**")
             else:
                 st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin", help="Developer session. Name shown on comments.")
                 current_user = (st.session_state.get("user_display_name") or "Developer").strip()
@@ -2350,11 +2421,20 @@ def main():
         # Allowlist off: allow typed email for display only (not for access control)
         is_developer = _is_developer()
         if _verified_email:
-            st.sidebar.text_input("Signed in as", value=_verified_email, key="user_display_name", disabled=True, help="Verified email. Used for comments and display.")
             current_user = _verified_email
+            st.sidebar.caption(f"Signed in as **{_verified_email}**")
         else:
-            st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
+            _prefill = (st.session_state.get("user_display_name") or "").strip()
+            if _prefill:
+                st.sidebar.caption(f"Signed in as **{_prefill}**")
+            else:
+                st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
+
+    # Persist session to URL params so refresh keeps user for SESSION_PERSISTENCE_HOURS
+    if current_user:
+        _persist_session_to_params(current_user)
+
     if _allowlist_enabled():
         st.sidebar.caption("Access is limited to allowed users.")
     else:
@@ -2443,10 +2523,15 @@ def main():
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Data", "Search", "Admin / Data Health"]
     else:
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
-    section = st.sidebar.radio(
+
+    # Website-style layout: section navigation as top tabs in main area (not sidebar)
+    st.markdown("<br>", unsafe_allow_html=True)  # small spacing below header
+    section = st.radio(
         "Section",
         section_options,
         index=0,
+        key="section_radio",
+        horizontal=True,
         label_visibility="collapsed",
     )
 
