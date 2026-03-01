@@ -2210,23 +2210,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             style = f"background-color: {bg}" if bg else ""
             return [style] * len(row)
         styled = df_display.style.apply(_row_bg, axis=1)
-        _max_key = f"generic_maximized_{key_suffix}"
-        if _max_key not in st.session_state:
-            st.session_state[_max_key] = False
-        if st.button("Restore" if st.session_state[_max_key] else "Maximize", key=f"max_{key_suffix}"):
-            st.session_state[_max_key] = not st.session_state[_max_key]
-            _rerun()
-        _h = 700 if st.session_state[_max_key] else 400
-        st.dataframe(styled, use_container_width=True, hide_index=True, height=_h)
+        st.dataframe(styled, use_container_width=True, hide_index=True)
     else:
-        _max_key = f"generic_maximized_{key_suffix}"
-        if _max_key not in st.session_state:
-            st.session_state[_max_key] = False
-        if st.button("Restore" if st.session_state[_max_key] else "Maximize", key=f"max_{key_suffix}"):
-            st.session_state[_max_key] = not st.session_state[_max_key]
-            _rerun()
-        _h = 700 if st.session_state[_max_key] else 400
-        st.dataframe(df_display, use_container_width=True, hide_index=True, height=_h)
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
     if allow_download and key_suffix != "master_other":
         buf = io.StringIO()
         if rows_shown:
@@ -2347,6 +2333,9 @@ def main():
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
+    /* Show toolbar (Fullscreen, zoom, etc.) for dataframes only — toolbar can be before or after dataframe */
+    [data-testid="stElementToolbar"]:has(+ [data-testid="stDataFrame"]) { display: flex !important; }
+    [data-testid="stDataFrame"] + [data-testid="stElementToolbar"] { display: flex !important; }
     /* Section nav now uses buttons (no radio/dots). Teal banner below. */
     .section-title-banner {
         background: #0f766e !important;
@@ -2707,13 +2696,7 @@ def main():
                             bg = _sc.get(key, "") if key else _sc.get(v, "")
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
-                    if "combined_table_maximized" not in st.session_state:
-                        st.session_state["combined_table_maximized"] = False
-                    if st.button("Restore" if st.session_state["combined_table_maximized"] else "Maximize", key="combined_max"):
-                        st.session_state["combined_table_maximized"] = not st.session_state["combined_table_maximized"]
-                        _rerun()
-                    _ch = 700 if st.session_state["combined_table_maximized"] else 400
-                    st.dataframe(df_combined, use_container_width=True, hide_index=True, height=_ch)
+                    st.dataframe(df_combined, use_container_width=True, hide_index=True)
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -2879,14 +2862,7 @@ def main():
                                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                                         return [f"background-color: {bg}" if bg else ""] * len(row)
                                     display_f = display_f.style.apply(_row_bg_f, axis=1)
-                                _fkey = f"facility_tab_max_{tab_idx}"
-                                if _fkey not in st.session_state:
-                                    st.session_state[_fkey] = False
-                                if st.button("Restore" if st.session_state[_fkey] else "Maximize", key=f"max_f_{tab_idx}"):
-                                    st.session_state[_fkey] = not st.session_state[_fkey]
-                                    _rerun()
-                                _fh = 700 if st.session_state[_fkey] else 400
-                                st.dataframe(display_f, use_container_width=True, hide_index=True, height=_fh)
+                                st.dataframe(display_f, use_container_width=True, hide_index=True)
                             else:
                                 for r in rows_f[:50]:
                                     st.json(r)
@@ -2920,15 +2896,7 @@ def main():
                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                         return [f"background-color: {bg}" if bg else ""] * len(row)
                     display_df = display_df.style.apply(_row_bg_m, axis=1)
-                # Maximize option for main table
-                if "master_table_maximized" not in st.session_state:
-                    st.session_state["master_table_maximized"] = False
-                max_label = "Restore" if st.session_state["master_table_maximized"] else "Maximize"
-                if st.button(max_label, key="master_table_maximize_btn"):
-                    st.session_state["master_table_maximized"] = not st.session_state["master_table_maximized"]
-                    _rerun()
-                _table_height = 700 if st.session_state["master_table_maximized"] else 400
-                st.dataframe(display_df, use_container_width=True, hide_index=True, height=_table_height)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
             elif rows_filtered and not use_facility_tabs:
                 for r in rows_filtered[:100]:
                     st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
@@ -3451,13 +3419,7 @@ def main():
                                     bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
                                     return [f"background-color: {bg}" if bg else ""] * len(row)
                                 df_inv = df_inv.style.apply(_inv_row_bg, axis=1)
-                            if "inv_table_maximized" not in st.session_state:
-                                st.session_state["inv_table_maximized"] = False
-                            if st.button("Restore" if st.session_state["inv_table_maximized"] else "Maximize", key="inv_max"):
-                                st.session_state["inv_table_maximized"] = not st.session_state["inv_table_maximized"]
-                                _rerun()
-                            _ih = 700 if st.session_state["inv_table_maximized"] else 400
-                            st.dataframe(df_inv, use_container_width=True, hide_index=True, height=_ih, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
+                            st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
                         else:
                             st.caption("No kitchens match the filters.")
                     # Bar chart and focus list
