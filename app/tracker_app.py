@@ -2295,10 +2295,6 @@ def main():
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
         div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
-        /* Section nav tabs (dark mode) — no dots, active underline */
-        #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: #1e293b !important; border-color: #334155 !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #cbd5e1 !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { color: #f1f5f9 !important; border-bottom-color: #0f766e !important; }
         .section-title-banner { background: #0f766e !important; color: white !important; }
         </style>
         """, unsafe_allow_html=True)
@@ -2337,63 +2333,7 @@ def main():
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
-    /* Section nav — tabs: no circles, active = underline. Target wrapper (JS) or immediate next sibling only. */
-    .section-nav-block div.row-widget.stRadio div[role="radiogroup"],
-    .section-nav-block .stRadio div[role="radiogroup"],
-    #section-nav-tabs + * div.row-widget.stRadio div[role="radiogroup"],
-    #section-nav-tabs + * .stRadio div[role="radiogroup"] {
-        display: flex !important;
-        flex-wrap: wrap;
-        gap: 0 2px !important;
-        background: #f8fafc !important;
-        padding: 0 12px 0 16px !important;
-        border-radius: 8px 8px 0 0;
-        overflow-x: auto;
-        border: 1px solid #e2e8f0;
-        border-bottom: none;
-    }
-    .section-nav-block div.row-widget.stRadio label,
-    .section-nav-block .stRadio label,
-    #section-nav-tabs + * div.row-widget.stRadio label,
-    #section-nav-tabs + * .stRadio label,
-        margin: 0 !important;
-        padding: 14px 18px 12px !important;
-        border-radius: 0 !important;
-        font-weight: 700 !important;
-        color: #334155 !important;
-        background: transparent !important;
-        border: none !important;
-        border-bottom: 3px solid transparent !important;
-        display: inline-flex !important;
-        align-items: center !important;
-    }
-    .section-nav-block div.row-widget.stRadio label:has(input:checked),
-    .section-nav-block div.row-widget.stRadio label:has(input:checked),
-    .section-nav-block .stRadio label:has(input:checked),
-    #section-nav-tabs + * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked),
-    #section-nav-tabs + * div.row-widget.stRadio label:has(input:checked),
-    #section-nav-tabs + * .stRadio label:has(input:checked) {
-        color: #0f172a !important;
-        border-bottom-color: #0f766e !important;
-    }
-    .section-nav-block div.row-widget.stRadio label span,
-    .section-nav-block .stRadio label span,
-    #section-nav-tabs + * div.row-widget.stRadio label span,
-    #section-nav-tabs + * .stRadio label span {
-        color: inherit !important;
-    }
-    /* Hide radio circles — section nav only (multiple selectors) */
-    .section-nav-block div.row-widget.stRadio input,
-    .section-nav-block .stRadio input,
-    #section-nav-tabs + * div.row-widget.stRadio input,
-    #section-nav-tabs + * .stRadio input {
-        display: none !important;
-        opacity: 0 !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-    }
-    /* Teal section title banner below tabs */
+    /* Section nav now uses buttons (no radio/dots). Teal banner below. */
     .section-title-banner {
         background: #0f766e !important;
         color: white !important;
@@ -2597,31 +2537,29 @@ def main():
     else:
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
 
-    # Website-style layout: section navigation as top tabs in main area (not sidebar)
-    st.markdown('<div id="section-nav-tabs"></div>', unsafe_allow_html=True)
-    # Wrap section radio in container so we can target it; script adds class for CSS
-    with st.container():
-        section = st.radio(
-            "Section",
-            section_options,
-            index=0,
-            key="section_radio",
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-    st.markdown("""
-    <script>
-    (function() {
-        var el = document.getElementById('section-nav-tabs');
-        if (el) {
-            var next = el.nextElementSibling;
-            while (next && !next.querySelector('.row-widget.stRadio')) { next = next.nextElementSibling; }
-            if (next) next.classList.add('section-nav-block');
-        }
-    })();
-    </script>
-    """, unsafe_allow_html=True)
-    # Teal banner with current section name (like reference)
+    # Website-style layout: section navigation as tabs (buttons, no radio dots)
+    if "section_radio" not in st.session_state:
+        st.session_state["section_radio"] = section_options[0]
+    section = st.session_state["section_radio"]
+    # Ensure current value is in options (e.g. after role change)
+    if section not in section_options:
+        section = section_options[0]
+        st.session_state["section_radio"] = section
+
+    # Tab row: one button per section (selected = primary, rest = secondary)
+    tab_cols = st.columns(len(section_options))
+    for i, opt in enumerate(section_options):
+        with tab_cols[i]:
+            is_selected = opt == section
+            if st.button(
+                opt,
+                key=f"section_tab_{i}_{opt.replace(' ', '_')}",
+                type="primary" if is_selected else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state["section_radio"] = opt
+                _rerun()
+    # Teal banner with current section name
     st.markdown(f'<div class="section-title-banner">{section}</div>', unsafe_allow_html=True)
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
