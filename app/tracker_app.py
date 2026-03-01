@@ -2337,8 +2337,11 @@ def main():
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
-    /* Section nav — tabs: no circles, active = underline */
-    #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] {
+    /* Section nav — tabs: no circles, active = underline. Target wrapper (JS) or immediate next sibling only. */
+    .section-nav-block div.row-widget.stRadio div[role="radiogroup"],
+    .section-nav-block .stRadio div[role="radiogroup"],
+    #section-nav-tabs + * div.row-widget.stRadio div[role="radiogroup"],
+    #section-nav-tabs + * .stRadio div[role="radiogroup"] {
         display: flex !important;
         flex-wrap: wrap;
         gap: 0 2px !important;
@@ -2349,7 +2352,10 @@ def main():
         border: 1px solid #e2e8f0;
         border-bottom: none;
     }
-    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] {
+    .section-nav-block div.row-widget.stRadio label,
+    .section-nav-block .stRadio label,
+    #section-nav-tabs + * div.row-widget.stRadio label,
+    #section-nav-tabs + * .stRadio label,
         margin: 0 !important;
         padding: 14px 18px 12px !important;
         border-radius: 0 !important;
@@ -2361,15 +2367,31 @@ def main():
         display: inline-flex !important;
         align-items: center !important;
     }
-    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) {
+    .section-nav-block div.row-widget.stRadio label:has(input:checked),
+    .section-nav-block div.row-widget.stRadio label:has(input:checked),
+    .section-nav-block .stRadio label:has(input:checked),
+    #section-nav-tabs + * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked),
+    #section-nav-tabs + * div.row-widget.stRadio label:has(input:checked),
+    #section-nav-tabs + * .stRadio label:has(input:checked) {
         color: #0f172a !important;
         border-bottom-color: #0f766e !important;
     }
-    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] span {
+    .section-nav-block div.row-widget.stRadio label span,
+    .section-nav-block .stRadio label span,
+    #section-nav-tabs + * div.row-widget.stRadio label span,
+    #section-nav-tabs + * .stRadio label span {
         color: inherit !important;
     }
-    #section-nav-tabs ~ * div.row-widget.stRadio input {
+    /* Hide radio circles — section nav only (multiple selectors) */
+    .section-nav-block div.row-widget.stRadio input,
+    .section-nav-block .stRadio input,
+    #section-nav-tabs + * div.row-widget.stRadio input,
+    #section-nav-tabs + * .stRadio input {
         display: none !important;
+        opacity: 0 !important;
+        position: absolute !important;
+        width: 0 !important;
+        height: 0 !important;
     }
     /* Teal section title banner below tabs */
     .section-title-banner {
@@ -2577,14 +2599,28 @@ def main():
 
     # Website-style layout: section navigation as top tabs in main area (not sidebar)
     st.markdown('<div id="section-nav-tabs"></div>', unsafe_allow_html=True)
-    section = st.radio(
-        "Section",
-        section_options,
-        index=0,
-        key="section_radio",
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    # Wrap section radio in container so we can target it; script adds class for CSS
+    with st.container():
+        section = st.radio(
+            "Section",
+            section_options,
+            index=0,
+            key="section_radio",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+    st.markdown("""
+    <script>
+    (function() {
+        var el = document.getElementById('section-nav-tabs');
+        if (el) {
+            var next = el.nextElementSibling;
+            while (next && !next.querySelector('.row-widget.stRadio')) { next = next.nextElementSibling; }
+            if (next) next.classList.add('section-nav-block');
+        }
+    })();
+    </script>
+    """, unsafe_allow_html=True)
     # Teal banner with current section name (like reference)
     st.markdown(f'<div class="section-title-banner">{section}</div>', unsafe_allow_html=True)
 
