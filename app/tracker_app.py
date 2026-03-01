@@ -2328,14 +2328,11 @@ def main():
         </style>
         """, unsafe_allow_html=True)
 
-    # Hide dataframe toolbar (eye, download, search, fullscreen) app-wide
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
     st.markdown("""
     <style>
-    [data-testid="stElementToolbar"] { display: none !important; }
-    /* Show toolbar (Fullscreen, zoom, etc.) for dataframes only — toolbar can be before or after dataframe */
-    [data-testid="stElementToolbar"]:has(+ [data-testid="stDataFrame"]) { display: flex !important; }
-    [data-testid="stDataFrame"] + [data-testid="stElementToolbar"] { display: flex !important; }
+    /* Keep dataframe toolbar visible (Fullscreen, search, download, etc.) */
+    [data-testid="stElementToolbar"] { display: flex !important; }
     /* Section nav now uses buttons (no radio/dots). Teal banner below. */
     .section-title-banner {
         background: #0f766e !important;
@@ -3612,7 +3609,7 @@ def main():
                 else:
                     total = sum(len(rows) for rows in results.values())
                     st.success(f"Found **{total}** row(s) in **{len(results)}** tab(s).")
-                    for tab_id, rows in results.items():
+                    for i, (tab_id, rows) in enumerate(results.items()):
                         with st.expander(f"**{tab_id}** — {len(rows)} row(s)", expanded=True):
                             if rows and HAS_EXCEL:
                                 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
