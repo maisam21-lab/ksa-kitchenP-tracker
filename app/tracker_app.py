@@ -2295,9 +2295,9 @@ def main():
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
         div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
-        /* Section nav tabs (dark mode) — text tabs, no dots, active = teal underline */
+        /* Section nav tabs (dark mode) — no dots, active underline */
         #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: #1e293b !important; border-color: #334155 !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #94a3b8 !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #cbd5e1 !important; }
         #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { color: #f1f5f9 !important; border-bottom-color: #0f766e !important; }
         .section-title-banner { background: #0f766e !important; color: white !important; }
         </style>
@@ -2333,17 +2333,17 @@ def main():
         """, unsafe_allow_html=True)
 
     # Hide dataframe toolbar (eye, download, search, fullscreen) app-wide
-    # Section nav: text-only tabs (no dots), active tab with underline
+    # Section nav: tabs only (no dots) — bold text, active tab with teal underline
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
-    /* Section nav — tabs only, no circles; active = teal underline */
+    /* Section nav — tabs: no circles, active = underline */
     #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] {
         display: flex !important;
         flex-wrap: wrap;
-        gap: 0 8px !important;
+        gap: 0 2px !important;
         background: #f8fafc !important;
-        padding: 12px 16px 10px !important;
+        padding: 0 12px 0 16px !important;
         border-radius: 8px 8px 0 0;
         overflow-x: auto;
         border: 1px solid #e2e8f0;
@@ -2351,20 +2351,18 @@ def main():
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] {
         margin: 0 !important;
-        padding: 8px 12px 10px !important;
-        border-radius: 4px 4px 0 0 !important;
-        font-weight: 500 !important;
-        color: #475569 !important;
+        padding: 14px 18px 12px !important;
+        border-radius: 0 !important;
+        font-weight: 700 !important;
+        color: #334155 !important;
         background: transparent !important;
         border: none !important;
         border-bottom: 3px solid transparent !important;
-    }
-    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]::before {
-        display: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) {
         color: #0f172a !important;
-        font-weight: 600 !important;
         border-bottom-color: #0f766e !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] span {
