@@ -2295,10 +2295,10 @@ def main():
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
         div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
-        /* Section nav tabs (dark) */
-        #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: #1E293B !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #94A3B8 !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { background: #0F766E !important; color: white !important; }
+        /* Section nav tabs (dark mode — same dark-bar style, active a bit lighter) */
+        #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%) !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #94a3b8 !important; background: rgba(0,0,0,0.3) !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { background: #334155 !important; color: #f1f5f9 !important; }
         </style>
         """, unsafe_allow_html=True)
     else:
@@ -2332,32 +2332,37 @@ def main():
         """, unsafe_allow_html=True)
 
     # Hide dataframe toolbar (eye, download, search, fullscreen) app-wide
-    # Section nav: style horizontal radio as tabs (no dots, tab-bar look)
+    # Section nav: top bar like reference (dark bar, active tab lighter/raised, inactive recessed)
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
-    /* Section nav as tabs: hide radio circles, style like tab bar */
+    /* Section nav — dark top bar, tabs like reference (active = lighter/raised, inactive = recessed) */
     #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] {
         display: flex !important;
         flex-wrap: wrap;
-        gap: 4px !important;
-        background: #F1F5F9;
-        padding: 6px 8px !important;
-        border-radius: 10px;
+        gap: 0 !important;
+        background: linear-gradient(180deg, #374151 0%, #1f2937 50%, #111827 100%) !important;
+        padding: 0 8px 0 12px !important;
+        border-radius: 8px 8px 0 0;
         overflow-x: auto;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] {
         margin: 0 !important;
-        padding: 10px 18px !important;
-        border-radius: 8px !important;
+        padding: 12px 20px !important;
+        border-radius: 8px 8px 0 0 !important;
         font-weight: 500 !important;
-        color: #475569 !important;
-        background: transparent !important;
+        color: rgba(255,255,255,0.85) !important;
+        background: rgba(0,0,0,0.2) !important;
         border: none !important;
+        margin-right: 2px !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) {
-        background: #0F766E !important;
-        color: white !important;
+        background: #4b5563 !important;
+        color: #fff !important;
+        box-shadow: 0 -2px 4px rgba(0,0,0,0.2);
+        position: relative;
+        z-index: 1;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] span {
         color: inherit !important;
