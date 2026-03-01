@@ -2120,9 +2120,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
-    # Status color coding (match sheet/dashboard reference): Vacant = light green, Blocked = same as Vacant, Occupied = light red, Sold = light red, Churning = amber, no status/NA/empty = dark red
-    _status_colors = {"Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
-    _no_status_bg = "#B22222"  # dark red for no status, NA, or empty
+    # Status color coding (match sheet/dashboard reference): Vacant = light green, Occupied = light red, Sold = light red, Churning = amber, no status/Blocked/NA/empty = dark red
+    _status_colors = {"Vacant": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
+    _no_status_bg = "#B22222"  # dark red for no status, Blocked, NA, or empty
     df_display = pd.DataFrame(rows_shown)
     status_col = None
     for c in df_display.columns:
@@ -2133,12 +2133,11 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         def _row_bg(row):
             v = (str(row[status_col]) if row[status_col] is not None else "").strip()
             low = v.lower()
-            if not v or low in ("no status", "n/a", "na", "—", "-"):
+            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                 return [f"background-color: {_no_status_bg}; color: white"] * len(row)
             # Normalize to match GSheet status labels (case-insensitive)
             key = None
             if low == "vacant": key = "Vacant"
-            elif low == "blocked": key = "Blocked"
             elif low == "churning": key = "Churning"
             elif low == "occupied": key = "Occupied"
             elif low == "sold": key = "Sold"
@@ -2572,14 +2571,14 @@ def main():
                             status_col_combined = c
                             break
                     if status_col_combined and not df_combined.empty:
-                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
+                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                         _ns = "#B22222"
                         def _row_bg_combined(row):
                             v = (str(row[status_col_combined]) if row[status_col_combined] is not None else "").strip()
                             low = v.lower()
-                            if not v or low in ("no status", "n/a", "na", "—", "-"):
+                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                 return [f"background-color: {_ns}; color: white"] * len(row)
-                            key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                            key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                             bg = _sc.get(key, "") if key else _sc.get(v, "")
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
@@ -2637,9 +2636,9 @@ def main():
                     _rerun()
             search = st.text_input("Search in all columns", key="master_search", placeholder="Type to filter rows by any column…")
             if is_tracker:
-                no_status = [r for r in rows if not (r.get("status") or "").strip() or str(r.get("status") or "").strip().lower() in ("no status", "n/a", "na", "—", "-")]
+                no_status = [r for r in rows if not (r.get("status") or "").strip() or str(r.get("status") or "").strip().lower() in ("no status", "n/a", "na", "—", "-", "blocked")]
                 if no_status:
-                    st.caption(f"**{len(no_status)}** records with no or empty status. ")
+                    st.caption(f"**{len(no_status)}** records with no status, Blocked, or empty. ")
                     if st.button("Show only these", key="master_show_no_status"):
                         st.session_state["master_f_status_filter"] = "no_status"
                         _rerun()
@@ -2685,7 +2684,7 @@ def main():
                 }
                 rows_filtered = filter_rows(rows, {k: v for k, v in filters.items() if v})
                 if st.session_state.get("master_f_status_filter") == "no_status":
-                    rows_filtered = [r for r in rows_filtered if not (r.get("status") or "").strip() or str(r.get("status") or "").strip().lower() in ("no status", "n/a", "na", "—", "-")]
+                    rows_filtered = [r for r in rows_filtered if not (r.get("status") or "").strip() or str(r.get("status") or "").strip().lower() in ("no status", "n/a", "na", "—", "-", "blocked")]
                 from_date = st.session_state.get("master_from_date")
                 to_date = st.session_state.get("master_to_date")
                 if from_date or to_date:
@@ -2736,16 +2735,16 @@ def main():
                                 cols_show_f = all_cols_f
                             if HAS_EXCEL:
                                 display_f = pd.DataFrame(rows_f)[cols_show_f] if cols_show_f else pd.DataFrame(rows_f)
-                                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
+                                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                                 _ns = "#B22222"
                                 status_col_f = next((c for c in display_f.columns if str(c).strip().lower() in ("status", "status__c")), None)
                                 if status_col_f and not display_f.empty:
                                     def _row_bg_f(row):
                                         v = (str(row[status_col_f]) if row[status_col_f] is not None else "").strip()
                                         low = v.lower()
-                                        if not v or low in ("no status", "n/a", "na", "—", "-"):
+                                        if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                             return [f"background-color: {_ns}; color: white"] * len(row)
-                                        key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                                         return [f"background-color: {bg}" if bg else ""] * len(row)
                                     display_f = display_f.style.apply(_row_bg_f, axis=1)
@@ -2770,16 +2769,16 @@ def main():
                     cols_to_show = all_cols
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_filtered)[cols_to_show] if cols_to_show else pd.DataFrame(rows_filtered)
-                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
+                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                 _ns = "#B22222"
                 status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
                 if status_col_m and not display_df.empty:
                     def _row_bg_m(row):
                         v = (str(row[status_col_m]) if row[status_col_m] is not None else "").strip()
                         low = v.lower()
-                        if not v or low in ("no status", "n/a", "na", "—", "-"):
+                        if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                             return [f"background-color: {_ns}; color: white"] * len(row)
-                        key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                         return [f"background-color: {bg}" if bg else ""] * len(row)
                     display_df = display_df.style.apply(_row_bg_m, axis=1)
@@ -3294,16 +3293,16 @@ def main():
                                     row_inv["Go Live Date"] = (r.get("Go Live Date") or "").strip() or "—"
                                 inv_data.append(row_inv)
                             df_inv = pd.DataFrame(inv_data)
-                            # Status color coding (same as Kitchen Master Data): Vacant/Blocked=green, Churning=amber, Occupied/Sold=red, no status=dark red
-                            _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
+                            # Status color coding (same as Kitchen Master Data): Vacant=green, Churning=amber, Occupied/Sold=red, no status/Blocked=dark red
+                            _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                             _no_status_bg = "#B22222"
                             if "Status" in df_inv.columns and not df_inv.empty:
                                 def _inv_row_bg(row):
                                     v = (str(row["Status"]) if row["Status"] is not None else "").strip()
                                     low = v.lower()
-                                    if not v or low in ("no status", "n/a", "na", "—", "-"):
+                                    if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                         return [f"background-color: {_no_status_bg}; color: white"] * len(row)
-                                    key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                                    key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                     bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
                                     return [f"background-color: {bg}" if bg else ""] * len(row)
                                 df_inv = df_inv.style.apply(_inv_row_bg, axis=1)
