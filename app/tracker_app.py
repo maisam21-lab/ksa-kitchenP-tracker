@@ -132,6 +132,24 @@ def _parse_uploaded_file(upload):
     return [dict(r) for r in reader]
 
 
+def _excel_sf_report_header_row(xl, sheet_name: str) -> int | None:
+    """If the sheet looks like a Salesforce report export (title rows then header with 'Account Name'), return the 0-based header row index; else None."""
+    try:
+        df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
+        if len(df) < 17:
+            return None
+        row16 = df.iloc[16].astype(str).str.strip()
+        if row16.str.contains("Account Name", case=False, na=False).any():
+            return 16
+        for r in range(14, min(20, len(df))):
+            row = df.iloc[r].astype(str).str.strip()
+            if row.str.contains("Account Name", case=False, na=False).any():
+                return r
+    except Exception:
+        pass
+    return None
+
+
 def _parse_workbook_all_sheets(upload, only_known_tabs: bool = True) -> dict[str, list[dict]]:
     """Read an Excel workbook and return {sheet_name: list of dicts}. If only_known_tabs, only read sheets matching SHEET_TAB_IDS (faster for large workbooks)."""
     if not HAS_EXCEL:
@@ -144,11 +162,18 @@ def _parse_workbook_all_sheets(upload, only_known_tabs: bool = True) -> dict[str
     if only_known_tabs:
         known = {s.strip().lower() for s in SHEET_TAB_IDS} | {s.strip().lower() for s in KITCHEN_TRACKER_SHEET_ALIASES}
         to_read = [s for s in xl.sheet_names if s.strip().lower() in known]
+        # Also include Salesforce report exports (e.g. "SF Kitchen Data - KSA")
+        to_read = list(to_read) + [s for s in xl.sheet_names if s.strip().lower().startswith("sf kitchen data")]
+        to_read = list(dict.fromkeys(to_read))  # dedupe, keep order
         if not to_read:
             to_read = xl.sheet_names[:20]  # fallback: first 20 sheets
     out = {}
     for sheet_name in to_read:
-        df = pd.read_excel(xl, sheet_name=sheet_name)
+        header_row = _excel_sf_report_header_row(xl, sheet_name)
+        if header_row is not None:
+            df = pd.read_excel(xl, sheet_name=sheet_name, header=header_row)
+        else:
+            df = pd.read_excel(xl, sheet_name=sheet_name)
         df = df.astype(str).replace("nan", "")
         rows = [dict(row) for _, row in df.iterrows()]
         out[sheet_name] = rows
@@ -177,7 +202,7 @@ def _load_workbook_into_db(data: dict[str, list[dict]], progress_placeholder=Non
         if tab_id is None:
             tab_id = ws_title
         # SF Kitchen Data sheet -> Kitchens tab (single main view)
-        if tab_id == "SF Kitchen Data":
+        if tab_id == "SF Kitchen Data" or (tab_id or "").startswith("SF Kitchen Data"):
             tab_id = "Kitchens"
         if tab_id == "Auto Refresh Execution Log":
             with get_conn() as c:
@@ -1330,6 +1355,215 @@ def _get_google_credentials_path():
     return None
 
 
+def _fetch_facility_go_live_csv() -> list[dict] | None:
+    """Load facility go-live from CSV (e.g. data/sa_bh_facility_go_live.csv).
+    Returns list of dicts with kitchen_number (empty), account_name, go_live_date, is_live.
+    Rule: is_live = (go_live_date is set and go_live_date <= today); otherwise not live.
+    """
+    path = REPO_ROOT / "data" / "sa_bh_facility_go_live.csv"
+    try:
+        cfg = (getattr(st, "secrets", None) or {}).get("go_live_facilities")
+        if isinstance(cfg, dict) and cfg.get("path"):
+            path = Path(cfg["path"]).expanduser().resolve()
+        if not path.exists():
+            return None
+        today = date.today()
+        out = []
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                an = (row.get("account_name") or "").strip()
+                if not an:
+                    continue
+                gl = (row.get("go_live_date") or "").strip()
+                # Rule: go_live_date on or before today → Live; otherwise Not live
+                is_live = False
+                if gl:
+                    try:
+                        go_date = datetime.strptime(gl, "%Y-%m-%d").date()
+                        is_live = go_date <= today
+                    except (ValueError, TypeError):
+                        pass
+                out.append({
+                    "kitchen_number": "",
+                    "account_name": an,
+                    "go_live_date": gl,
+                    "is_live": is_live,
+                })
+        return out if out else None
+    except Exception:
+        return None
+
+
+def _fetch_bigquery_go_live() -> list[dict] | None:
+    """Fetch kitchen go-live / is_live from BigQuery when configured.
+    Expects st.secrets.bigquery_go_live with project_id and query (or dataset_id + table_id).
+    Returns list of dicts with keys kitchen_number, account_name, is_live, go_live_date; or None if not configured or error.
+    """
+    try:
+        cfg = (getattr(st, "secrets", None) or {}).get("bigquery_go_live")
+        if not cfg or not isinstance(cfg, dict):
+            cfg = None
+        if not cfg:
+            return None
+        project_id = (cfg.get("project_id") or "").strip()
+        query = (cfg.get("query") or "").strip()
+        dataset_id = (cfg.get("dataset_id") or "").strip()
+        table_id = (cfg.get("table_id") or "").strip()
+        if not project_id:
+            return None
+        if not query and dataset_id and table_id:
+            query = f"SELECT kitchen_number, account_name, go_live_date, is_live FROM `{project_id}.{dataset_id}.{table_id}`"
+        if not query:
+            return None
+        creds_path = _get_google_credentials_path()
+        try:
+            from google.cloud import bigquery
+            from google.oauth2 import service_account
+        except ImportError:
+            return None
+        if creds_path == "__FROM_SECRETS__":
+            info = dict(getattr(st, "secrets", {}).get("gsheet_service_account", {}))
+            if not info:
+                client = bigquery.Client(project=project_id)
+            else:
+                info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+                info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
+                creds = service_account.Credentials.from_service_account_info(
+                    info, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+                )
+                client = bigquery.Client(project=project_id, credentials=creds)
+        elif creds_path and Path(creds_path).exists():
+            creds = service_account.Credentials.from_service_account_file(
+                creds_path, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+            )
+            client = bigquery.Client(project=project_id, credentials=creds)
+        else:
+            client = bigquery.Client(project=project_id)
+        job = client.query(query)
+        rows = list(job.result())
+        today = date.today()
+        out = []
+        for row in rows:
+            d = dict(row)
+            # Normalize keys (BQ may return various names: Kitchen Number ID 18, Account Name, Go Live Date)
+            kn = (
+                d.get("kitchen_number") or d.get("Kitchen_Number")
+                or d.get("Kitchen_Number_ID_18__c") or d.get("Kitchen Number ID 18")
+                or ""
+            )
+            kn = str(kn).strip() or None
+            an = (
+                d.get("account_name") or d.get("Account_Name")
+                or d.get("Account Name") or d.get("Account_Name__c") or ""
+            )
+            an = str(an).strip() or None
+            gl = d.get("go_live_date") or d.get("Go_Live_Date__c") or d.get("Go Live Date")
+            if gl is not None and hasattr(gl, "strftime"):
+                gl = gl.strftime("%Y-%m-%d")
+            elif isinstance(gl, str) and gl.strip():
+                gl = gl.strip()
+            else:
+                gl = ""
+            # Rule: go_live_date on or before today → Live; otherwise Not live
+            is_live = False
+            go_date = None
+            if gl:
+                for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+                    try:
+                        go_date = datetime.strptime(gl[:10], fmt).date()
+                        if fmt != "%Y-%m-%d":
+                            gl = go_date.strftime("%Y-%m-%d")
+                        break
+                    except (ValueError, TypeError):
+                        continue
+                if go_date is not None:
+                    is_live = go_date <= today
+            out.append({"kitchen_number": kn, "account_name": an, "is_live": is_live, "go_live_date": gl or ""})
+        return out if out else None
+    except Exception:
+        return None
+
+
+def _fetch_bigquery_sf_churn_data() -> list[dict] | None:
+    """Fetch SF Churn Data from BigQuery when configured.
+    Expects st.secrets.bigquery_sf_churn_data with project_id and query.
+    Returns list of dicts (one per row, keys = column names) or None if not configured or error.
+    Used as data source for the SF Churn Data tab when set; overrides Salesforce for that tab on refresh.
+    """
+    try:
+        cfg = (getattr(st, "secrets", None) or {}).get("bigquery_sf_churn_data")
+        if not cfg or not isinstance(cfg, dict):
+            return None
+        project_id = (cfg.get("project_id") or "").strip()
+        query = (cfg.get("query") or "").strip()
+        if not project_id or not query:
+            return None
+        creds_path = _get_google_credentials_path()
+        try:
+            from google.cloud import bigquery
+            from google.oauth2 import service_account
+        except ImportError:
+            return None
+        if creds_path == "__FROM_SECRETS__":
+            info = dict(getattr(st, "secrets", {}).get("gsheet_service_account", {}))
+            if not info:
+                client = bigquery.Client(project=project_id)
+            else:
+                info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+                info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
+                creds = service_account.Credentials.from_service_account_info(
+                    info, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+                )
+                client = bigquery.Client(project=project_id, credentials=creds)
+        elif creds_path and Path(creds_path).exists():
+            creds = service_account.Credentials.from_service_account_file(
+                creds_path, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+            )
+            client = bigquery.Client(project=project_id, credentials=creds)
+        else:
+            client = bigquery.Client(project=project_id)
+        job = client.query(query)
+        rows = list(job.result())
+        # BQ Row supports dict(row); normalize to plain dicts for JSON storage
+        out = [dict(r) for r in rows]
+        return out if out else None
+    except Exception:
+        return None
+
+
+def _merge_go_live_into_kitchens(rows_kitchens: list[dict], bq_rows: list[dict]) -> list[dict]:
+    """Merge BigQuery go-live result into kitchen rows. Adds 'Is Live' and 'Go Live Date' to each row when matched."""
+    def _kitchen_key(r):
+        for k in ("Kitchen Number", "Kitchen_Number_ID_18__c", "Name", "Kitchen Number Name", "Kitchen_Number__c.Name"):
+            v = r.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        return ""
+    def _account_key(r):
+        for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+            v = r.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        return ""
+    lookup = {}
+    for b in bq_rows:
+        kn = (b.get("kitchen_number") or "").strip()
+        an = (b.get("account_name") or "").strip()
+        if kn or an:
+            lookup[(kn, an)] = {"is_live": b.get("is_live", False), "go_live_date": b.get("go_live_date") or ""}
+    for r in rows_kitchens:
+        kn = _kitchen_key(r)
+        an = _account_key(r)
+        info = lookup.get((kn, an)) or lookup.get((kn, "")) or lookup.get(("", an))
+        if info:
+            r["Is Live"] = info["is_live"]
+            r["Go Live Date"] = info.get("go_live_date") or ""
+        else:
+            r["Is Live"] = None  # unknown
+            r["Go Live Date"] = ""
+    return rows_kitchens
+
+
 def _salesforce_token_from_password(
     consumer_key: str,
     consumer_secret: str,
@@ -1520,6 +1754,12 @@ def _refresh_from_salesforce():
             if not soql_or_report_id:
                 continue
             save_to = KITCHENS_TAB if tab_id == "SF Kitchen Data" else tab_id
+            if tab_id == "SF Churn Data":
+                bq_rows = _fetch_bigquery_sf_churn_data()
+                if bq_rows is not None:
+                    save_generic_tab(save_to, bq_rows, source="salesforce")
+                    loaded.append(f"{save_to} (BQ, {len(bq_rows)} rows)")
+                    continue
             try:
                 rows = sfdc.mock_fetch_tab_data(tab_id, soql_or_report_id)
                 save_generic_tab(save_to, rows, source="salesforce")
@@ -1545,6 +1785,13 @@ def _refresh_from_salesforce():
         if not soql_or_report_id:
             continue
         save_to = KITCHENS_TAB if tab_id == "SF Kitchen Data" else tab_id
+        # SF Churn Data: prefer BigQuery when configured (same tab, source=salesforce)
+        if tab_id == "SF Churn Data":
+            bq_rows = _fetch_bigquery_sf_churn_data()
+            if bq_rows is not None:
+                save_generic_tab(save_to, bq_rows, source="salesforce")
+                loaded.append(f"{save_to} (BQ, {len(bq_rows)} rows)")
+                continue
         try:
             if _is_report_id(soql_or_report_id):
                 rows = _salesforce_report_data(soql_or_report_id, config)
@@ -1655,7 +1902,7 @@ def _refresh_from_online_sheet():
         if tab_id is None:
             tab_id = ws_title
         # SF Kitchen Data sheet -> Kitchens tab (single main view)
-        if tab_id == "SF Kitchen Data":
+        if tab_id == "SF Kitchen Data" or (tab_id or "").startswith("SF Kitchen Data"):
             tab_id = "Kitchens"
         if tab_id == "Auto Refresh Execution Log":
             with get_conn() as c:
@@ -1873,8 +2120,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
-    # Status color coding (match sheet/dashboard reference): Vacant = light green, Occupied = light red, Sold = light red, Churning = amber, no status/NA/empty = dark red
-    _status_colors = {"Vacant": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
+    # Status color coding (match sheet/dashboard reference): Vacant = light green, Blocked = same as Vacant, Occupied = light red, Sold = light red, Churning = amber, no status/NA/empty = dark red
+    _status_colors = {"Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
     _no_status_bg = "#B22222"  # dark red for no status, NA, or empty
     df_display = pd.DataFrame(rows_shown)
     status_col = None
@@ -1891,6 +2138,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             # Normalize to match GSheet status labels (case-insensitive)
             key = None
             if low == "vacant": key = "Vacant"
+            elif low == "blocked": key = "Blocked"
             elif low == "churning": key = "Churning"
             elif low == "occupied": key = "Occupied"
             elif low == "sold": key = "Sold"
@@ -2324,14 +2572,14 @@ def main():
                             status_col_combined = c
                             break
                     if status_col_combined and not df_combined.empty:
-                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
                         _ns = "#B22222"
                         def _row_bg_combined(row):
                             v = (str(row[status_col_combined]) if row[status_col_combined] is not None else "").strip()
                             low = v.lower()
                             if not v or low in ("no status", "n/a", "na", "—", "-"):
                                 return [f"background-color: {_ns}; color: white"] * len(row)
-                            key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                            key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                             bg = _sc.get(key, "") if key else _sc.get(v, "")
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
@@ -2488,7 +2736,7 @@ def main():
                                 cols_show_f = all_cols_f
                             if HAS_EXCEL:
                                 display_f = pd.DataFrame(rows_f)[cols_show_f] if cols_show_f else pd.DataFrame(rows_f)
-                                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
                                 _ns = "#B22222"
                                 status_col_f = next((c for c in display_f.columns if str(c).strip().lower() in ("status", "status__c")), None)
                                 if status_col_f and not display_f.empty:
@@ -2497,7 +2745,7 @@ def main():
                                         low = v.lower()
                                         if not v or low in ("no status", "n/a", "na", "—", "-"):
                                             return [f"background-color: {_ns}; color: white"] * len(row)
-                                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                                        key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                                         return [f"background-color: {bg}" if bg else ""] * len(row)
                                     display_f = display_f.style.apply(_row_bg_f, axis=1)
@@ -2522,7 +2770,7 @@ def main():
                     cols_to_show = all_cols
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_filtered)[cols_to_show] if cols_to_show else pd.DataFrame(rows_filtered)
-                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
                 _ns = "#B22222"
                 status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
                 if status_col_m and not display_df.empty:
@@ -2531,7 +2779,7 @@ def main():
                         low = v.lower()
                         if not v or low in ("no status", "n/a", "na", "—", "-"):
                             return [f"background-color: {_ns}; color: white"] * len(row)
-                        key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                        key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                         return [f"background-color: {bg}" if bg else ""] * len(row)
                     display_df = display_df.style.apply(_row_bg_m, axis=1)
@@ -2614,6 +2862,13 @@ def main():
                     pass
         # Ensure Account Country for filtering (Kitchens / Master list may use County or other keys)
         rows_kitchens = _ensure_account_country_in_kitchens(rows_kitchens)
+        # Enrich with go-live / is_live: facility CSV (data/sa_bh_facility_go_live.csv) + optional BigQuery
+        bq_go_live = _fetch_bigquery_go_live()
+        csv_go_live = _fetch_facility_go_live_csv()
+        go_live_rows = (csv_go_live or []) + (bq_go_live or [])
+        if go_live_rows:
+            rows_kitchens = _merge_go_live_into_kitchens(rows_kitchens, go_live_rows)
+        has_go_live = bool(go_live_rows)
         def _country(r):
             """Country for a row (Account Country, County, or other country header)."""
             for k in ("Account Country", "County", "Account__r.Country__c", "Country__c", "Country", "account country", "county"):
@@ -2627,19 +2882,20 @@ def main():
                 if v is not None and str(v).strip():
                     return str(v).strip()
             return ""
-        # —— Country & Facility filters (drive all dashboard data) ——
+        # —— Country, Facility, and Live status filters (drive all dashboard data) ——
         unique_countries = sorted({(_country(r) or "(No country)") for r in rows_kitchens})
         if not unique_countries:
             unique_countries = ["(No country)"]
-        filter_col1, filter_col2 = st.columns(2)
-        with filter_col1:
+        n_filter_cols = 3 if has_go_live else 2
+        filter_cols = st.columns(n_filter_cols)
+        with filter_cols[0]:
             selected_country = st.selectbox(
                 "Country",
                 options=["All"] + unique_countries,
                 key="dashboard_country",
                 help="Filter all dashboard metrics and tables by country.",
             )
-        with filter_col2:
+        with filter_cols[1]:
             # Facilities depend on selected country
             if selected_country and selected_country != "All":
                 rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
@@ -2655,12 +2911,30 @@ def main():
                 key="dashboard_facility",
                 help="Filter by facility within the selected country.",
             )
+        selected_live = "All"
+        if has_go_live and n_filter_cols >= 3:
+            with filter_cols[2]:
+                selected_live = st.selectbox(
+                    "Live status",
+                    options=["All", "Live", "Not live"],
+                    key="dashboard_live",
+                    help="Filter by kitchens marked live vs not live (from BigQuery go-live data).",
+                )
         # Apply filters
         if selected_country and selected_country != "All":
             rows_kitchens = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
         if selected_facility and selected_facility != "All":
             rows_kitchens = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_facility]
-        st.caption(f"Showing data for **{selected_country or 'All'}** · **{selected_facility or 'All'}** facilities ({len(rows_kitchens):,} kitchens).")
+        if selected_live == "Live":
+            rows_kitchens = [r for r in rows_kitchens if r.get("Is Live") is True]
+        elif selected_live == "Not live":
+            rows_kitchens = [r for r in rows_kitchens if r.get("Is Live") is False]
+        cap = f"Showing data for **{selected_country or 'All'}** · **{selected_facility or 'All'}** facilities ({len(rows_kitchens):,} kitchens)."
+        if has_go_live:
+            n_live = sum(1 for r in rows_kitchens if r.get("Is Live") is True)
+            n_not = sum(1 for r in rows_kitchens if r.get("Is Live") is False)
+            cap += f" **{n_live}** live, **{n_not}** not live (go-live from facility list / BigQuery)."
+        st.caption(cap)
         st.divider()
         def _s(r):
             v = None
@@ -3008,16 +3282,20 @@ def main():
                                 st_val = _status_normalized(r) or "Vacant"
                                 floor_val = _price_for_value(r, "Occupied") or _price(r) or 0
                                 list_val = _price_for_value(r, "Vacant") or _price(r) or 0
-                                inv_data.append({
+                                row_inv = {
                                     "Kitchen": _kitchen_name(r) or "—",
                                     "Status": st_val or "—",
                                     "Floor (MRR)": floor_val,
                                     "List (MRR)": list_val,
                                     "Facility": _facility(r) or "—",
-                                })
+                                }
+                                if has_go_live:
+                                    row_inv["Is Live"] = "Yes" if r.get("Is Live") is True else ("No" if r.get("Is Live") is False else "—")
+                                    row_inv["Go Live Date"] = (r.get("Go Live Date") or "").strip() or "—"
+                                inv_data.append(row_inv)
                             df_inv = pd.DataFrame(inv_data)
-                            # Status color coding (same as Kitchen Master Data): Vacant=green, Churning=amber, Occupied/Sold=red, no status=dark red
-                            _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                            # Status color coding (same as Kitchen Master Data): Vacant/Blocked=green, Churning=amber, Occupied/Sold=red, no status=dark red
+                            _status_colors = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Blocked": "#D1FAE5", "Churning": "#FDE68A"}
                             _no_status_bg = "#B22222"
                             if "Status" in df_inv.columns and not df_inv.empty:
                                 def _inv_row_bg(row):
@@ -3025,7 +3303,7 @@ def main():
                                     low = v.lower()
                                     if not v or low in ("no status", "n/a", "na", "—", "-"):
                                         return [f"background-color: {_no_status_bg}; color: white"] * len(row)
-                                    key = "Vacant" if low == "vacant" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                                    key = "Vacant" if low == "vacant" else "Blocked" if low == "blocked" else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                     bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
                                     return [f"background-color: {bg}" if bg else ""] * len(row)
                                 df_inv = df_inv.style.apply(_inv_row_bg, axis=1)
