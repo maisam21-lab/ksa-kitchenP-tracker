@@ -2269,7 +2269,7 @@ def main():
     if _dark:
         st.markdown("""
         <style>
-        .stApp { background: #0F172A; font-family: sans-serif; }
+        .stApp { background: #0F172A; font-family: sans-serif; font-size: 0.875rem !important; }
         header[data-testid="stHeader"] { background: #1E293B !important; border-bottom: 1px solid #334155; }
         header[data-testid="stHeader"] * { color: #F1F5F9 !important; }
         section[data-testid="stSidebar"] { background: #1E293B; border-right: 4px solid #0F766E; }
@@ -2301,7 +2301,7 @@ def main():
     else:
         st.markdown("""
         <style>
-        .stApp { background: #FAFBFC; font-family: sans-serif; }
+        .stApp { background: #FAFBFC; font-family: sans-serif; font-size: 0.875rem !important; }
         header[data-testid="stHeader"] { background: #F1F3F4 !important; border-bottom: 1px solid #E2E8F0; }
         header[data-testid="stHeader"] * { color: #1E293B !important; }
         section[data-testid="stSidebar"] { background: #FFFFFF; border-right: 4px solid #0F766E; }
@@ -2333,11 +2333,15 @@ def main():
     <style>
     /* Keep dataframe toolbar visible (Fullscreen, search, download, etc.) */
     [data-testid="stElementToolbar"] { display: flex !important; }
+    /* Slightly smaller base font app-wide */
+    .stApp h1 { font-size: 1.4rem !important; }
+    .stApp h2 { font-size: 1.15rem !important; }
+    .stApp h3 { font-size: 1rem !important; }
     /* Section nav now uses buttons (no radio/dots). Teal banner below. */
     .section-title-banner {
         background: #0f766e !important;
         color: white !important;
-        font-size: 1.75rem !important;
+        font-size: 1.5rem !important;
         font-weight: 700 !important;
         padding: 20px 28px !important;
         margin: 0 0 1.5rem 0 !important;
@@ -2352,7 +2356,7 @@ def main():
     if logo_path:
         st.sidebar.image(str(logo_path), use_container_width=True)
     else:
-        st.sidebar.markdown('<span style="color: #2E7D6E; font-size: 1.4rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
+        st.sidebar.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
     st.sidebar.markdown("**KSA Kitchens Tracker**")
     st.sidebar.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
     # Log this session once (for analytics); show record count — more meaningful than "traffic"
