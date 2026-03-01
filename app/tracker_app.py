@@ -2295,10 +2295,13 @@ def main():
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
         div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
-        /* Section nav tabs (dark mode — same dark-bar style, active a bit lighter) */
-        #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%) !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #94a3b8 !important; background: rgba(0,0,0,0.3) !important; }
-        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { background: #334155 !important; color: #f1f5f9 !important; }
+        /* Section nav tabs (dark mode) — light text, circles unchanged */
+        #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: #1e293b !important; border-color: #334155 !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #cbd5e1 !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]::before { border-color: #64748b !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { color: #f1f5f9 !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked)::before { background: #0f766e !important; border-color: #0f766e !important; }
+        .section-title-banner { background: #0f766e !important; color: white !important; }
         </style>
         """, unsafe_allow_html=True)
     else:
@@ -2332,43 +2335,68 @@ def main():
         """, unsafe_allow_html=True)
 
     # Hide dataframe toolbar (eye, download, search, fullscreen) app-wide
-    # Section nav: top bar like reference (dark bar, active tab lighter/raised, inactive recessed)
+    # Section nav: tab names with circle indicators (filled green = active, hollow = inactive), then teal title banner
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
-    /* Section nav — dark top bar, tabs like reference (active = lighter/raised, inactive = recessed) */
+    /* Section nav — tab names with circle before each: filled green active, hollow grey inactive */
     #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] {
         display: flex !important;
         flex-wrap: wrap;
-        gap: 0 !important;
-        background: linear-gradient(180deg, #374151 0%, #1f2937 50%, #111827 100%) !important;
-        padding: 0 8px 0 12px !important;
+        gap: 0 4px !important;
+        background: #f8fafc !important;
+        padding: 10px 12px 10px 16px !important;
         border-radius: 8px 8px 0 0;
         overflow-x: auto;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+        border: 1px solid #e2e8f0;
+        border-bottom: none;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] {
-        margin: 0 !important;
-        padding: 12px 20px !important;
-        border-radius: 8px 8px 0 0 !important;
+        margin: 0 4px 0 0 !important;
+        padding: 8px 14px !important;
+        border-radius: 6px !important;
         font-weight: 500 !important;
-        color: rgba(255,255,255,0.85) !important;
-        background: rgba(0,0,0,0.2) !important;
+        color: #334155 !important;
+        background: transparent !important;
         border: none !important;
-        margin-right: 2px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+    }
+    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]::before {
+        content: "" !important;
+        display: inline-block !important;
+        width: 10px !important;
+        height: 10px !important;
+        border-radius: 50% !important;
+        margin-right: 10px !important;
+        flex-shrink: 0 !important;
+        border: 2px solid #94a3b8 !important;
+        background: transparent !important;
+    }
+    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked)::before {
+        background: #0f766e !important;
+        border-color: #0f766e !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) {
-        background: #4b5563 !important;
-        color: #fff !important;
-        box-shadow: 0 -2px 4px rgba(0,0,0,0.2);
-        position: relative;
-        z-index: 1;
+        color: #0f172a !important;
+        font-weight: 600 !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] span {
         color: inherit !important;
     }
     #section-nav-tabs ~ * div.row-widget.stRadio input {
         display: none !important;
+    }
+    /* Teal section title banner below tabs */
+    .section-title-banner {
+        background: #0f766e !important;
+        color: white !important;
+        font-size: 1.75rem !important;
+        font-weight: 700 !important;
+        padding: 20px 28px !important;
+        margin: 0 0 1.5rem 0 !important;
+        border-radius: 0 0 10px 10px !important;
+        box-shadow: 0 2px 4px rgba(15,118,110,0.2);
     }
     </style>
     """, unsafe_allow_html=True)
@@ -2573,10 +2601,11 @@ def main():
         horizontal=True,
         label_visibility="collapsed",
     )
+    # Teal banner with current section name (like reference)
+    st.markdown(f'<div class="section-title-banner">{section}</div>', unsafe_allow_html=True)
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
-        st.title("Kitchen Master Data")
         _show_refresh_btn = _is_developer() or user_role == "super_user"
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
@@ -2965,7 +2994,6 @@ def main():
 
     # Dashboard: management view — percentages, insights, breakdowns; no day-to-day focus
     elif section == "Dashboard":
-        st.title("Dashboard")
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             st.caption("Data source: **Superset (Trino proxy)**. Last refresh: **" + ((superset_meta or {}).get("last_refresh_ts_utc") or "Never") + "**")
@@ -3613,7 +3641,6 @@ def main():
 
     # Search (all tabs)
     if section == "Search":
-        st.title("Search")
         st.caption("Find text across main data, Execution Log, and every sheet tab.")
         search_input = st.text_input("Search", key="global_search_q", placeholder="Type to search across all data…")
         if st.button("Search", key="btn_global_search") or search_input:
@@ -3639,7 +3666,6 @@ def main():
 
     # Discussions: app-wide comments and questions (with replies)
     if section == "Discussions":
-        st.title("Discussions")
         st.caption("Ask questions or add comments. You can reply to any post.")
         current_name = (st.session_state.get("user_display_name") or "").strip()
         all_posts = list_app_discussions(200)
@@ -3716,7 +3742,6 @@ def main():
 
     # —— Data: all sheet tabs as horizontal tabs ——
     if section == "Data":
-        st.title("Data")
         st.caption("Use the **Kitchens** tab; filter or search below.")
         # Data source: Google Sheet only (Salesforce source removed from UI)
         st.session_state["data_source"] = "gsheet"
@@ -3853,7 +3878,6 @@ def main():
         return
 
     if section == "Admin / Data Health":
-        st.title("Admin / Data Health")
         st.caption("Data source health and allowed list (read-only). No manual refresh — scheduler runs every 15 minutes.")
         st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
         st.subheader("Superset persisted store")
