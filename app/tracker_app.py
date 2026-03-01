@@ -2434,8 +2434,13 @@ def main():
                 current_user = _verified_email
                 st.sidebar.caption(f"Signed in as **{_verified_email}**")
             else:
-                st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin", help="Developer session. Name shown on comments.")
+                # Developer session: only show name input when no name yet (e.g. after session expired)
                 current_user = (st.session_state.get("user_display_name") or "Developer").strip()
+                if current_user and current_user != "Developer":
+                    st.sidebar.caption(f"Signed in as **{current_user}**")
+                else:
+                    st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin", help="Developer session. Name shown on comments.")
+                    current_user = (st.session_state.get("user_display_name") or "Developer").strip()
                 st.sidebar.caption("Developer session (key unlocked)")
     else:
         # Allowlist off: allow typed email for display only (not for access control)
