@@ -2295,6 +2295,10 @@ def main():
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
         [data-testid="stMetricLabel"] { color: #94A3B8 !important; }
         div[data-testid="stVerticalBlock"] > div { color: #E2E8F0; }
+        /* Section nav tabs (dark) */
+        #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] { background: #1E293B !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] { color: #94A3B8 !important; }
+        #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) { background: #0F766E !important; color: white !important; }
         </style>
         """, unsafe_allow_html=True)
     else:
@@ -2328,9 +2332,39 @@ def main():
         """, unsafe_allow_html=True)
 
     # Hide dataframe toolbar (eye, download, search, fullscreen) app-wide
+    # Section nav: style horizontal radio as tabs (no dots, tab-bar look)
     st.markdown("""
     <style>
     [data-testid="stElementToolbar"] { display: none !important; }
+    /* Section nav as tabs: hide radio circles, style like tab bar */
+    #section-nav-tabs ~ * div.row-widget.stRadio div[role="radiogroup"] {
+        display: flex !important;
+        flex-wrap: wrap;
+        gap: 4px !important;
+        background: #F1F5F9;
+        padding: 6px 8px !important;
+        border-radius: 10px;
+        overflow-x: auto;
+    }
+    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] {
+        margin: 0 !important;
+        padding: 10px 18px !important;
+        border-radius: 8px !important;
+        font-weight: 500 !important;
+        color: #475569 !important;
+        background: transparent !important;
+        border: none !important;
+    }
+    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"]:has(input:checked) {
+        background: #0F766E !important;
+        color: white !important;
+    }
+    #section-nav-tabs ~ * div.row-widget.stRadio label[data-baseweb="radio"] span {
+        color: inherit !important;
+    }
+    #section-nav-tabs ~ * div.row-widget.stRadio input {
+        display: none !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2525,7 +2559,7 @@ def main():
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
 
     # Website-style layout: section navigation as top tabs in main area (not sidebar)
-    st.markdown("<br>", unsafe_allow_html=True)  # small spacing below header
+    st.markdown('<div id="section-nav-tabs"></div>', unsafe_allow_html=True)
     section = st.radio(
         "Section",
         section_options,
