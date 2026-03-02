@@ -9,6 +9,7 @@ import html
 import io
 import json
 import os
+import re
 import sqlite3
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -849,6 +850,46 @@ def insert_app_discussion(author: str, message: str, parent_id: int | None = Non
             "INSERT INTO app_discussions (created_at, author, message, parent_id) VALUES (?, ?, ?, ?)",
             (now, (author or "Anonymous").strip(), (message or "").strip(), parent_id),
         )
+    _slack_notify_discussion(author, message, parent_id)
+
+
+def _get_slack_discussion_url() -> str | None:
+    """Return configured Slack channel URL for discussions (secrets or env)."""
+    try:
+        url = st.secrets.get("SLACK_DISCUSSION_CHANNEL_URL") or os.environ.get("SLACK_DISCUSSION_CHANNEL_URL", "")
+    except Exception:
+        url = os.environ.get("SLACK_DISCUSSION_CHANNEL_URL", "")
+    return (url or "").strip() or None
+
+
+def _slack_notify_discussion(author: str, message: str, parent_id: int | None) -> None:
+    """If SLACK_WEBHOOK_URL is set, post a summary of the new discussion to Slack."""
+    try:
+        webhook = st.secrets.get("SLACK_WEBHOOK_URL") or os.environ.get("SLACK_WEBHOOK_URL", "")
+    except Exception:
+        webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
+    if not (webhook or "").strip():
+        return
+    try:
+        snippet = (message or "").strip()[:200]
+        if len((message or "").strip()) > 200:
+            snippet += "…"
+        label = "Reply" if parent_id else "New discussion"
+        text = f"*{label}* from *{author or 'Anonymous'}*:\n{snippet}"
+        payload = {"text": text}
+        resp = requests.post((webhook or "").strip(), json=payload, timeout=5)
+        if resp.status_code != 200:
+            pass  # don't fail the app
+    except Exception:
+        pass
+
+
+def _render_discussion_message(msg: str) -> str:
+    """Render message with @mentions highlighted (bold). Use in st.markdown."""
+    if not msg:
+        return ""
+    # @username or @first.last — make them bold for visibility
+    return re.sub(r"@([a-zA-Z0-9_.-]+)", r"**@\1**", msg)
 
 
 def list_app_discussions(limit: int = 200) -> list[dict]:
@@ -3692,7 +3733,10 @@ def main():
 
     # Discussions: app-wide comments and questions (with replies)
     if section == "Discussions":
-        st.caption("Ask questions or add comments. You can reply to any post.")
+        st.caption("Ask questions or add comments. You can reply to any post and use **@name** to mention someone.")
+        slack_url = _get_slack_discussion_url()
+        if slack_url:
+            st.markdown(f"Continue the conversation in Slack: [Open channel]({slack_url})")
         current_name = (st.session_state.get("user_display_name") or "").strip()
         all_posts = list_app_discussions(200)
         roots = [p for p in all_posts if p.get("parent_id") is None]
@@ -3715,7 +3759,7 @@ def main():
                     snippet = (root.get("message") or "")[:60] + ("…" if len(root.get("message") or "") > 60 else "")
                     st.caption(f"Replying to: **{snippet}**")
                     reply_author = st.text_input("Your name", value=current_name, key="reply_author", placeholder="e.g. Jane")
-                    reply_message = st.text_area("Your reply", key="reply_message", placeholder="Type your reply…", height=80)
+                    reply_message = st.text_area("Your reply", key="reply_message", placeholder="Type your reply… Use @name to mention someone.", height=80)
                     col_r1, col_r2 = st.columns(2)
                     with col_r1:
                         post_clicked = st.form_submit_button("Post reply")
@@ -3736,7 +3780,7 @@ def main():
 
         with st.form("discussion_form", clear_on_submit=True):
             author = st.text_input("Your name", value=current_name, key="discussion_author", placeholder="e.g. Jane")
-            message = st.text_area("Comment or question", key="discussion_message", placeholder="Type your message…", height=120)
+            message = st.text_area("Comment or question", key="discussion_message", placeholder="Type your message… Use @name to mention someone (e.g. @Jane).", height=120)
             if st.form_submit_button("Post"):
                 if not (message or "").strip():
                     st.error("Please enter a message.")
@@ -3754,7 +3798,7 @@ def main():
                     st.markdown(
                         f"**{p.get('author') or 'Anonymous'}** · {p.get('created_at', '')[:19].replace('T', ' ')}"
                     )
-                    st.markdown(p.get("message", ""))
+                    st.markdown(_render_discussion_message(p.get("message", "")))
                     if st.button("Reply", key=f"reply_btn_{p.get('id')}"):
                         st.session_state["discussion_reply_to_id"] = p.get("id")
                         _rerun()
@@ -3762,7 +3806,7 @@ def main():
                         st.markdown(
                             f"↳ **{r.get('author') or 'Anonymous'}** · {r.get('created_at', '')[:19].replace('T', ' ')}"
                         )
-                        st.markdown(r.get("message", ""))
+                        st.markdown(_render_discussion_message(r.get("message", "")))
                     st.divider()
         return
 
