@@ -2487,10 +2487,6 @@ def main():
                 st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
 
-    # When signed in, hide the dataframe toolbar (Fullscreen, zoom, etc.) so the UI is cleaner
-    if current_user:
-        st.markdown("""<style>[data-testid="stElementToolbar"] { display: none !important; }</style>""", unsafe_allow_html=True)
-
     # Persist session to URL params so refresh keeps user for SESSION_PERSISTENCE_HOURS
     if current_user:
         _persist_session_to_params(current_user)
