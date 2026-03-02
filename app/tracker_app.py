@@ -862,8 +862,31 @@ def _get_slack_discussion_url() -> str | None:
     return (url or "").strip() or None
 
 
+def _get_slack_mention_ids() -> dict[str, str]:
+    """Return map of mention key (lowercase name/email) -> Slack user ID (U0xxx) for @mention notifications."""
+    out: dict[str, str] = {}
+    try:
+        table = st.secrets.get("slack_mention_ids")
+        if isinstance(table, dict):
+            for k, v in table.items():
+                if k and v and isinstance(v, str) and v.strip().startswith("U"):
+                    out[str(k).strip().lower()] = v.strip()
+    except Exception:
+        pass
+    env_val = os.environ.get("SLACK_MENTION_IDS", "")
+    if env_val:
+        for part in str(env_val).split(","):
+            part = part.strip()
+            if ":" in part:
+                key, val = part.split(":", 1)
+                key, val = key.strip().lower(), val.strip()
+                if key and val and val.startswith("U"):
+                    out[key] = val
+    return out
+
+
 def _slack_notify_discussion(author: str, message: str, parent_id: int | None) -> None:
-    """If SLACK_WEBHOOK_URL is set, post a summary of the new discussion to Slack."""
+    """If SLACK_WEBHOOK_URL is set, post to Slack. @mentions become <@ID> so Slack notifies those users."""
     try:
         webhook = st.secrets.get("SLACK_WEBHOOK_URL") or os.environ.get("SLACK_WEBHOOK_URL", "")
     except Exception:
@@ -871,15 +894,23 @@ def _slack_notify_discussion(author: str, message: str, parent_id: int | None) -
     if not (webhook or "").strip():
         return
     try:
-        snippet = (message or "").strip()[:200]
-        if len((message or "").strip()) > 200:
+        snippet = (message or "").strip()[:500]
+        if len((message or "").strip()) > 500:
             snippet += "…"
+        mention_ids = _get_slack_mention_ids()
+        if mention_ids:
+            def _repl(match):
+                key = (match.group(1) or "").strip().lower()
+                if key and key in mention_ids:
+                    return f"<@{mention_ids[key]}>"
+                return match.group(0)
+            snippet = re.sub(r"@([a-zA-Z0-9_.-]+)", _repl, snippet)
         label = "Reply" if parent_id else "New discussion"
         text = f"*{label}* from *{author or 'Anonymous'}*:\n{snippet}"
         payload = {"text": text}
         resp = requests.post((webhook or "").strip(), json=payload, timeout=5)
         if resp.status_code != 200:
-            pass  # don't fail the app
+            pass
     except Exception:
         pass
 
