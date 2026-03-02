@@ -886,12 +886,16 @@ def _get_slack_mention_ids() -> dict[str, str]:
 
 
 def _slack_notify_discussion(author: str, message: str, parent_id: int | None) -> None:
-    """If SLACK_WEBHOOK_URL is set, post to Slack. @mentions become <@ID> so Slack notifies those users."""
+    """Post to Slack: prefer Slack app (SLACK_BOT_TOKEN + SLACK_CHANNEL_ID), else Incoming Webhook. @mentions become <@ID>."""
     try:
-        webhook = st.secrets.get("SLACK_WEBHOOK_URL") or os.environ.get("SLACK_WEBHOOK_URL", "")
+        bot_token = (st.secrets.get("SLACK_BOT_TOKEN") or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
+        channel_id = (st.secrets.get("SLACK_CHANNEL_ID") or os.environ.get("SLACK_CHANNEL_ID", "")).strip()
+        webhook = (st.secrets.get("SLACK_WEBHOOK_URL") or os.environ.get("SLACK_WEBHOOK_URL", "")).strip()
     except Exception:
-        webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
-    if not (webhook or "").strip():
+        bot_token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+        channel_id = os.environ.get("SLACK_CHANNEL_ID", "").strip()
+        webhook = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+    if not bot_token and not webhook:
         return
     try:
         snippet = (message or "").strip()[:500]
@@ -907,10 +911,19 @@ def _slack_notify_discussion(author: str, message: str, parent_id: int | None) -
             snippet = re.sub(r"@([a-zA-Z0-9_.-]+)", _repl, snippet)
         label = "Reply" if parent_id else "New discussion"
         text = f"*{label}* from *{author or 'Anonymous'}*:\n{snippet}"
-        payload = {"text": text}
-        resp = requests.post((webhook or "").strip(), json=payload, timeout=5)
-        if resp.status_code != 200:
-            pass
+        if bot_token and channel_id:
+            resp = requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {bot_token}", "Content-Type": "application/json"},
+                json={"channel": channel_id, "text": text},
+                timeout=10,
+            )
+            if resp.status_code != 200 or not (resp.json() or {}).get("ok"):
+                pass
+        elif webhook:
+            resp = requests.post(webhook, json={"text": text}, timeout=5)
+            if resp.status_code != 200:
+                pass
     except Exception:
         pass
 
