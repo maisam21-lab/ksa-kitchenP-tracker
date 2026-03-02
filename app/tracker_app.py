@@ -2200,7 +2200,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             low = v.lower()
             if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                 return [f"background-color: {_no_status_bg}; color: white"] * len(row)
-            # Normalize: exact match or "Vacant" variants (e.g. Vacant with opportunity) → green
+            # Normalize to match GSheet status labels (case-insensitive)
             key = None
             if low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low):
                 key = "Vacant"
@@ -2208,6 +2208,11 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             elif low == "occupied": key = "Occupied"
             elif low == "sold": key = "Sold"
             bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
+            # Vacant but has opportunity → red like Occupied
+            if key == "Vacant" and bg:
+                has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                if has_opp:
+                    bg = _status_colors.get("Occupied", bg)
             style = f"background-color: {bg}" if bg else ""
             return [style] * len(row)
         styled = df_display.style.apply(_row_bg, axis=1)
@@ -2706,9 +2711,13 @@ def main():
                             low = v.lower()
                             if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                 return [f"background-color: {_ns}; color: white"] * len(row)
-                            # Vacant or "Vacant with opportunity" etc. → green
+                            # Vacant or "Vacant with opportunity" etc. → green; Vacant + has opportunity → red
                             key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                             bg = _sc.get(key, "") if key else _sc.get(v, "")
+                            if key == "Vacant" and bg:
+                                has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                                if has_opp:
+                                    bg = _sc.get("Occupied", bg)
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
                     st.dataframe(df_combined, use_container_width=True, hide_index=True)
@@ -2873,9 +2882,13 @@ def main():
                                         low = v.lower()
                                         if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                             return [f"background-color: {_ns}; color: white"] * len(row)
-                                        # Vacant or "Vacant with opportunity" etc. → green
+                                        # Vacant or "Vacant with opportunity" etc. → green; Vacant + has opportunity → red
                                         key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                         bg = _sc.get(key, "") if key else _sc.get(v, "")
+                                        if key == "Vacant" and bg:
+                                            has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                                            if has_opp:
+                                                bg = _sc.get("Occupied", bg)
                                         return [f"background-color: {bg}" if bg else ""] * len(row)
                                     display_f = display_f.style.apply(_row_bg_f, axis=1)
                                 st.dataframe(display_f, use_container_width=True, hide_index=True)
@@ -2908,9 +2921,13 @@ def main():
                         low = v.lower()
                         if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                             return [f"background-color: {_ns}; color: white"] * len(row)
-                        # Vacant or "Vacant with opportunity" etc. → green
+                        # Vacant or "Vacant with opportunity" etc. → green; Vacant + has opportunity → red
                         key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                         bg = _sc.get(key, "") if key else _sc.get(v, "")
+                        if key == "Vacant" and bg:
+                            has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                            if has_opp:
+                                bg = _sc.get("Occupied", bg)
                         return [f"background-color: {bg}" if bg else ""] * len(row)
                     display_df = display_df.style.apply(_row_bg_m, axis=1)
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
@@ -3434,6 +3451,10 @@ def main():
                                         return [f"background-color: {_no_status_bg}; color: white"] * len(row)
                                     key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                     bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
+                                    if key == "Vacant" and bg:
+                                        has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                                        if has_opp:
+                                            bg = _status_colors.get("Occupied", bg)
                                     return [f"background-color: {bg}" if bg else ""] * len(row)
                                 df_inv = df_inv.style.apply(_inv_row_bg, axis=1)
                             st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
