@@ -84,6 +84,28 @@ def _logo_path():
             return p
     return None
 
+
+def _row_has_opportunity_name(row) -> bool:
+    """True if row has any Opportunity Name–style field filled (for coloring: Vacant + opportunity → red)."""
+    if row is None:
+        return False
+    # Same keys as Dashboard _opportunity_name (SF / GSheet)
+    for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c", "Opportunity name", "opportunity_name", "opportunity name"):
+        v = row.get(k) if hasattr(row, "get") else (row[k] if k in (row.index if hasattr(row, "index") else []) else None)
+        if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
+            return True
+    # Fallback: any key containing "opportunity" with non-empty value
+    try:
+        for k in (row.keys() if hasattr(row, "keys") else (row.index if hasattr(row, "index") else [])):
+            if "opportunity" not in str(k).lower():
+                continue
+            v = row.get(k) if hasattr(row, "get") else row[k]
+            if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
+                return True
+    except Exception:
+        pass
+    return False
+
 # Standardized column order for stakeholder export (matches ETL output)
 EXPORT_COLUMNS = [
     "record_id", "report_date", "site_id", "site_name", "region",
@@ -2208,9 +2230,12 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             elif low == "occupied": key = "Occupied"
             elif low == "sold": key = "Sold"
             bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
-            # Vacant but has opportunity → red like Occupied
+            # Vacant but has opportunity name filled → red like Occupied
             if key == "Vacant" and bg:
-                has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                def _val_filled(c):
+                    s = (str(row.get(c, "") or "")).strip()
+                    return bool(s and s.lower() not in ("nan", "none"))
+                has_opp = any(_val_filled(c) for c in row.index if "opportunity" in str(c).lower())
                 if has_opp:
                     bg = _status_colors.get("Occupied", bg)
             style = f"background-color: {bg}" if bg else ""
@@ -2698,6 +2723,7 @@ def main():
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
                     st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s).")
                     df_combined = pd.DataFrame(rows_shown)
+                    df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
                     status_col_combined = None
                     for c in df_combined.columns:
                         if str(c).strip().lower() in ("status", "status__c"):
@@ -2711,16 +2737,16 @@ def main():
                             low = v.lower()
                             if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                 return [f"background-color: {_ns}; color: white"] * len(row)
-                            # Vacant or "Vacant with opportunity" etc. → green; Vacant + has opportunity → red
+                            # Vacant or "Vacant with opportunity" etc. → green; Vacant + opportunity name filled → red
                             key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                             bg = _sc.get(key, "") if key else _sc.get(v, "")
                             if key == "Vacant" and bg:
-                                has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                                has_opp = row.get("_has_opportunity", False)
                                 if has_opp:
                                     bg = _sc.get("Occupied", bg)
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
-                    st.dataframe(df_combined, use_container_width=True, hide_index=True)
+                    st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None})
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -2873,6 +2899,8 @@ def main():
                                 cols_show_f = all_cols_f
                             if HAS_EXCEL:
                                 display_f = pd.DataFrame(rows_f)[cols_show_f] if cols_show_f else pd.DataFrame(rows_f)
+                                display_f = display_f.copy()
+                                display_f["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_f]
                                 _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                                 _ns = "#B22222"
                                 status_col_f = next((c for c in display_f.columns if str(c).strip().lower() in ("status", "status__c")), None)
@@ -2882,16 +2910,16 @@ def main():
                                         low = v.lower()
                                         if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                             return [f"background-color: {_ns}; color: white"] * len(row)
-                                        # Vacant or "Vacant with opportunity" etc. → green; Vacant + has opportunity → red
+                                        # Vacant or "Vacant with opportunity" etc. → green; Vacant + opportunity name filled → red
                                         key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                                         if key == "Vacant" and bg:
-                                            has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                                            has_opp = row.get("_has_opportunity", False)
                                             if has_opp:
                                                 bg = _sc.get("Occupied", bg)
                                         return [f"background-color: {bg}" if bg else ""] * len(row)
                                     display_f = display_f.style.apply(_row_bg_f, axis=1)
-                                st.dataframe(display_f, use_container_width=True, hide_index=True)
+                                st.dataframe(display_f, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None})
                             else:
                                 for r in rows_f[:50]:
                                     st.json(r)
@@ -2912,6 +2940,8 @@ def main():
                     cols_to_show = all_cols
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_filtered)[cols_to_show] if cols_to_show else pd.DataFrame(rows_filtered)
+                display_df = display_df.copy()
+                display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_filtered]
                 _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                 _ns = "#B22222"
                 status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
@@ -2921,16 +2951,16 @@ def main():
                         low = v.lower()
                         if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                             return [f"background-color: {_ns}; color: white"] * len(row)
-                        # Vacant or "Vacant with opportunity" etc. → green; Vacant + has opportunity → red
+                        # Vacant or "Vacant with opportunity" etc. → green; Vacant + opportunity name filled → red
                         key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                         bg = _sc.get(key, "") if key else _sc.get(v, "")
                         if key == "Vacant" and bg:
-                            has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                            has_opp = row.get("_has_opportunity", False)
                             if has_opp:
                                 bg = _sc.get("Occupied", bg)
                         return [f"background-color: {bg}" if bg else ""] * len(row)
                     display_df = display_df.style.apply(_row_bg_m, axis=1)
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None})
             elif rows_filtered and not use_facility_tabs:
                 for r in rows_filtered[:100]:
                     st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
@@ -3434,6 +3464,7 @@ def main():
                                     "Floor (MRR)": floor_val,
                                     "List (MRR)": list_val,
                                     "Facility": _facility(r) or "—",
+                                    "_has_opportunity": _row_has_opportunity_name(r),
                                 }
                                 if has_go_live:
                                     row_inv["Is Live"] = "Yes" if r.get("Is Live") is True else ("No" if r.get("Is Live") is False else "—")
@@ -3452,12 +3483,12 @@ def main():
                                     key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                                     bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
                                     if key == "Vacant" and bg:
-                                        has_opp = any(str(row.get(c, "") or "").strip() for c in row.index if "opportunity" in str(c).lower())
+                                        has_opp = row.get("_has_opportunity", False)
                                         if has_opp:
                                             bg = _status_colors.get("Occupied", bg)
                                     return [f"background-color: {bg}" if bg else ""] * len(row)
                                 df_inv = df_inv.style.apply(_inv_row_bg, axis=1)
-                            st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f")})
+                            st.dataframe(df_inv, use_container_width=True, hide_index=True, column_config={"Floor (MRR)": st.column_config.NumberColumn(format="%.0f"), "List (MRR)": st.column_config.NumberColumn(format="%.0f"), "_has_opportunity": None})
                         else:
                             st.caption("No kitchens match the filters.")
                     # Bar chart and focus list
