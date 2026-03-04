@@ -2547,12 +2547,7 @@ def main():
     else:
         st.sidebar.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
     st.sidebar.markdown("**KSA Kitchens Tracker**")
-    st.sidebar.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
-    # Log this session once (for analytics); show record count — more meaningful than "traffic"
-    if not st.session_state.get("traffic_logged"):
-        log_traffic()
-        st.session_state["traffic_logged"] = True
-    # Data pulse: aligned with last GSheet refresh (scheduler runs every 15 min)
+    # Data pulse at top: aligned with last GSheet refresh (scheduler runs every 15 min)
     last_gsheet = get_last_refresh("gsheet")
     if last_gsheet:
         try:
@@ -2564,6 +2559,11 @@ def main():
     else:
         pulse_display = "—"
     st.sidebar.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
+    st.sidebar.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
+    # Log this session once (for analytics); show record count — more meaningful than "traffic"
+    if not st.session_state.get("traffic_logged"):
+        log_traffic()
+        st.session_state["traffic_logged"] = True
 
     # Restore session from URL params so user is remembered across refresh for SESSION_PERSISTENCE_HOURS
     if not _verified_email:
