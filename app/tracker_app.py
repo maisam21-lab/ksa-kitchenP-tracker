@@ -2663,11 +2663,11 @@ def main():
     /* Left: logo (rectangular area) + divider + title + status + updated */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stImage"] img,
     .header-top-bar + div [data-testid="column"]:first-child img {
-        max-height: 40px !important; max-width: 160px !important; width: auto !important; height: auto !important;
-        object-fit: contain !important; object-position: left center !important; display: block !important; margin: 0 !important;
+        max-height: 52px !important; max-width: 100px !important; width: auto !important; height: auto !important;
+        object-fit: contain !important; object-position: center center !important; display: block !important; margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
-        min-width: 160px !important; padding-left: 8px !important;
+        min-width: 100px !important; padding-left: 8px !important;
     }
     .header-left-inner { display: flex !important; align-items: center !important; gap: 16px !important; flex-wrap: nowrap !important; }
     .header-brand-kp { color: #374151 !important; font-size: 0.9375rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
