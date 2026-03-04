@@ -2560,37 +2560,53 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* BI-style single header bar */
+    /* BI-style single header bar — SaaS (Stripe/Linear) style */
     .bi-header-bar + div {
-        min-height: 56px !important;
+        min-height: 64px !important;
+        height: 64px !important;
         display: flex !important;
         align-items: center !important;
-        background: #f8fafc !important;
-        border-bottom: 1px solid #e2e8f0 !important;
-        padding: 0 1.25rem !important;
+        background: rgba(255,255,255,0.85) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        border-bottom: 1px solid #e5e7eb !important;
+        padding: 0 1.5rem !important;
         margin: 0 -1rem 0.75rem -1rem !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
     }
     .bi-header-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
-    .bi-header-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 4px !important; margin: 0 !important; min-height: 0 !important; }
-    .bi-header-bar + div [data-testid="column"] { padding: 0 8px !important; }
+    .bi-header-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 6px !important; margin: 0 !important; min-height: 0 !important; }
+    .bi-header-bar + div [data-testid="column"] { padding: 0 6px !important; }
     .bi-header-bar + div img { margin: 0 !important; }
     .bi-header-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
-    .bi-header-bar + div .stMarkdown p { margin: 0 !important; font-size: 0.9rem !important; }
+    .bi-header-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
     .bi-header-bar + div [data-testid="stMetric"] { padding: 0 !important; }
     .bi-header-bar + div [data-testid="stMetric"] > div { padding: 0 !important; }
     .bi-header-bar + div [data-testid="stCheckbox"] { padding: 0 !important; }
-    /* Header logo: crisp, consistent size, no stretch */
+    /* Brand column: title hierarchy */
     .bi-header-bar + div [data-testid="column"]:first-child img {
-        max-height: 42px !important;
-        width: auto !important;
-        height: auto !important;
-        object-fit: contain !important;
-        display: block !important;
-        margin: 0 !important;
+        max-height: 36px !important; width: auto !important; height: auto !important;
+        object-fit: contain !important; display: block !important; margin: 0 0 2px 0 !important;
     }
-    .bi-header-bar + div [data-testid="column"]:first-child .stMarkdown p { line-height: 1.25 !important; }
-    .header-brand-text { color: #0f766e !important; font-size: 1rem !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
+    .header-brand-muted { color: #6b7280 !important; font-size: 0.875rem !important; font-weight: 400 !important; margin: 0 !important; line-height: 1.3 !important; }
+    .header-brand-title { color: #111827 !important; font-size: 1.125rem !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.3 !important; }
+    /* Primary Sync button */
+    .bi-header-bar + div [data-testid="stVerticalBlock"] button[kind="primary"],
+    .bi-header-bar + div a[data-testid="stButton"] + div button { border-radius: 8px !important; padding: 8px 16px !important; font-weight: 500 !important; box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important; }
+    /* Status pill (rendered via markdown) */
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 8px !important; padding: 6px 14px !important; border-radius: 9999px !important; font-size: 0.8125rem !important; font-weight: 500 !important; }
+    .header-status-pill.live { background: #f0fdf4 !important; color: #15803d !important; }
+    .header-status-pill.delayed { background: #fefce8 !important; color: #a16207 !important; }
+    .header-status-pill.stale { background: #fef2f2 !important; color: #b91c1c !important; }
+    /* User avatar 36px + hover */
+    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; margin-right: 10px !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; }
+    .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
+    .header-user-email { font-size: 0.8125rem !important; color: #374151 !important; }
+    /* Sync primary button: rounded, padding, shadow */
+    .bi-header-bar + div [data-testid="column"]:nth-child(3) [data-testid="stVerticalBlock"] > div:first-child button {
+        border-radius: 8px !important; padding: 8px 16px !important; font-weight: 500 !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2711,8 +2727,9 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single BI-style header bar: left (brand) | center (data status) | right (refresh, developer, dark, user)
+    # Single BI-style header bar: left (brand) | center (status pill) | right (sync, dev, dark, user)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
+    status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     st.markdown('<div class="bi-header-bar"></div>', unsafe_allow_html=True)
     with st.container():
         h1, h2, h3 = st.columns([1, 1, 1])
@@ -2721,29 +2738,28 @@ def main():
             b1, b2 = st.columns([1, 2])
             with b1:
                 if logo_path:
-                    st.image(str(logo_path), width=120)
-                else:
-                    st.markdown('<span class="header-brand-text">KitchenPark</span>', unsafe_allow_html=True)
+                    st.image(str(logo_path), width=100)
             with b2:
-                st.markdown("**KSA Kitchens Tracker**")
+                st.markdown('<p class="header-brand-muted">KitchenPark</p>', unsafe_allow_html=True)
+                st.markdown('<p class="header-brand-title">KSA Kitchens Tracker</p>', unsafe_allow_html=True)
         with h2:
+            dot_emoji = "🟢" if status_class == "live" else ("🟡" if status_class == "delayed" else "🔴")
             st.markdown(
-                f'<p style="margin:0; font-size:0.9rem; color:#64748b;">'
-                f'<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:{status_color}; margin-right:6px; vertical-align:middle;"></span>'
-                f'<strong style="color:#334155;">{status_label}</strong> &nbsp;|&nbsp; Last sync: {status_ts}</p>',
+                f'<span class="header-status-pill {status_class}">'
+                f'{dot_emoji} {status_label.upper().replace(" ", " ")} • {status_ts}</span>',
                 unsafe_allow_html=True,
             )
         with h3:
             rr = st.columns([1, 1, 1, 2])
             with rr[0]:
-                if st.button("↻ Sync", key="header_sync", help="Refresh data from Google Sheet"):
+                if st.button("↻ Sync Data", key="header_sync", type="primary", help="Refresh data from Google Sheet"):
                     ok, _ = _refresh_from_online_sheet()
                     if ok:
                         set_last_refresh("gsheet")
                         _rerun()
             with rr[1]:
                 if _developer_section_visible(current_user):
-                    with st.expander("Developer", expanded=False):
+                    with st.expander("⚙ Dev", expanded=False):
                         if is_developer:
                             st.caption("Unlocked for this session.")
                             if st.button("Lock", key="dev_lock"):
@@ -2761,9 +2777,11 @@ def main():
                 st.checkbox("Dark mode", key="dark_mode", help="Dark theme")
             with rr[3]:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
-                short_email = (current_user or "")[:28] + ("…" if len(current_user or "") > 28 else "")
+                short_email = (current_user or "")[:32] + ("…" if len(current_user or "") > 32 else "")
                 st.markdown(
-                    f'<p style="margin:0; font-size:0.85rem;"><span style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#0f766e; color:white; font-weight:600; margin-right:8px;">{initials}</span>{short_email}</p>',
+                    f'<p style="margin:0; display:flex; align-items:center;">'
+                    f'<span class="header-user-avatar" title="{current_user or ""}">{initials}</span>'
+                    f'<span class="header-user-email">{short_email}</span></p>',
                     unsafe_allow_html=True,
                 )
 
