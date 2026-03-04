@@ -43,5 +43,20 @@
     "Activation Fee": "400",
     "Floor": "1",
     "Account Country": "Kuwait"
+  },
+  {
+    "Account Name": "Test Account Bahrain",
+    "Type": "Standard",
+    "Category": "Full",
+    "Kitchen Number": "KN-004",
+    "Kitchen Number Name": "Kitchen 4",
+    "Status": "Active",
+    "Kitchen Size (Sq. Meters)": "28",
+    "Hood Size": "3",
+    "Floor Price": "11000",
+    "List Price": "13200",
+    "Activation Fee": "550",
+    "Floor": "1",
+    "Account Country": "Bahrain"
   }
 ]

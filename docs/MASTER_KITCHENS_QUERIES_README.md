@@ -27,9 +27,18 @@ The long examples you shared (kitchen_number_raw with `data_json ->> 'Id'`, acco
 
 The raw-json Master Kitchens query in `MASTER_KITCHENS_RAW_JSON_EXAMPLE.sql` follows this style and applies the same KSA filters (Bahrain/Saudi Arabia, Facility, K%, not Deprecated, no SA - JED, churn blank, stage Approved/Closed Won, type ≠ CloudRetail).
 
+## 4. Kitchen Live vs Not live (go-live from BigQuery)
+
+**File:** `BIGQUERY_KITCHEN_GO_LIVE.sql`
+
+- **Purpose:** The tracker sheet has no go-live column. This query returns one row per kitchen with `kitchen_number`, `account_name`, `go_live_date`, and `is_live` so the app can distinguish live vs not live kitchens.
+- **Use when:** You want the Dashboard to filter by "Live" / "Not live" and show Is Live / Go Live Date. Configure Streamlit secrets `bigquery_go_live.project_id` and `bigquery_go_live.query` (or `dataset_id` + `table_id`). See the SQL file for templates (raw JSON vs flattened staging) and replace `PROJECT_ID`, `DATASET_ID`, and the Account go-live field name (e.g. `Go_Live_Date__c`).
+
 ## Summary
 
 | Source layer        | File to use                          |
 |---------------------|--------------------------------------|
 | BQ staging (css-operations) | `BIGQUERY_MASTER_KITCHENS.sql`       |
 | Raw JSON (salesforce_raw.*) | `MASTER_KITCHENS_RAW_JSON_EXAMPLE.sql` |
+| Go-live / is_live (any BQ) | `BIGQUERY_KITCHEN_GO_LIVE.sql`       |
+| sales schema (sf_opportunities) | `BIGQUERY_SALES_EXAMPLES.sql` (churn, Listco/CSS, facility_country) |

@@ -90,8 +90,8 @@ def _row_has_opportunity_name(row) -> bool:
     """True if row has any Opportunity Name–style field filled (for coloring: Vacant + opportunity → red)."""
     if row is None:
         return False
-    # Same keys as Dashboard _opportunity_name (SF / GSheet)
-    for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c", "Opportunity name", "opportunity_name", "opportunity name"):
+    # Same keys as Dashboard _opportunity_name (SF / GSheet / BigQuery)
+    for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c", "Opportunity name", "opportunity_name", "opportunity name", "Opportunity_Name"):
         v = row.get(k) if hasattr(row, "get") else (row[k] if k in (row.index if hasattr(row, "index") else []) else None)
         if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
             return True
@@ -1703,6 +1703,76 @@ def _fetch_bigquery_sf_churn_data() -> list[dict] | None:
         return None
 
 
+def _fetch_bigquery_master_kitchens() -> list[dict] | None:
+    """Fetch Kitchen Master Data from BigQuery when configured.
+    Expects st.secrets.bigquery_master_kitchens with project_id and query (or query_file).
+    query_file: path relative to repo root (e.g. docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql); file may contain comments and only the last SELECT is used.
+    Returns list of dicts (one per row, keys = column names from SELECT) or None if not configured or error.
+    """
+    try:
+        cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
+        if not cfg or not isinstance(cfg, dict):
+            return None
+        project_id = (cfg.get("project_id") or "").strip()
+        query = (cfg.get("query") or "").strip()
+        query_file = (cfg.get("query_file") or "").strip()
+        if not project_id:
+            return None
+        if not query and query_file:
+            base = Path(__file__).resolve().parent.parent
+            path = (base / query_file) if not Path(query_file).is_absolute() else Path(query_file)
+            if path.exists():
+                raw = path.read_text(encoding="utf-8")
+                for part in raw.split(";"):
+                    part = part.strip()
+                    if part.upper().startswith("SELECT"):
+                        query = part
+                        break
+            if not query:
+                return None
+        if not query:
+            return None
+        creds_path = _get_google_credentials_path()
+        try:
+            from google.cloud import bigquery
+            from google.oauth2 import service_account
+        except ImportError:
+            return None
+        if creds_path == "__FROM_SECRETS__":
+            info = dict(getattr(st, "secrets", {}).get("gsheet_service_account", {}))
+            if not info:
+                client = bigquery.Client(project=project_id)
+            else:
+                info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+                info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
+                creds = service_account.Credentials.from_service_account_info(
+                    info, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+                )
+                client = bigquery.Client(project=project_id, credentials=creds)
+        elif creds_path and Path(creds_path).exists():
+            creds = service_account.Credentials.from_service_account_file(
+                creds_path, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+            )
+            client = bigquery.Client(project=project_id, credentials=creds)
+        else:
+            client = bigquery.Client(project=project_id)
+        job = client.query(query)
+        rows = list(job.result())
+        out = []
+        for row in rows:
+            d = dict(row)
+            for k, v in list(d.items()):
+                if hasattr(v, "strftime"):
+                    try:
+                        d[k] = v.strftime("%Y-%m-%d")
+                    except Exception:
+                        d[k] = v.isoformat() if hasattr(v, "isoformat") else str(v)
+            out.append(d)
+        return out if out else None
+    except Exception:
+        return None
+
+
 def _merge_go_live_into_kitchens(rows_kitchens: list[dict], bq_rows: list[dict]) -> list[dict]:
     """Merge BigQuery go-live result into kitchen rows. Adds 'Is Live' and 'Go Live Date' to each row when matched."""
     def _kitchen_key(r):
@@ -2705,76 +2775,118 @@ def main():
             source_options = []
             is_other_sheet = False
         else:
-            # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
-            last_refresh = get_last_refresh("gsheet")
-            # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
+            # BigQuery Master Kitchens: cache in session_state; refresh every 3 minutes
             import time
+            _bq_cache_key = "bq_master_kitchens_rows"
+            _bq_ts_key = "bq_master_kitchens_fetched_at"
+            _bq_refresh_interval_sec = 180  # 3 minutes
             now_sec = time.time()
-            last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
-            if _gsheet_refresh_is_stale(15) and (now_sec - last_run) >= 900:  # 15 min cooldown
-                st.session_state["gsheet_auto_refresh_last_run"] = now_sec
-                ok, msg = _refresh_from_online_sheet()
-                if ok:
-                    set_last_refresh("gsheet")
-                    st.session_state["data_source"] = "gsheet"
-                    _rerun()
+            cached_rows = st.session_state.get(_bq_cache_key)
+            fetched_at = st.session_state.get(_bq_ts_key) or 0
+            if cached_rows is not None and (now_sec - fetched_at) < _bq_refresh_interval_sec:
+                bq_rows = cached_rows
+            else:
+                bq_rows = _fetch_bigquery_master_kitchens()
+                if bq_rows is not None:
+                    st.session_state[_bq_cache_key] = bq_rows
+                    st.session_state[_bq_ts_key] = now_sec
+            if bq_rows is not None:
+                _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
+                cap_col, btn_col = st.columns([3, 1])
+                with cap_col:
+                    st.caption(f"Filter kitchen details and download your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
+                with btn_col:
+                    if st.button("Refresh now", key="master_bq_refresh_now"):
+                        st.session_state[_bq_cache_key] = None
+                        st.session_state[_bq_ts_key] = 0
+                        _rerun()
+                chosen_label = "Master Kitchens (BigQuery)"
+                source_id = "bigquery"
+                rows = bq_rows
+                source_options = []
+                is_other_sheet = False
+            else:
+                # BigQuery configured but returned no data — show help
+                _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
+                if _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file")):
+                    st.info(
+                        "**BigQuery is configured but no data loaded.**\n\n"
+                        "1. Put your service account JSON key in **scripts/credentials.json**\n"
+                        "2. Restart the app from PowerShell **with** this line first:\n"
+                        "   `$env:GOOGLE_APPLICATION_CREDENTIALS = \".\\scripts\\credentials.json\"`\n"
+                        "3. Then run: `py -m streamlit run app/tracker_app.py`\n\n"
+                        "If you already did that, check the PowerShell window for error messages."
+                    )
+                # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
                 last_refresh = get_last_refresh("gsheet")
-            if _show_refresh_btn:
-                if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
+                # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
+                import time
+                now_sec = time.time()
+                last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
+                if _gsheet_refresh_is_stale(15) and (now_sec - last_run) >= 900:  # 15 min cooldown
+                    st.session_state["gsheet_auto_refresh_last_run"] = now_sec
                     ok, msg = _refresh_from_online_sheet()
                     if ok:
                         set_last_refresh("gsheet")
                         st.session_state["data_source"] = "gsheet"
-                        st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
-                    else:
-                        st.error(msg or "Refresh failed.")
-                    _rerun()
-            sources = _master_kitchens_sources()
-            source_options = [s[0] for s in sources]
-            source_ids = {s[0]: s[1] for s in sources}
-            if not source_options:
-                st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
-                rows = []
-                source_id = None
-                chosen_label = ""
-                is_other_sheet = False
-            else:
-                first_tab = source_options[0]
-                # Sheets and facilities in one filter box: Select all / Clear + multiselect for each
-                # Use a dedicated key for multiselect so we never write to the widget key after it runs (avoids StreamlitAPIException on Cloud)
-                _sel_key = "master_sheets_selection"
-                if _sel_key not in st.session_state:
-                    st.session_state[_sel_key] = [first_tab]
-                _initial_sel = st.session_state.get(_sel_key) or [first_tab]
-                if not isinstance(_initial_sel, list):
-                    _initial_sel = [_initial_sel] if _initial_sel else [first_tab]
-                source_id = source_ids.get((_initial_sel or [first_tab])[0], first_tab)
-                rows = list_generic_tab(source_id, source="gsheet")
-                cap_col, btn_col = st.columns([3, 1])
-                with cap_col:
-                    st.caption("Select **one facility** or **multiple facilities** (sheets). One selected → that facility only; multiple selected → combined table with a **Sheet** column.")
-                with btn_col:
-                    sel_col, clr_col = st.columns(2)
-                    with sel_col:
-                        if st.button("Select all", key="master_sheets_select_all"):
-                            st.session_state[_sel_key] = list(source_options)
-                            _rerun()
-                    with clr_col:
-                        if st.button("Clear", key="master_sheets_clear"):
-                            st.session_state[_sel_key] = [first_tab]
-                            _rerun()
-                chosen_labels = st.multiselect(
-                    "Facilities (sheets)",
-                    options=source_options,
-                    key=_sel_key,
-                    help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
-                )
-                if not chosen_labels:
-                    chosen_labels = [first_tab]
-                chosen_labels = [t for t in (chosen_labels or []) if t in source_options] or [first_tab]
-                source_id = source_ids.get(chosen_labels[0], first_tab)
-                rows = list_generic_tab(source_id, source="gsheet")
-                is_other_sheet = True
+                        _rerun()
+                    last_refresh = get_last_refresh("gsheet")
+                if _show_refresh_btn:
+                    if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
+                        ok, msg = _refresh_from_online_sheet()
+                        if ok:
+                            set_last_refresh("gsheet")
+                            st.session_state["data_source"] = "gsheet"
+                            st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
+                        else:
+                            st.error(msg or "Refresh failed.")
+                        _rerun()
+                sources = _master_kitchens_sources()
+                source_options = [s[0] for s in sources]
+                source_ids = {s[0]: s[1] for s in sources}
+                if not source_options:
+                    st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
+                    rows = []
+                    source_id = None
+                    chosen_label = ""
+                    is_other_sheet = False
+                else:
+                    first_tab = source_options[0]
+                    # Sheets and facilities in one filter box: Select all / Clear + multiselect for each
+                    # Use a dedicated key for multiselect so we never write to the widget key after it runs (avoids StreamlitAPIException on Cloud)
+                    _sel_key = "master_sheets_selection"
+                    if _sel_key not in st.session_state:
+                        st.session_state[_sel_key] = [first_tab]
+                    _initial_sel = st.session_state.get(_sel_key) or [first_tab]
+                    if not isinstance(_initial_sel, list):
+                        _initial_sel = [_initial_sel] if _initial_sel else [first_tab]
+                    source_id = source_ids.get((_initial_sel or [first_tab])[0], first_tab)
+                    rows = list_generic_tab(source_id, source="gsheet")
+                    cap_col, btn_col = st.columns([3, 1])
+                    with cap_col:
+                        st.caption("Select **one facility** or **multiple facilities** (sheets). One selected → that facility only; multiple selected → combined table with a **Sheet** column.")
+                    with btn_col:
+                        sel_col, clr_col = st.columns(2)
+                        with sel_col:
+                            if st.button("Select all", key="master_sheets_select_all"):
+                                st.session_state[_sel_key] = list(source_options)
+                                _rerun()
+                        with clr_col:
+                            if st.button("Clear", key="master_sheets_clear"):
+                                st.session_state[_sel_key] = [first_tab]
+                                _rerun()
+                    chosen_labels = st.multiselect(
+                        "Facilities (sheets)",
+                        options=source_options,
+                        key=_sel_key,
+                        help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
+                    )
+                    if not chosen_labels:
+                        chosen_labels = [first_tab]
+                    chosen_labels = [t for t in (chosen_labels or []) if t in source_options] or [first_tab]
+                    source_id = source_ids.get(chosen_labels[0], first_tab)
+                    rows = list_generic_tab(source_id, source="gsheet")
+                    is_other_sheet = True
         # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
         if is_other_sheet and chosen_labels:
             _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
@@ -2841,7 +2953,7 @@ def main():
                         return str(v).strip()
                 return ""
             def _row_facility(r):
-                for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+                for k in ("Account Name", "Account__r.Name", "Account_Name", "facility", "Facility"):
                     v = r.get(k)
                     if v is not None and str(v).strip():
                         return str(v).strip()
@@ -3250,8 +3362,8 @@ def main():
                     pass
             return ""
         def _opportunity_name(r):
-            # Explicit keys first (SF / report column names)
-            for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c", "Opportunity name", "opportunity_name", "opportunity name"):
+            # Explicit keys first (SF / report / BigQuery column names)
+            for k in ("Opportunity Name", "Opportunity__r.Name", "Opportunity_Name__c", "Opportunity Name__c", "Opportunity name", "opportunity_name", "opportunity name", "Opportunity_Name"):
                 v = r.get(k)
                 if v is not None and str(v).strip():
                     return str(v).strip()
