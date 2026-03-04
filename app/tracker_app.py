@@ -2555,20 +2555,19 @@ def main():
         log_traffic()
         st.session_state["traffic_logged"] = True
 
-    # Row 1: logo, title, Data pulse, Dark mode — single horizontal bar
+    # Row 1: brand (logo + title vertical), Data pulse, Dark mode
     with st.container():
-        r1 = st.columns([1, 1, 1, 1])
+        r1 = st.columns(3)
         with r1[0]:
             logo_path = _logo_path()
             if logo_path:
-                st.image(str(logo_path), use_container_width=True)
+                st.image(str(logo_path), width=140)
             else:
                 st.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
-        with r1[1]:
             st.markdown("**KSA Kitchens Tracker**")
-        with r1[2]:
+        with r1[1]:
             st.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
-        with r1[3]:
+        with r1[2]:
             st.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
 
     # Restore session from URL params so user is remembered across refresh for SESSION_PERSISTENCE_HOURS
