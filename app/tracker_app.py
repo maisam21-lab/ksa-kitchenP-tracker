@@ -2580,6 +2580,17 @@ def main():
     .bi-header-bar + div [data-testid="stMetric"] { padding: 0 !important; }
     .bi-header-bar + div [data-testid="stMetric"] > div { padding: 0 !important; }
     .bi-header-bar + div [data-testid="stCheckbox"] { padding: 0 !important; }
+    /* Header logo: crisp, consistent size, no stretch */
+    .bi-header-bar + div [data-testid="column"]:first-child img {
+        max-height: 42px !important;
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain !important;
+        display: block !important;
+        margin: 0 !important;
+    }
+    .bi-header-bar + div [data-testid="column"]:first-child .stMarkdown p { line-height: 1.25 !important; }
+    .header-brand-text { color: #0f766e !important; font-size: 1rem !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2707,11 +2718,14 @@ def main():
         h1, h2, h3 = st.columns([1, 1, 1])
         with h1:
             logo_path = _logo_path()
-            if logo_path:
-                st.image(str(logo_path), width=80)
-            else:
-                st.markdown('<span style="color: #2E7D6E; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
-            st.markdown("**KSA Kitchens Tracker**")
+            b1, b2 = st.columns([1, 2])
+            with b1:
+                if logo_path:
+                    st.image(str(logo_path), width=120)
+                else:
+                    st.markdown('<span class="header-brand-text">KitchenPark</span>', unsafe_allow_html=True)
+            with b2:
+                st.markdown("**KSA Kitchens Tracker**")
         with h2:
             st.markdown(
                 f'<p style="margin:0; font-size:0.9rem; color:#64748b;">'
