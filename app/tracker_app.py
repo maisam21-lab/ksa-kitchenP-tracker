@@ -3507,8 +3507,9 @@ def main():
         div[data-testid="stDataFrame"]:hover { box-shadow: 0 4px 14px rgba(15,118,110,0.12); }
         </style>
         """, unsafe_allow_html=True)
+        glance_label = f"{selected_country or 'All'} at a glance" if (selected_country and selected_country != "All") else "All countries at a glance"
         st.markdown(
-            f'<div class="dashboard-summary"><strong>KSA at a glance</strong> · {total:,} kitchens · {vacant:,} vacant · {occupied:,} occupied · {sold:,} sold · {vacant_approved_deal:,} approved deal{"s" if vacant_approved_deal != 1 else ""}</div>',
+            f'<div class="dashboard-summary"><strong>{glance_label}</strong> · {total:,} kitchens · {vacant:,} vacant · {occupied:,} occupied · {sold:,} sold · {vacant_approved_deal:,} approved deal{"s" if vacant_approved_deal != 1 else ""}</div>',
             unsafe_allow_html=True,
         )
         # —— Scorecard (Sales-first: Sold Rate + Ops Occupancy) ——
