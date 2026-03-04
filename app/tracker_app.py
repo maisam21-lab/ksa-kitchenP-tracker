@@ -2583,55 +2583,71 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Single-row top bar — premium SaaS (64px, max-width container, no second row) */
+    /* Single-row top bar — modern SaaS (flex, glassmorphism, minimalist status) */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        min-height: 64px !important;
-        height: 64px !important;
+        min-height: 56px !important;
+        height: 56px !important;
         max-width: 1280px !important;
         margin: 0 auto !important;
         padding: 0 24px !important;
-        border-bottom: 1px solid #e5e7eb !important;
-        background: rgba(255,255,255,0.98) !important;
-        backdrop-filter: blur(8px) !important;
-        -webkit-backdrop-filter: blur(8px) !important;
+        border-bottom: 1px solid rgba(0,0,0,0.06) !important;
+        background: rgba(255,255,255,0.72) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
     }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 16px !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 12px !important; }
     @media (min-width: 1024px) { .header-top-bar + div { padding: 0 32px !important; } }
     .header-top-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
-    .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 4px !important; margin: 0 !important; min-height: 0 !important; }
-    .header-top-bar + div [data-testid="column"] { padding: 0 6px !important; }
+    .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 2px !important; margin: 0 !important; min-height: 0 !important; }
+    .header-top-bar + div [data-testid="column"] { padding: 0 4px !important; }
     .header-top-bar + div img { margin: 0 !important; }
     .header-top-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
     .header-top-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
-    .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; }
-    /* Left group: logo + label + title + pill (gap-4, title+pill gap-3) */
-    .header-top-bar + div [data-testid="column"]:first-child { gap: 16px !important; }
+    .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; width: auto !important; }
+    /* Left: logo + KitchenPark + divider + title + status + updated */
     .header-top-bar + div [data-testid="column"]:first-child img {
-        max-height: 36px !important; width: auto !important; height: auto !important;
+        max-height: 32px !important; width: auto !important; height: auto !important;
         object-fit: contain !important; display: block !important; margin: 0 !important;
     }
-    .header-brand-muted { color: #6b7280 !important; font-size: 0.875rem !important; font-weight: 400 !important; margin: 0 !important; line-height: 1.3 !important; }
-    .header-brand-title { color: #111827 !important; font-size: 1.25rem !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.3 !important; }
-    .header-title-pill-wrap { display: inline-flex !important; align-items: center !important; gap: 12px !important; flex-wrap: nowrap !important; }
-    /* Status pill */
-    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 6px !important; padding: 6px 14px !important; border-radius: 9999px !important; font-size: 0.8125rem !important; font-weight: 500 !important; flex-shrink: 0 !important; }
-    .header-status-pill.live { background: #f0fdf4 !important; color: #15803d !important; }
-    .header-status-pill.delayed { background: #fefce8 !important; color: #a16207 !important; }
-    .header-status-pill.stale { background: #fef2f2 !important; color: #b91c1c !important; }
-    .header-status-dot { width: 8px !important; height: 8px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
-    .header-status-pill.live .header-status-dot { background: #22c55e !important; }
-    .header-status-pill.delayed .header-status-dot { background: #eab308 !important; }
-    .header-status-pill.stale .header-status-dot { background: #dc2626 !important; }
-    /* Right group: tight cluster, gap-4 */
-    .header-top-bar + div [data-testid="column"]:last-child { gap: 16px !important; justify-content: flex-end !important; }
-    .header-help-icon { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 32px !important; height: 32px !important; border-radius: 8px !important; background: #f9fafb !important; color: #6b7280 !important; text-decoration: none !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; }
-    .header-help-icon:hover { background: #f3f4f6 !important; color: #111827 !important; }
-    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease !important; flex-shrink: 0 !important; }
-    .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; opacity: 0.95 !important; }
-    .header-user-email { font-size: 0.8125rem !important; color: #374151 !important; max-width: 220px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; display: inline-block !important; }
+    .header-left-inner { display: flex !important; align-items: center !important; gap: 16px !important; flex-wrap: nowrap !important; }
+    .header-brand-kp { color: #374151 !important; font-size: 0.9375rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
+    .header-divider-v { width: 1px !important; height: 28px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
+    .header-title-block { display: inline-flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 6px !important; flex-wrap: nowrap !important; }
+    .header-title-row { display: block !important; }
+    .header-status-row { display: flex !important; align-items: center !important; gap: 10px !important; flex-wrap: nowrap !important; }
+    .header-brand-title { color: #111827 !important; font-size: 1.125rem !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; }
+    /* Status pill: image style – subtle fill + glowing dot; live = green with white text */
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 8px !important; padding: 4px 12px !important; border-radius: 9999px !important; font-size: 0.75rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
+    .header-status-pill.live { background: rgba(34,197,94,0.28) !important; color: #fff !important; border: 1px solid rgba(34,197,94,0.5) !important; }
+    .header-status-pill.delayed { background: rgba(234,179,8,0.2) !important; color: #713f12 !important; border: 1px solid rgba(234,179,8,0.5) !important; }
+    .header-status-pill.stale { background: rgba(220,38,38,0.2) !important; color: #fff !important; border: 1px solid rgba(220,38,38,0.5) !important; }
+    .header-status-dot { width: 6px !important; height: 6px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
+    .header-status-pill.live .header-status-dot { background: #22c55e !important; box-shadow: 0 0 8px rgba(34,197,94,0.7) !important; }
+    .header-status-pill.delayed .header-status-dot { background: #eab308 !important; box-shadow: 0 0 6px rgba(234,179,8,0.5) !important; }
+    .header-status-pill.stale .header-status-dot { background: #dc2626 !important; box-shadow: 0 0 6px rgba(220,38,38,0.5) !important; }
+    .header-updated-muted { color: #9ca3af !important; font-size: 0.8125rem !important; font-weight: 400 !important; margin: 0 !important; }
+    /* Right: icon buttons, theme switch, help circle, bell + badge, avatar+chevron */
+    .header-icon-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 8px !important; color: #6b7280 !important; text-decoration: none !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; border: none !important; background: transparent !important; cursor: pointer !important; }
+    .header-icon-btn:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; }
+    .header-help-btn { border: 1px solid #e5e7eb !important; border-radius: 50% !important; font-weight: 600 !important; }
+    .header-bell-wrap { position: relative !important; display: inline-flex !important; }
+    .header-bell-badge { position: absolute !important; top: -2px !important; right: -2px !important; min-width: 16px !important; height: 16px !important; padding: 0 4px !important; border-radius: 999px !important; background: #0f766e !important; color: #fff !important; font-size: 0.65rem !important; font-weight: 700 !important; display: flex !important; align-items: center !important; justify-content: center !important; }
+    /* Sun/Moon horizontal toggle switch */
+    .header-theme-switch { display: inline-flex !important; align-items: center !important; width: 64px !important; height: 32px !important; border-radius: 999px !important; background: #e5e7eb !important; position: relative !important; text-decoration: none !important; color: #6b7280 !important; flex-shrink: 0 !important; }
+    .header-theme-switch:hover { background: #d1d5db !important; color: #374151 !important; }
+    .header-theme-switch .header-theme-sun, .header-theme-switch .header-theme-moon { position: absolute !important; top: 50% !important; transform: translateY(-50%) !important; font-size: 0.9rem !important; z-index: 0 !important; }
+    .header-theme-switch .header-theme-sun { left: 8px !important; }
+    .header-theme-switch .header-theme-moon { right: 8px !important; }
+    .header-theme-switch .header-theme-thumb { position: absolute !important; left: 4px !important; top: 4px !important; width: 24px !important; height: 24px !important; border-radius: 50% !important; background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.12) !important; transition: left 0.2s ease !important; z-index: 1 !important; }
+    .header-theme-switch.dark .header-theme-thumb { left: 36px !important; }
+    .header-avatar-chevron { display: inline-flex !important; align-items: center !important; gap: 6px !important; }
+    .header-chevron { color: #6b7280 !important; font-size: 0.75rem !important; }
+    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; flex-shrink: 0 !important; }
+    .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
     """, unsafe_allow_html=True)
@@ -2753,51 +2769,86 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left (logo + label + title + pill) | right (dark, help, avatar, email)
+    # Single-row top bar: left (logo | KitchenPark | divider | title + pill + updated) | right (search, toggle, help, bell, avatar▼, sign out)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
+    # Theme toggle via query param so we can use a link-styled switch
+    _qp = getattr(st, "query_params", None)
+    if _qp is not None:
+        _tv = _qp.get("toggle_dark")
+        _val = _tv[0] if isinstance(_tv, list) else _tv
+        if _val:
+            st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
+            try:
+                del _qp["toggle_dark"]
+            except Exception:
+                pass
+            _rerun()
+    _dark = st.session_state.get("dark_mode", False)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
         left_col, right_col = st.columns([2, 1])
         with left_col:
-            l1, l2 = st.columns([1, 3])
+            l1, l2 = st.columns([1, 4])
             with l1:
                 logo_path = _logo_path()
                 if logo_path:
-                    st.image(str(logo_path), width=90)
+                    st.image(str(logo_path), width=80)
                 else:
-                    st.markdown('<span class="header-brand-muted">KitchenPark</span>', unsafe_allow_html=True)
+                    st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
             with l2:
-                st.markdown('<p class="header-brand-muted">KitchenPark</p>', unsafe_allow_html=True)
+                brand_lead = '<span class="header-brand-kp">KitchenPark</span><span class="header-divider-v"></span>' if logo_path else '<span class="header-divider-v"></span>'
                 st.markdown(
-                    f'<p class="header-title-pill-wrap" style="margin:0;">'
-                    f'<span class="header-brand-title">KSA Kitchens Tracker</span> '
+                    f'<div class="header-left-inner">'
+                    f'{brand_lead}'
+                    f'<div class="header-title-block">'
+                    f'<span class="header-title-row header-brand-title">KSA Kitchens Tracker</span>'
+                    f'<div class="header-status-row">'
                     f'<span class="header-status-pill {status_class}">'
-                    f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")} • {updated_ago}</span></p>',
+                    f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")}</span>'
+                    f'<span class="header-updated-muted">{updated_ago}</span>'
+                    f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
         with right_col:
-            r1, r2, r3, r4, r5 = st.columns(5)
+            r1, r2, r3, r4, r5, r6 = st.columns(6)
             with r1:
-                st.checkbox("Dark mode", key="dark_mode", help="Toggle dark theme")
-            with r2:
                 st.markdown(
-                    '<a href="#" class="header-help-icon" title="Help">?</a>',
+                    '<a href="#" class="header-icon-btn" title="Search" aria-label="Search">'
+                    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></a>',
+                    unsafe_allow_html=True,
+                )
+            with r2:
+                _switch_class = "header-theme-switch dark" if _dark else "header-theme-switch"
+                st.markdown(
+                    f'<a href="?toggle_dark=1" class="{_switch_class}" title="Toggle dark mode" aria-label="Toggle dark mode">'
+                    '<span class="header-theme-sun">☀</span><span class="header-theme-moon">☾</span>'
+                    '<span class="header-theme-thumb"></span></a>',
                     unsafe_allow_html=True,
                 )
             with r3:
-                initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
-                    f'<span class="header-user-avatar" title="{current_user or ""}">{initials}</span>',
+                    '<a href="#" class="header-icon-btn header-help-btn" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
             with r4:
                 st.markdown(
-                    f'<span class="header-user-email header-email-mobile" title="{current_user or ""}">{current_user or ""}</span>',
+                    '<span class="header-bell-wrap">'
+                    '<a href="#" class="header-icon-btn" title="Notifications" aria-label="Notifications">'
+                    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></a>'
+                    '<span class="header-bell-badge">3</span></span>',
                     unsafe_allow_html=True,
                 )
             with r5:
+                initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
+                st.markdown(
+                    f'<div class="header-avatar-chevron" title="{current_user or ""}">'
+                    f'<span class="header-user-avatar">{initials}</span>'
+                    f'<span class="header-chevron">▼</span></div>',
+                    unsafe_allow_html=True,
+                )
+            with r6:
                 if st.button("Sign out", key="header_sign_out", help="Sign out and clear session"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
