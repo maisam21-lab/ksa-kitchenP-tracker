@@ -2540,7 +2540,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # Top bar (replaces sidebar): logo, title, Data pulse, Dark mode — always at top of main
+    # Top bar (replaces sidebar): compact two-row layout
     last_gsheet = get_last_refresh("gsheet")
     if last_gsheet:
         try:
@@ -2555,18 +2555,20 @@ def main():
         log_traffic()
         st.session_state["traffic_logged"] = True
 
+    # Row 1: logo, title, Data pulse, Dark mode — single horizontal bar
     with st.container():
-        top_cols = st.columns([2, 1, 1])
-        with top_cols[0]:
+        r1 = st.columns([1, 1, 1, 1])
+        with r1[0]:
             logo_path = _logo_path()
             if logo_path:
                 st.image(str(logo_path), use_container_width=True)
             else:
                 st.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
+        with r1[1]:
             st.markdown("**KSA Kitchens Tracker**")
-        with top_cols[1]:
+        with r1[2]:
             st.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
-        with top_cols[2]:
+        with r1[3]:
             st.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
 
     # Restore session from URL params so user is remembered across refresh for SESSION_PERSISTENCE_HOURS
@@ -2607,7 +2609,7 @@ def main():
             # Fallback: Sign-in not required — allow typed email (identity not verified)
             _prefill = (st.session_state.get("user_display_name") or "").strip()
             if _prefill:
-                st.caption(f"Signed in as **{_prefill}**")
+                pass  # Shown in row 2 below
             else:
                 st.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
@@ -2622,26 +2624,26 @@ def main():
             if _verified_email:
                 st.session_state["user_display_name"] = _verified_email
                 current_user = _verified_email
-                st.caption(f"Signed in as **{_verified_email}**")
+                pass  # Shown in row 2 below
             else:
                 # Developer session: only show name input when no name yet (e.g. after session expired)
                 current_user = (st.session_state.get("user_display_name") or "Developer").strip()
                 if current_user and current_user != "Developer":
-                    st.caption(f"Signed in as **{current_user}**")
+                    pass  # Shown in row 2 below
                 else:
                     st.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin", help="Developer session. Name shown on comments.")
                     current_user = (st.session_state.get("user_display_name") or "Developer").strip()
-                st.caption("Developer session (key unlocked)")
+                pass  # "Developer session (key unlocked)" shown in row 2
     else:
         # Allowlist off: allow typed email for display only (not for access control)
         is_developer = _is_developer()
         if _verified_email:
             current_user = _verified_email
-            st.caption(f"Signed in as **{_verified_email}**")
+            pass  # Shown in row 2 below
         else:
             _prefill = (st.session_state.get("user_display_name") or "").strip()
             if _prefill:
-                st.caption(f"Signed in as **{_prefill}**")
+                pass  # Shown in row 2 below
             else:
                 st.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
@@ -2649,13 +2651,6 @@ def main():
     # Persist session to URL params so refresh keeps user for SESSION_PERSISTENCE_HOURS
     if current_user:
         _persist_session_to_params(current_user)
-
-    if _allowlist_enabled():
-        st.caption("Access is limited to allowed users.")
-    else:
-        st.caption("Contact your admin to restrict access to this app.")
-    st.markdown("---")
-    st.caption("Developed by **RevOps** team")
 
     # Helper: list of configured developer identifiers from secrets/env
     def _get_developer_ids_list() -> list[str]:
@@ -2665,45 +2660,50 @@ def main():
             ids = os.environ.get("DEVELOPER_IDS", "")
         return [s.strip().lower() for s in str(ids).split(",") if s.strip()]
 
-    # Optionally hide the Developer access section for non-developer users.
-    # If DEVELOPER_IDS is set (comma-separated names/emails),
-    # only those identifiers (case-insensitive) will see this expander.
     def _developer_section_visible(user: str) -> bool:
-        """Show Developer access only for configured developers.
-
-        If DEVELOPER_IDS is set (comma-separated), only those names/emails
-        will ever see the Developer access box. If it is NOT set, the box
-        is hidden for everyone (no public developer UI).
-        """
         ids_list = _get_developer_ids_list()
         if not ids_list:
-            # No explicit developer list configured: hide for all users
             return False
         if _is_developer():
             return True
         return (user or "").strip().lower() in ids_list
 
-    # If the current user is listed in DEVELOPER_IDS, auto-unlock developer mode
     dev_ids = _get_developer_ids_list()
     if dev_ids and (current_user or "").strip().lower() in dev_ids and not is_developer:
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    if _developer_section_visible(current_user):
-        with st.expander("Developer access", expanded=False):
-            if is_developer:
-                st.caption("Unlocked for this session.")
-                if st.button("Lock", key="dev_lock"):
-                    st.session_state["developer_unlocked"] = False
-                    _rerun()
+    # Row 2: user, access, Developer access, footer — single horizontal line
+    with st.container():
+        r2 = st.columns([2, 1, 1, 1])
+        with r2[0]:
+            st.caption(f"Signed in as **{current_user}**")
+            if is_developer and not _verified_email:
+                st.caption("Developer session (key unlocked)")
+            if _allowlist_enabled():
+                st.caption("Access is limited to allowed users.")
             else:
-                key_in = st.text_input("Key", type="password", key="dev_key_input", placeholder="Enter key")
-                if st.button("Unlock", key="dev_unlock") and key_in.strip():
-                    if key_in.strip() == _get_developer_key() and _get_developer_key():
-                        st.session_state["developer_unlocked"] = True
-                        _rerun()
+                st.caption("Contact your admin to restrict access to this app.")
+        with r2[1]:
+            if _developer_section_visible(current_user):
+                with st.expander("Developer access", expanded=False):
+                    if is_developer:
+                        st.caption("Unlocked for this session.")
+                        if st.button("Lock", key="dev_lock"):
+                            st.session_state["developer_unlocked"] = False
+                            _rerun()
                     else:
-                        st.error("Invalid key")
+                        key_in = st.text_input("Key", type="password", key="dev_key_input", placeholder="Enter key")
+                        if st.button("Unlock", key="dev_unlock") and key_in.strip():
+                            if key_in.strip() == _get_developer_key() and _get_developer_key():
+                                st.session_state["developer_unlocked"] = True
+                                _rerun()
+                            else:
+                                st.error("Invalid key")
+        with r2[2]:
+            pass
+        with r2[3]:
+            st.caption("Developed by **RevOps** team")
 
     st.divider()
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
