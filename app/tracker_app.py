@@ -828,6 +828,29 @@ def get_last_refresh(source: str) -> str | None:
         return row[0] if row else None
 
 
+def _data_status_from_pulse(last_ts: str | None) -> tuple[str, str, str]:
+    """From last refresh timestamp return (status_label, dot_color, formatted_ts).
+    status_label: 'Live Data' | 'Delayed' | 'Stale'
+    dot_color: green / yellow / red
+    formatted_ts: e.g. '04 Mar 10:56' or '—'
+    """
+    if not last_ts:
+        return "Stale", "#dc2626", "—"
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        age_min = (now - dt).total_seconds() / 60
+        fmt = dt.strftime("%d %b %H:%M")
+        if age_min <= 30:
+            return "Live Data", "#22c55e", fmt
+        if age_min <= 120:
+            return "Delayed", "#eab308", fmt
+        return "Stale", "#dc2626", fmt
+    except Exception:
+        return "Stale", "#dc2626", last_ts[:16] if last_ts else "—"
+
+
 def _gsheet_refresh_is_stale(minutes: int = 15) -> bool:
     """True if no GSheet refresh yet or last refresh was more than `minutes` ago."""
     ts = get_last_refresh("gsheet")
@@ -2537,37 +2560,26 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Website-style header bar — tight spacing */
-    .site-header-wrapper + div {
+    /* BI-style single header bar */
+    .bi-header-bar + div {
+        min-height: 56px !important;
+        display: flex !important;
+        align-items: center !important;
         background: #f8fafc !important;
         border-bottom: 1px solid #e2e8f0 !important;
-        border-left: 4px solid #0f766e !important;
-        padding: 6px 16px 8px !important;
-        margin: 0 -1rem 0.5rem -1rem !important;
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
+        padding: 0 1.25rem !important;
+        margin: 0 -1rem 0.75rem -1rem !important;
         box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-        border-radius: 0 !important;
     }
-    .site-header-wrapper + div [data-testid="stVerticalBlock"] { padding-top: 0 !important; margin-top: 0 !important; }
-    .site-header-wrapper + div [data-testid="stVerticalBlock"] > div { padding-top: 0 !important; margin-top: 0 !important; padding-bottom: 0 !important; }
-    .site-header-wrapper + div [data-testid="stMetric"] { padding: 0 0 0 8px !important; }
-    .site-header-wrapper + div [data-testid="stMetric"] > div { padding: 4px 0 !important; }
-    .site-header-wrapper + div img { margin-bottom: 0 !important; display: block !important; }
-    .site-header-wrapper + div .stMarkdown { margin-top: 2px !important; margin-bottom: 0 !important; }
-    .site-header-row2 + div {
-        background: #fafafa !important;
-        border-bottom: 1px solid #e2e8f0 !important;
-        border-left: 4px solid #0f766e !important;
-        padding: 4px 16px 6px !important;
-        margin: -0.5rem -1rem 0.75rem -1rem !important;
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
-        border-radius: 0 !important;
-    }
-    .site-header-row2 + div [data-testid="stVerticalBlock"] { padding-top: 0 !important; margin-top: 0 !important; }
-    .site-header-row2 + div [data-testid="stVerticalBlock"] > div { padding-top: 0 !important; margin-top: 0 !important; padding-bottom: 0 !important; }
-    .site-header-row2 + div .stCaption { margin-top: 0 !important; padding-top: 0 !important; }
+    .bi-header-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
+    .bi-header-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 4px !important; margin: 0 !important; min-height: 0 !important; }
+    .bi-header-bar + div [data-testid="column"] { padding: 0 8px !important; }
+    .bi-header-bar + div img { margin: 0 !important; }
+    .bi-header-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
+    .bi-header-bar + div .stMarkdown p { margin: 0 !important; font-size: 0.9rem !important; }
+    .bi-header-bar + div [data-testid="stMetric"] { padding: 0 !important; }
+    .bi-header-bar + div [data-testid="stMetric"] > div { padding: 0 !important; }
+    .bi-header-bar + div [data-testid="stCheckbox"] { padding: 0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2585,22 +2597,6 @@ def main():
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
-
-    st.markdown('<div class="site-header-wrapper"></div>', unsafe_allow_html=True)
-    # Row 1: brand (logo + title vertical), Data pulse, Dark mode
-    with st.container():
-        r1 = st.columns(3)
-        with r1[0]:
-            logo_path = _logo_path()
-            if logo_path:
-                st.image(str(logo_path), width=100)
-            else:
-                st.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
-            st.markdown("**KSA Kitchens Tracker**")
-        with r1[1]:
-            st.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
-        with r1[2]:
-            st.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
 
     # Restore session from URL params so user is remembered across refresh for SESSION_PERSISTENCE_HOURS
     if not _verified_email:
@@ -2704,38 +2700,58 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Row 2: user, access, Developer access, footer — single horizontal line
-    st.markdown('<div class="site-header-row2"></div>', unsafe_allow_html=True)
+    # Single BI-style header bar: left (brand) | center (data status) | right (refresh, developer, dark, user)
+    status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
+    st.markdown('<div class="bi-header-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        r2 = st.columns([2, 1, 1, 1])
-        with r2[0]:
-            st.caption(f"Signed in as **{current_user}**")
-            if is_developer and not _verified_email:
-                st.caption("Developer session (key unlocked)")
-            if _allowlist_enabled():
-                st.caption("Access is limited to allowed users.")
+        h1, h2, h3 = st.columns([1, 1, 1])
+        with h1:
+            logo_path = _logo_path()
+            if logo_path:
+                st.image(str(logo_path), width=80)
             else:
-                st.caption("Contact your admin to restrict access to this app.")
-        with r2[1]:
-            if _developer_section_visible(current_user):
-                with st.expander("Developer access", expanded=False):
-                    if is_developer:
-                        st.caption("Unlocked for this session.")
-                        if st.button("Lock", key="dev_lock"):
-                            st.session_state["developer_unlocked"] = False
-                            _rerun()
-                    else:
-                        key_in = st.text_input("Key", type="password", key="dev_key_input", placeholder="Enter key")
-                        if st.button("Unlock", key="dev_unlock") and key_in.strip():
-                            if key_in.strip() == _get_developer_key() and _get_developer_key():
-                                st.session_state["developer_unlocked"] = True
+                st.markdown('<span style="color: #2E7D6E; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
+            st.markdown("**KSA Kitchens Tracker**")
+        with h2:
+            st.markdown(
+                f'<p style="margin:0; font-size:0.9rem; color:#64748b;">'
+                f'<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:{status_color}; margin-right:6px; vertical-align:middle;"></span>'
+                f'<strong style="color:#334155;">{status_label}</strong> &nbsp;|&nbsp; Last sync: {status_ts}</p>',
+                unsafe_allow_html=True,
+            )
+        with h3:
+            rr = st.columns([1, 1, 1, 2])
+            with rr[0]:
+                if st.button("↻ Sync", key="header_sync", help="Refresh data from Google Sheet"):
+                    ok, _ = _refresh_from_online_sheet()
+                    if ok:
+                        set_last_refresh("gsheet")
+                        _rerun()
+            with rr[1]:
+                if _developer_section_visible(current_user):
+                    with st.expander("Developer", expanded=False):
+                        if is_developer:
+                            st.caption("Unlocked for this session.")
+                            if st.button("Lock", key="dev_lock"):
+                                st.session_state["developer_unlocked"] = False
                                 _rerun()
-                            else:
-                                st.error("Invalid key")
-        with r2[2]:
-            pass
-        with r2[3]:
-            st.caption("Developed by **RevOps** team")
+                        else:
+                            key_in = st.text_input("Key", type="password", key="dev_key_input", placeholder="Enter key")
+                            if st.button("Unlock", key="dev_unlock") and key_in.strip():
+                                if key_in.strip() == _get_developer_key() and _get_developer_key():
+                                    st.session_state["developer_unlocked"] = True
+                                    _rerun()
+                                else:
+                                    st.error("Invalid key")
+            with rr[2]:
+                st.checkbox("Dark mode", key="dark_mode", help="Dark theme")
+            with rr[3]:
+                initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
+                short_email = (current_user or "")[:28] + ("…" if len(current_user or "") > 28 else "")
+                st.markdown(
+                    f'<p style="margin:0; font-size:0.85rem;"><span style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#0f766e; color:white; font-weight:600; margin-right:8px;">{initials}</span>{short_email}</p>',
+                    unsafe_allow_html=True,
+                )
 
     st.divider()
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
