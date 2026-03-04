@@ -1144,6 +1144,16 @@ def list_comments(record_id: str):
         return [dict(row) for row in r]
 
 
+def list_recent_comments_global(limit: int = 30):
+    """Recent comments across all records for notifications feed."""
+    with get_conn() as c:
+        r = c.execute(
+            "SELECT id, record_id, created_at, author, comment_text FROM record_comments ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(row) for row in r]
+
+
 # —— Activity log (Quip-style history) ——
 def log_record_activity(record_id: str, action: str, by_user: str = "", details: str = ""):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1171,6 +1181,48 @@ def list_recent_activity_global(limit: int = 20):
             (limit,),
         )
         return [dict(row) for row in r]
+
+
+def get_unread_notification_count(since_iso: str) -> int:
+    """Count activity and comments newer than since_iso (e.g. last read timestamp)."""
+    if not (since_iso or since_iso.strip()):
+        since_iso = "1970-01-01T00:00:00Z"
+    with get_conn() as c:
+        a = c.execute(
+            "SELECT COUNT(1) FROM record_activity WHERE at > ?",
+            (since_iso.strip(),),
+        ).fetchone()[0]
+        b = c.execute(
+            "SELECT COUNT(1) FROM record_comments WHERE created_at > ?",
+            (since_iso.strip(),),
+        ).fetchone()[0]
+        return a + b
+
+
+def list_notifications_feed(limit: int = 50):
+    """Merged feed of recent activity and comments, sorted by time desc."""
+    activities = list_recent_activity_global(limit)
+    comments = list_recent_comments_global(limit)
+    feed = []
+    for r in activities:
+        feed.append({
+            "type": "activity",
+            "at": r["at"],
+            "record_id": r["record_id"],
+            "author": r.get("by_user") or "Someone",
+            "action": r.get("action") or "updated",
+            "details": (r.get("details") or "")[:80],
+        })
+    for r in comments:
+        feed.append({
+            "type": "comment",
+            "at": r["created_at"],
+            "record_id": r["record_id"],
+            "author": r.get("author") or "Anonymous",
+            "snippet": (r.get("comment_text") or "")[:100].replace("\n", " "),
+        })
+    feed.sort(key=lambda x: x["at"], reverse=True)
+    return feed[:limit]
 
 
 # —— Saved views (global-tracker style) ——
@@ -2610,7 +2662,7 @@ def main():
     .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; width: auto !important; }
     /* Left: logo + KitchenPark + divider + title + status + updated */
     .header-top-bar + div [data-testid="column"]:first-child img {
-        max-height: 32px !important; width: auto !important; height: auto !important;
+        max-height: 40px !important; width: auto !important; height: auto !important;
         object-fit: contain !important; display: block !important; margin: 0 !important;
     }
     .header-left-inner { display: flex !important; align-items: center !important; gap: 16px !important; flex-wrap: nowrap !important; }
@@ -2785,18 +2837,34 @@ def main():
             except Exception:
                 pass
             _rerun()
+        _on = _qp.get("open_notifications")
+        _on_val = _on[0] if isinstance(_on, list) else _on
+        if _on_val:
+            st.session_state["show_notifications"] = True
+            try:
+                del _qp["open_notifications"]
+            except Exception:
+                pass
+            _rerun()
     _dark = st.session_state.get("dark_mode", False)
+    _last_read = st.session_state.get("notifications_last_read_at") or "1970-01-01T00:00:00Z"
+    _unread_count = get_unread_notification_count(_last_read)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
         left_col, right_col = st.columns([2, 1])
         with left_col:
             l1, l2 = st.columns([1, 4])
             with l1:
-                st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
+                logo_path = _logo_path()
+                if logo_path:
+                    st.image(str(logo_path), width=120)
+                else:
+                    st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
             with l2:
+                brand_lead = '<span class="header-brand-kp">KitchenPark</span><span class="header-divider-v"></span>' if logo_path else '<span class="header-divider-v"></span>'
                 st.markdown(
                     f'<div class="header-left-inner">'
-                    f'<span class="header-divider-v"></span>'
+                    f'{brand_lead}'
                     f'<div class="header-title-block">'
                     f'<span class="header-title-row header-brand-title">KSA Kitchens Tracker</span>'
                     f'<div class="header-status-row">'
@@ -2824,15 +2892,16 @@ def main():
                 )
             with r3:
                 st.markdown(
-                    '<a href="#" class="header-icon-btn header-help-btn" title="Help">?</a>',
+                    '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Contact: maysam.abukashabeh@cloudkitchens.com">?</a>',
                     unsafe_allow_html=True,
                 )
             with r4:
+                _badge_html = f'<span class="header-bell-badge">{min(_unread_count, 99)}</span>' if _unread_count > 0 else ''
                 st.markdown(
                     '<span class="header-bell-wrap">'
-                    '<a href="#" class="header-icon-btn" title="Notifications" aria-label="Notifications">'
+                    '<a href="?open_notifications=1" class="header-icon-btn" title="Notifications" aria-label="Notifications">'
                     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></a>'
-                    '<span class="header-bell-badge">3</span></span>',
+                    f'{_badge_html}</span>',
                     unsafe_allow_html=True,
                 )
             with r5:
@@ -2906,8 +2975,32 @@ def main():
             ):
                 st.session_state["section_radio"] = opt
                 _rerun()
-    # Teal banner with current section name
-    st.markdown(f'<div class="section-title-banner">{section}</div>', unsafe_allow_html=True)
+
+    # Notifications panel (opened from header bell)
+    if st.session_state.get("show_notifications"):
+        feed = list_notifications_feed(50)
+        with st.expander("Notifications", expanded=True):
+            if st.button("Mark all as read", key="notif_mark_read"):
+                st.session_state["notifications_last_read_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _rerun()
+            st.caption("Recent activity and comments across records.")
+            if not feed:
+                st.info("No recent activity or comments.")
+            else:
+                for item in feed:
+                    ts = (item.get("at") or "")[:19].replace("T", " ")
+                    rid = item.get("record_id") or "—"
+                    if item.get("type") == "activity":
+                        author = item.get("author") or "Someone"
+                        action = item.get("action") or "updated"
+                        st.markdown(f"**{author}** {action} record `{rid}` — *{ts}*")
+                    else:
+                        author = item.get("author") or "Anonymous"
+                        snippet = (item.get("snippet") or "").strip().replace('"', "'") or "—"
+                        st.markdown(f"**{author}** commented on `{rid}`: \"{snippet}\" — *{ts}*")
+            if st.button("Close", key="notif_close"):
+                st.session_state.pop("show_notifications", None)
+                _rerun()
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
@@ -3371,14 +3464,12 @@ def main():
     elif section == "Dashboard":
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
-            st.caption("Data source: **Superset (Trino proxy)**. Last refresh: **" + ((superset_meta or {}).get("last_refresh_ts_utc") or "Never") + "**")
             if _superset_stale_warning(superset_meta or {}):
                 st.warning("Last refresh is older than 30 minutes or last run failed.")
             rows_kitchens = superset_rows
         else:
             # Always use GSheet for Dashboard so regular users see data (session data_source may default to salesforce)
             rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
-            st.caption("Data source: **Google Sheet (Kitchens / Master Kitchens list)**. Data refreshes every 15 minutes — use **Refresh** in the sidebar if you need the latest.")
         today_str = date.today().isoformat()
         if snapshot_mod and rows_kitchens:
             if not snapshot_mod.snapshot_exists_for_date(today_str):
