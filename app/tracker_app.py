@@ -1703,21 +1703,21 @@ def _fetch_bigquery_sf_churn_data() -> list[dict] | None:
         return None
 
 
-def _fetch_bigquery_master_kitchens() -> list[dict] | None:
+def _fetch_bigquery_master_kitchens() -> tuple[list[dict] | None, str | None]:
     """Fetch Kitchen Master Data from BigQuery when configured.
     Expects st.secrets.bigquery_master_kitchens with project_id and query (or query_file).
     query_file: path relative to repo root (e.g. docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql); file may contain comments and only the last SELECT is used.
-    Returns list of dicts (one per row, keys = column names from SELECT) or None if not configured or error.
+    Returns (list of dicts, None) on success or (None, error_message) if not configured or on error.
     """
     try:
         cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
         if not cfg or not isinstance(cfg, dict):
-            return None
+            return None, None
         project_id = (cfg.get("project_id") or "").strip()
         query = (cfg.get("query") or "").strip()
         query_file = (cfg.get("query_file") or "").strip()
         if not project_id:
-            return None
+            return None, None
         if not query and query_file:
             base = Path(__file__).resolve().parent.parent
             path = (base / query_file) if not Path(query_file).is_absolute() else Path(query_file)
@@ -1729,15 +1729,15 @@ def _fetch_bigquery_master_kitchens() -> list[dict] | None:
                         query = part
                         break
             if not query:
-                return None
+                return None, f"query_file not found or no SELECT in: {query_file}"
         if not query:
-            return None
+            return None, "Missing query or query_file in bigquery_master_kitchens"
         creds_path = _get_google_credentials_path()
         try:
             from google.cloud import bigquery
             from google.oauth2 import service_account
         except ImportError:
-            return None
+            return None, "Missing google-cloud-bigquery (pip install google-cloud-bigquery)"
         if creds_path == "__FROM_SECRETS__":
             info = dict(getattr(st, "secrets", {}).get("gsheet_service_account", {}))
             if not info:
@@ -1768,9 +1768,9 @@ def _fetch_bigquery_master_kitchens() -> list[dict] | None:
                     except Exception:
                         d[k] = v.isoformat() if hasattr(v, "isoformat") else str(v)
             out.append(d)
-        return out if out else None
-    except Exception:
-        return None
+        return (out if out else None, None)
+    except Exception as e:
+        return None, str(e)
 
 
 def _merge_go_live_into_kitchens(rows_kitchens: list[dict], bq_rows: list[dict]) -> list[dict]:
@@ -2785,11 +2785,13 @@ def main():
             fetched_at = st.session_state.get(_bq_ts_key) or 0
             if cached_rows is not None and (now_sec - fetched_at) < _bq_refresh_interval_sec:
                 bq_rows = cached_rows
+                bq_error = None
             else:
-                bq_rows = _fetch_bigquery_master_kitchens()
+                bq_rows, bq_error = _fetch_bigquery_master_kitchens()
                 if bq_rows is not None:
                     st.session_state[_bq_cache_key] = bq_rows
                     st.session_state[_bq_ts_key] = now_sec
+                    bq_error = None
             if bq_rows is not None:
                 _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
                 cap_col, btn_col = st.columns([3, 1])
@@ -2806,17 +2808,23 @@ def main():
                 source_options = []
                 is_other_sheet = False
             else:
-                # BigQuery configured but returned no data — show help
+                # BigQuery configured but returned no data — show help and any error
                 _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
-                if _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file")):
-                    st.info(
-                        "**BigQuery is configured but no data loaded.**\n\n"
-                        "1. Put your service account JSON key in **scripts/credentials.json**\n"
-                        "2. Restart the app from PowerShell **with** this line first:\n"
-                        "   `$env:GOOGLE_APPLICATION_CREDENTIALS = \".\\scripts\\credentials.json\"`\n"
-                        "3. Then run: `py -m streamlit run app/tracker_app.py`\n\n"
-                        "If you already did that, check the PowerShell window for error messages."
-                    )
+                _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
+                _from_secrets = _get_google_credentials_path() == "__FROM_SECRETS__"
+                if _has_bq_cfg:
+                    help_lines = [
+                        "**BigQuery is configured but no data loaded.**",
+                        "",
+                    ]
+                    if bq_error:
+                        help_lines.append(f"Error: `{bq_error}`")
+                        help_lines.append("")
+                    if _from_secrets:
+                        help_lines.append("On Streamlit Cloud: check **Settings → Secrets**. You need both `[bigquery_master_kitchens]` (project_id, query_file) and `[gsheet_service_account]` (full service account JSON from credentials.json). Redeploy after saving Secrets.")
+                    else:
+                        help_lines.append("Local: put your service account JSON in **scripts/credentials.json** and set `$env:GOOGLE_APPLICATION_CREDENTIALS = \".\\scripts\\credentials.json\"` before running Streamlit. Check the terminal for errors.")
+                    st.info("\n".join(help_lines))
                 # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
                 last_refresh = get_last_refresh("gsheet")
                 # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
