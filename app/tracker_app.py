@@ -2660,10 +2660,14 @@ def main():
     .header-top-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
     .header-top-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
     .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; width: auto !important; }
-    /* Left: logo + KitchenPark + divider + title + status + updated */
+    /* Left: logo (rectangular area) + divider + title + status + updated */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stImage"] img,
     .header-top-bar + div [data-testid="column"]:first-child img {
-        max-height: 40px !important; width: auto !important; height: auto !important;
-        object-fit: contain !important; display: block !important; margin: 0 !important;
+        max-height: 40px !important; max-width: 160px !important; width: auto !important; height: auto !important;
+        object-fit: contain !important; object-position: left center !important; display: block !important; margin: 0 !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
+        min-width: 160px !important; padding-left: 8px !important;
     }
     .header-left-inner { display: flex !important; align-items: center !important; gap: 16px !important; flex-wrap: nowrap !important; }
     .header-brand-kp { color: #374151 !important; font-size: 0.9375rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
@@ -2861,10 +2865,10 @@ def main():
                 else:
                     st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
             with l2:
-                brand_lead = '<span class="header-brand-kp">KitchenPark</span><span class="header-divider-v"></span>' if logo_path else '<span class="header-divider-v"></span>'
+                # When logo is shown, no duplicate "KitchenPark" text; divider then title block
                 st.markdown(
                     f'<div class="header-left-inner">'
-                    f'{brand_lead}'
+                    f'<span class="header-divider-v"></span>'
                     f'<div class="header-title-block">'
                     f'<span class="header-title-row header-brand-title">KSA Kitchens Tracker</span>'
                     f'<div class="header-status-row">'
