@@ -2778,7 +2778,7 @@ def main():
                     unsafe_allow_html=True,
                 )
         with right_col:
-            r1, r2, r3, r4 = st.columns(4)
+            r1, r2, r3, r4, r5 = st.columns(5)
             with r1:
                 st.checkbox("Dark mode", key="dark_mode", help="Toggle dark theme")
             with r2:
@@ -2797,6 +2797,13 @@ def main():
                     f'<span class="header-user-email header-email-mobile" title="{current_user or ""}">{current_user or ""}</span>',
                     unsafe_allow_html=True,
                 )
+            with r5:
+                if st.button("Sign out", key="header_sign_out", help="Sign out and clear session"):
+                    if "user_display_name" in st.session_state:
+                        del st.session_state["user_display_name"]
+                    st.session_state["developer_unlocked"] = False
+                    _clear_session_params()
+                    _rerun()
     st.divider()
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
