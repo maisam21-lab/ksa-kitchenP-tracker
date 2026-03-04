@@ -2537,6 +2537,28 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 2px 4px rgba(15,118,110,0.2);
     }
+    /* Website-style header bar */
+    .site-header-wrapper + div {
+        background: #f8fafc !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        border-left: 4px solid #0f766e !important;
+        padding: 14px 24px !important;
+        margin: 0 -1rem 1.5rem -1rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+        border-radius: 0 !important;
+    }
+    .site-header-row2 + div {
+        background: #fafafa !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        border-left: 4px solid #0f766e !important;
+        padding: 10px 24px 12px !important;
+        margin: -1.5rem -1rem 1rem -1rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        border-radius: 0 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2555,6 +2577,7 @@ def main():
         log_traffic()
         st.session_state["traffic_logged"] = True
 
+    st.markdown('<div class="site-header-wrapper"></div>', unsafe_allow_html=True)
     # Row 1: brand (logo + title vertical), Data pulse, Dark mode
     with st.container():
         r1 = st.columns(3)
@@ -2673,6 +2696,7 @@ def main():
         is_developer = True
 
     # Row 2: user, access, Developer access, footer — single horizontal line
+    st.markdown('<div class="site-header-row2"></div>', unsafe_allow_html=True)
     with st.container():
         r2 = st.columns([2, 1, 1, 1])
         with r2[0]:
