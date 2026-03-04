@@ -2769,7 +2769,7 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left (logo | KitchenPark | divider | title + pill + updated) | right (search, toggle, help, bell, avatar▼, sign out)
+    # Single-row top bar: left (KitchenPark text | divider | title + pill + updated) | right (search, toggle, help, bell, avatar▼, sign out)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
@@ -2792,16 +2792,11 @@ def main():
         with left_col:
             l1, l2 = st.columns([1, 4])
             with l1:
-                logo_path = _logo_path()
-                if logo_path:
-                    st.image(str(logo_path), width=80)
-                else:
-                    st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
+                st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
             with l2:
-                brand_lead = '<span class="header-brand-kp">KitchenPark</span><span class="header-divider-v"></span>' if logo_path else '<span class="header-divider-v"></span>'
                 st.markdown(
                     f'<div class="header-left-inner">'
-                    f'{brand_lead}'
+                    f'<span class="header-divider-v"></span>'
                     f'<div class="header-title-block">'
                     f'<span class="header-title-row header-brand-title">KSA Kitchens Tracker</span>'
                     f'<div class="header-status-row">'
