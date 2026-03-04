@@ -2583,31 +2583,41 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Header card — SaaS style (Stripe/Linear/Notion) */
-    .header-card + div {
-        background: white !important;
-        border-radius: 16px !important;
-        padding: 24px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
-        border: 1px solid #f3f4f6 !important;
-        margin: 0 0 1rem 0 !important;
+    /* Single-row top bar — premium SaaS (64px, max-width container, no second row) */
+    .header-top-bar + div {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        min-height: 64px !important;
+        height: 64px !important;
+        max-width: 1280px !important;
+        margin: 0 auto !important;
+        padding: 0 24px !important;
+        border-bottom: 1px solid #e5e7eb !important;
+        background: rgba(255,255,255,0.98) !important;
+        backdrop-filter: blur(8px) !important;
+        -webkit-backdrop-filter: blur(8px) !important;
     }
-    .header-card + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
-    .header-card + div [data-testid="stVerticalBlock"] > div { padding: 0 4px !important; margin: 0 !important; min-height: 0 !important; }
-    .header-card + div [data-testid="column"] { padding: 0 8px !important; }
-    .header-card + div img { margin: 0 !important; }
-    .header-card + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
-    .header-card + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
-    .header-card + div [data-testid="stCheckbox"] { padding: 0 !important; }
-    /* Row 1: brand + status */
-    .header-card + div [data-testid="column"]:first-child img {
-        max-height: 40px !important; width: auto !important; height: auto !important;
-        object-fit: contain !important; display: block !important; margin: 0 12px 0 0 !important;
+    .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 16px !important; }
+    @media (min-width: 1024px) { .header-top-bar + div { padding: 0 32px !important; } }
+    .header-top-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
+    .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 4px !important; margin: 0 !important; min-height: 0 !important; }
+    .header-top-bar + div [data-testid="column"] { padding: 0 6px !important; }
+    .header-top-bar + div img { margin: 0 !important; }
+    .header-top-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
+    .header-top-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
+    .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; }
+    /* Left group: logo + label + title + pill (gap-4, title+pill gap-3) */
+    .header-top-bar + div [data-testid="column"]:first-child { gap: 16px !important; }
+    .header-top-bar + div [data-testid="column"]:first-child img {
+        max-height: 36px !important; width: auto !important; height: auto !important;
+        object-fit: contain !important; display: block !important; margin: 0 !important;
     }
-    .header-brand-muted { color: #6b7280 !important; font-size: 0.875rem !important; font-weight: 400 !important; margin: 0 !important; line-height: 1.35 !important; }
-    .header-brand-title { color: #111827 !important; font-size: 1.25rem !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.35 !important; }
-    /* Status pill: rounded-full, px-4 py-1.5, green-50/700, 8px dot */
-    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 8px !important; padding: 6px 16px !important; border-radius: 9999px !important; font-size: 0.8125rem !important; font-weight: 500 !important; }
+    .header-brand-muted { color: #6b7280 !important; font-size: 0.875rem !important; font-weight: 400 !important; margin: 0 !important; line-height: 1.3 !important; }
+    .header-brand-title { color: #111827 !important; font-size: 1.25rem !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.3 !important; }
+    .header-title-pill-wrap { display: inline-flex !important; align-items: center !important; gap: 12px !important; flex-wrap: nowrap !important; }
+    /* Status pill */
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 6px !important; padding: 6px 14px !important; border-radius: 9999px !important; font-size: 0.8125rem !important; font-weight: 500 !important; flex-shrink: 0 !important; }
     .header-status-pill.live { background: #f0fdf4 !important; color: #15803d !important; }
     .header-status-pill.delayed { background: #fefce8 !important; color: #a16207 !important; }
     .header-status-pill.stale { background: #fef2f2 !important; color: #b91c1c !important; }
@@ -2615,17 +2625,13 @@ def main():
     .header-status-pill.live .header-status-dot { background: #22c55e !important; }
     .header-status-pill.delayed .header-status-dot { background: #eab308 !important; }
     .header-status-pill.stale .header-status-dot { background: #dc2626 !important; }
-    /* Header divider between row 1 and row 2 */
-    .header-row-divider { border-top: 1px solid #f3f4f6 !important; margin: 16px 0 12px 0 !important; }
-    /* Controls row: dark, help, avatar, email — gap-4 */
-    .header-controls-wrap { display: flex !important; align-items: center !important; justify-content: flex-end !important; gap: 24px !important; flex-wrap: wrap !important; }
-    .header-help-icon { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 32px !important; height: 32px !important; border-radius: 8px !important; background: #f9fafb !important; color: #6b7280 !important; text-decoration: none !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: background 0.15s, color 0.15s !important; }
+    /* Right group: tight cluster, gap-4 */
+    .header-top-bar + div [data-testid="column"]:last-child { gap: 16px !important; justify-content: flex-end !important; }
+    .header-help-icon { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 32px !important; height: 32px !important; border-radius: 8px !important; background: #f9fafb !important; color: #6b7280 !important; text-decoration: none !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; }
     .header-help-icon:hover { background: #f3f4f6 !important; color: #111827 !important; }
-    /* User avatar 36px + hover */
-    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; margin-right: 10px !important; transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease !important; }
+    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease !important; flex-shrink: 0 !important; }
     .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; opacity: 0.95 !important; }
-    .header-user-email { font-size: 0.8125rem !important; color: #374151 !important; }
-    @media (max-width: 900px) { .header-status-mobile { order: 2 !important; width: 100% !important; margin-top: 8px !important; } }
+    .header-user-email { font-size: 0.8125rem !important; color: #374151 !important; max-width: 220px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; display: inline-block !important; }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
     """, unsafe_allow_html=True)
@@ -2747,56 +2753,48 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Header card: row 1 (brand | status) + row 2 (controls: dark, help, user)
+    # Single-row top bar: left (logo + label + title + pill) | right (dark, help, avatar, email)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
-    st.markdown('<div class="header-card"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        # Row 1: LEFT logo + labels | CENTER status pill | RIGHT empty
-        r1_left, r1_center, r1_right = st.columns([1, 1, 1])
-        with r1_left:
-            logo_path = _logo_path()
-            b1, b2 = st.columns([1, 3])
-            with b1:
+        left_col, right_col = st.columns([2, 1])
+        with left_col:
+            l1, l2 = st.columns([1, 3])
+            with l1:
+                logo_path = _logo_path()
                 if logo_path:
-                    st.image(str(logo_path), width=100)
-            with b2:
+                    st.image(str(logo_path), width=90)
+                else:
+                    st.markdown('<span class="header-brand-muted">KitchenPark</span>', unsafe_allow_html=True)
+            with l2:
                 st.markdown('<p class="header-brand-muted">KitchenPark</p>', unsafe_allow_html=True)
-                st.markdown('<p class="header-brand-title">KSA Kitchens Tracker</p>', unsafe_allow_html=True)
-        with r1_center:
-            st.markdown(
-                f'<span class="header-status-pill {status_class} header-status-mobile">'
-                f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")} • {updated_ago}</span>',
-                unsafe_allow_html=True,
-            )
-        with r1_right:
-            pass
-        # Divider
-        st.markdown('<div class="header-row-divider"></div>', unsafe_allow_html=True)
-        # Row 2: LEFT empty | RIGHT dark mode, help, avatar, email
-        r2_left, r2_right = st.columns([1, 1])
-        with r2_left:
-            pass
-        with r2_right:
-            cc = st.columns(4)
-            with cc[0]:
+                st.markdown(
+                    f'<p class="header-title-pill-wrap" style="margin:0;">'
+                    f'<span class="header-brand-title">KSA Kitchens Tracker</span> '
+                    f'<span class="header-status-pill {status_class}">'
+                    f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")} • {updated_ago}</span></p>',
+                    unsafe_allow_html=True,
+                )
+        with right_col:
+            r1, r2, r3, r4 = st.columns(4)
+            with r1:
                 st.checkbox("Dark mode", key="dark_mode", help="Toggle dark theme")
-            with cc[1]:
+            with r2:
                 st.markdown(
                     '<a href="#" class="header-help-icon" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
-            with cc[2]:
+            with r3:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<span class="header-user-avatar" title="{current_user or ""}">{initials}</span>',
                     unsafe_allow_html=True,
                 )
-            with cc[3]:
-                short_email = (current_user or "")[:32] + ("…" if len(current_user or "") > 32 else "")
+            with r4:
                 st.markdown(
-                    f'<span class="header-user-email header-email-mobile">{short_email}</span>',
+                    f'<span class="header-user-email header-email-mobile" title="{current_user or ""}">{current_user or ""}</span>',
                     unsafe_allow_html=True,
                 )
     st.divider()
