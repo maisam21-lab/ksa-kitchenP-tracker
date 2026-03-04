@@ -2560,53 +2560,50 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* BI-style single header bar — SaaS (Stripe/Linear) style */
-    .bi-header-bar + div {
-        min-height: 64px !important;
-        height: 64px !important;
-        display: flex !important;
-        align-items: center !important;
-        background: rgba(255,255,255,0.85) !important;
-        backdrop-filter: blur(12px) !important;
-        -webkit-backdrop-filter: blur(12px) !important;
-        border-bottom: 1px solid #e5e7eb !important;
-        padding: 0 1.5rem !important;
-        margin: 0 -1rem 0.75rem -1rem !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
+    /* Header card — SaaS style (Stripe/Linear/Notion) */
+    .header-card + div {
+        background: white !important;
+        border-radius: 16px !important;
+        padding: 24px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+        border: 1px solid #f3f4f6 !important;
+        margin: 0 0 1rem 0 !important;
     }
-    .bi-header-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
-    .bi-header-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 6px !important; margin: 0 !important; min-height: 0 !important; }
-    .bi-header-bar + div [data-testid="column"] { padding: 0 6px !important; }
-    .bi-header-bar + div img { margin: 0 !important; }
-    .bi-header-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
-    .bi-header-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
-    .bi-header-bar + div [data-testid="stMetric"] { padding: 0 !important; }
-    .bi-header-bar + div [data-testid="stMetric"] > div { padding: 0 !important; }
-    .bi-header-bar + div [data-testid="stCheckbox"] { padding: 0 !important; }
-    /* Brand column: title hierarchy */
-    .bi-header-bar + div [data-testid="column"]:first-child img {
-        max-height: 36px !important; width: auto !important; height: auto !important;
-        object-fit: contain !important; display: block !important; margin: 0 0 2px 0 !important;
+    .header-card + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
+    .header-card + div [data-testid="stVerticalBlock"] > div { padding: 0 4px !important; margin: 0 !important; min-height: 0 !important; }
+    .header-card + div [data-testid="column"] { padding: 0 8px !important; }
+    .header-card + div img { margin: 0 !important; }
+    .header-card + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
+    .header-card + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
+    .header-card + div [data-testid="stCheckbox"] { padding: 0 !important; }
+    /* Row 1: brand + status */
+    .header-card + div [data-testid="column"]:first-child img {
+        max-height: 40px !important; width: auto !important; height: auto !important;
+        object-fit: contain !important; display: block !important; margin: 0 12px 0 0 !important;
     }
-    .header-brand-muted { color: #6b7280 !important; font-size: 0.875rem !important; font-weight: 400 !important; margin: 0 !important; line-height: 1.3 !important; }
-    .header-brand-title { color: #111827 !important; font-size: 1.125rem !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.3 !important; }
-    /* Primary Sync button */
-    .bi-header-bar + div [data-testid="stVerticalBlock"] button[kind="primary"],
-    .bi-header-bar + div a[data-testid="stButton"] + div button { border-radius: 8px !important; padding: 8px 16px !important; font-weight: 500 !important; box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important; }
-    /* Status pill (rendered via markdown) */
-    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 8px !important; padding: 6px 14px !important; border-radius: 9999px !important; font-size: 0.8125rem !important; font-weight: 500 !important; }
+    .header-brand-muted { color: #6b7280 !important; font-size: 0.875rem !important; font-weight: 400 !important; margin: 0 !important; line-height: 1.35 !important; }
+    .header-brand-title { color: #111827 !important; font-size: 1.25rem !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.35 !important; }
+    /* Status pill: rounded-full, px-4 py-1.5, green-50/700, 8px dot */
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 8px !important; padding: 6px 16px !important; border-radius: 9999px !important; font-size: 0.8125rem !important; font-weight: 500 !important; }
     .header-status-pill.live { background: #f0fdf4 !important; color: #15803d !important; }
     .header-status-pill.delayed { background: #fefce8 !important; color: #a16207 !important; }
     .header-status-pill.stale { background: #fef2f2 !important; color: #b91c1c !important; }
+    .header-status-dot { width: 8px !important; height: 8px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
+    .header-status-pill.live .header-status-dot { background: #22c55e !important; }
+    .header-status-pill.delayed .header-status-dot { background: #eab308 !important; }
+    .header-status-pill.stale .header-status-dot { background: #dc2626 !important; }
+    /* Header divider between row 1 and row 2 */
+    .header-row-divider { border-top: 1px solid #f3f4f6 !important; margin: 16px 0 12px 0 !important; }
+    /* Controls row: dark, help, avatar, email — gap-4 */
+    .header-controls-wrap { display: flex !important; align-items: center !important; justify-content: flex-end !important; gap: 24px !important; flex-wrap: wrap !important; }
+    .header-help-icon { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 32px !important; height: 32px !important; border-radius: 8px !important; background: #f9fafb !important; color: #6b7280 !important; text-decoration: none !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: background 0.15s, color 0.15s !important; }
+    .header-help-icon:hover { background: #f3f4f6 !important; color: #111827 !important; }
     /* User avatar 36px + hover */
-    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; margin-right: 10px !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; }
-    .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
+    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; margin-right: 10px !important; transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease !important; }
+    .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; opacity: 0.95 !important; }
     .header-user-email { font-size: 0.8125rem !important; color: #374151 !important; }
-    /* Sync primary button: rounded, padding, shadow */
-    .bi-header-bar + div [data-testid="column"]:nth-child(3) [data-testid="stVerticalBlock"] > div:first-child button {
-        border-radius: 8px !important; padding: 8px 16px !important; font-weight: 500 !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-    }
+    @media (max-width: 900px) { .header-status-mobile { order: 2 !important; width: 100% !important; margin-top: 8px !important; } }
+    @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2727,64 +2724,57 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single BI-style header bar: left (brand) | center (status pill) | right (sync, dev, dark, user)
+    # Header card: row 1 (brand | status) + row 2 (controls: dark, help, user)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
-    st.markdown('<div class="bi-header-bar"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-card"></div>', unsafe_allow_html=True)
     with st.container():
-        h1, h2, h3 = st.columns([1, 1, 1])
-        with h1:
+        # Row 1: LEFT logo + labels | CENTER status pill | RIGHT empty
+        r1_left, r1_center, r1_right = st.columns([1, 1, 1])
+        with r1_left:
             logo_path = _logo_path()
-            b1, b2 = st.columns([1, 2])
+            b1, b2 = st.columns([1, 3])
             with b1:
                 if logo_path:
                     st.image(str(logo_path), width=100)
             with b2:
                 st.markdown('<p class="header-brand-muted">KitchenPark</p>', unsafe_allow_html=True)
                 st.markdown('<p class="header-brand-title">KSA Kitchens Tracker</p>', unsafe_allow_html=True)
-        with h2:
-            dot_emoji = "🟢" if status_class == "live" else ("🟡" if status_class == "delayed" else "🔴")
+        with r1_center:
             st.markdown(
-                f'<span class="header-status-pill {status_class}">'
-                f'{dot_emoji} {status_label.upper().replace(" ", " ")} • {status_ts}</span>',
+                f'<span class="header-status-pill {status_class} header-status-mobile">'
+                f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")} • {status_ts}</span>',
                 unsafe_allow_html=True,
             )
-        with h3:
-            rr = st.columns([1, 1, 1, 2])
-            with rr[0]:
-                if st.button("↻ Sync Data", key="header_sync", type="primary", help="Refresh data from Google Sheet"):
-                    ok, _ = _refresh_from_online_sheet()
-                    if ok:
-                        set_last_refresh("gsheet")
-                        _rerun()
-            with rr[1]:
-                if _developer_section_visible(current_user):
-                    with st.expander("⚙ Dev", expanded=False):
-                        if is_developer:
-                            st.caption("Unlocked for this session.")
-                            if st.button("Lock", key="dev_lock"):
-                                st.session_state["developer_unlocked"] = False
-                                _rerun()
-                        else:
-                            key_in = st.text_input("Key", type="password", key="dev_key_input", placeholder="Enter key")
-                            if st.button("Unlock", key="dev_unlock") and key_in.strip():
-                                if key_in.strip() == _get_developer_key() and _get_developer_key():
-                                    st.session_state["developer_unlocked"] = True
-                                    _rerun()
-                                else:
-                                    st.error("Invalid key")
-            with rr[2]:
-                st.checkbox("Dark mode", key="dark_mode", help="Dark theme")
-            with rr[3]:
-                initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
-                short_email = (current_user or "")[:32] + ("…" if len(current_user or "") > 32 else "")
+        with r1_right:
+            pass
+        # Divider
+        st.markdown('<div class="header-row-divider"></div>', unsafe_allow_html=True)
+        # Row 2: LEFT empty | RIGHT dark mode, help, avatar, email
+        r2_left, r2_right = st.columns([1, 1])
+        with r2_left:
+            pass
+        with r2_right:
+            cc = st.columns(4)
+            with cc[0]:
+                st.checkbox("Dark mode", key="dark_mode", help="Toggle dark theme")
+            with cc[1]:
                 st.markdown(
-                    f'<p style="margin:0; display:flex; align-items:center;">'
-                    f'<span class="header-user-avatar" title="{current_user or ""}">{initials}</span>'
-                    f'<span class="header-user-email">{short_email}</span></p>',
+                    '<a href="#" class="header-help-icon" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
-
+            with cc[2]:
+                initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
+                st.markdown(
+                    f'<span class="header-user-avatar" title="{current_user or ""}">{initials}</span>',
+                    unsafe_allow_html=True,
+                )
+            with cc[3]:
+                short_email = (current_user or "")[:32] + ("…" if len(current_user or "") > 32 else "")
+                st.markdown(
+                    f'<span class="header-user-email header-email-mobile">{short_email}</span>',
+                    unsafe_allow_html=True,
+                )
     st.divider()
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
