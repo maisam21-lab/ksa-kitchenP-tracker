@@ -2415,7 +2415,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
 
 
 def main():
-    st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide")
+    st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
@@ -2540,14 +2540,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # Sidebar (KitchenPark-style: logo + header)
-    logo_path = _logo_path()
-    if logo_path:
-        st.sidebar.image(str(logo_path), use_container_width=True)
-    else:
-        st.sidebar.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
-    st.sidebar.markdown("**KSA Kitchens Tracker**")
-    # Data pulse at top: aligned with last GSheet refresh (scheduler runs every 15 min)
+    # Top bar (replaces sidebar): logo, title, Data pulse, Dark mode — always at top of main
     last_gsheet = get_last_refresh("gsheet")
     if last_gsheet:
         try:
@@ -2558,12 +2551,23 @@ def main():
             pulse_display = last_gsheet
     else:
         pulse_display = "—"
-    st.sidebar.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
-    st.sidebar.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
-    # Log this session once (for analytics); show record count — more meaningful than "traffic"
     if not st.session_state.get("traffic_logged"):
         log_traffic()
         st.session_state["traffic_logged"] = True
+
+    with st.container():
+        top_cols = st.columns([2, 1, 1])
+        with top_cols[0]:
+            logo_path = _logo_path()
+            if logo_path:
+                st.image(str(logo_path), use_container_width=True)
+            else:
+                st.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
+            st.markdown("**KSA Kitchens Tracker**")
+        with top_cols[1]:
+            st.metric("Data pulse", pulse_display, help="Last Google Sheet refresh (scheduler every 15 min)")
+        with top_cols[2]:
+            st.checkbox("Dark mode", key="dark_mode", help="Switch to dark theme for the entire app")
 
     # Restore session from URL params so user is remembered across refresh for SESSION_PERSISTENCE_HOURS
     if not _verified_email:
@@ -2581,65 +2585,65 @@ def main():
         is_developer = _is_developer()
         if not _verified_email and not is_developer:
             if _require_verified_signin():
-                st.sidebar.error("Sign-in required")
-                st.sidebar.markdown("Access is restricted. You must **sign in** with your company account.")
+                st.error("Sign-in required")
+                st.markdown("Access is restricted. You must **sign in** with your company account.")
                 _st_login = getattr(st, "login", None)
                 if callable(_st_login):
-                    if st.sidebar.button("Sign in", type="primary", key="gate_sign_in"):
+                    if st.button("Sign in", type="primary", key="gate_sign_in"):
                         try:
                             _st_login()
                         except Exception:
-                            st.sidebar.error("Sign-in is not configured. Use **Developer access** below (key), or ask the app admin to enable Sign in with Google in Streamlit settings.")
+                            st.error("Sign-in is not configured. Use **Developer access** below (key), or ask the app admin to enable Sign in with Google in Streamlit settings.")
                 else:
-                    st.sidebar.info("The app administrator must enable **Sign in with Google** (or OIDC) in Streamlit deployment settings. Until then, only developer key access is possible below.")
-                with st.sidebar.expander("Developer access (key only)", expanded=False):
+                    st.info("The app administrator must enable **Sign in with Google** (or OIDC) in Streamlit deployment settings. Until then, only developer key access is possible below.")
+                with st.expander("Developer access (key only)", expanded=False):
                     key_in = st.text_input("Key", type="password", key="gate_dev_key", placeholder="Enter developer key")
                     if st.button("Unlock", key="gate_dev_unlock") and key_in.strip() and key_in.strip() == _get_developer_key() and _get_developer_key():
                         st.session_state["developer_unlocked"] = True
                         _rerun()
                 st.markdown("---")
-                st.info("**You must sign in to use this app.** Use the **Sign in** button in the sidebar, or unlock with a developer key if you have one.")
+                st.info("**You must sign in to use this app.** Use the **Sign in** button above, or unlock with a developer key if you have one.")
                 st.stop()
             # Fallback: Sign-in not required — allow typed email (identity not verified)
             _prefill = (st.session_state.get("user_display_name") or "").strip()
             if _prefill:
-                st.sidebar.caption(f"Signed in as **{_prefill}**")
+                st.caption(f"Signed in as **{_prefill}**")
             else:
-                st.sidebar.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
+                st.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
             if not current_user:
-                st.sidebar.warning("Enter your email to continue.")
+                st.warning("Enter your email to continue.")
                 st.stop()
             if "@" not in current_user or "." not in current_user.split("@")[-1]:
-                st.sidebar.warning("Enter a valid email address (e.g. name@company.com).")
+                st.warning("Enter a valid email address (e.g. name@company.com).")
                 st.stop()
         else:
             # Allowlist on and (verified or developer): identity is verified email only, or developer key
             if _verified_email:
                 st.session_state["user_display_name"] = _verified_email
                 current_user = _verified_email
-                st.sidebar.caption(f"Signed in as **{_verified_email}**")
+                st.caption(f"Signed in as **{_verified_email}**")
             else:
                 # Developer session: only show name input when no name yet (e.g. after session expired)
                 current_user = (st.session_state.get("user_display_name") or "Developer").strip()
                 if current_user and current_user != "Developer":
-                    st.sidebar.caption(f"Signed in as **{current_user}**")
+                    st.caption(f"Signed in as **{current_user}**")
                 else:
-                    st.sidebar.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin", help="Developer session. Name shown on comments.")
+                    st.text_input("Your name (for comments)", key="user_display_name", placeholder="e.g. Admin", help="Developer session. Name shown on comments.")
                     current_user = (st.session_state.get("user_display_name") or "Developer").strip()
-                st.sidebar.caption("Developer session (key unlocked)")
+                st.caption("Developer session (key unlocked)")
     else:
         # Allowlist off: allow typed email for display only (not for access control)
         is_developer = _is_developer()
         if _verified_email:
             current_user = _verified_email
-            st.sidebar.caption(f"Signed in as **{_verified_email}**")
+            st.caption(f"Signed in as **{_verified_email}**")
         else:
             _prefill = (st.session_state.get("user_display_name") or "").strip()
             if _prefill:
-                st.sidebar.caption(f"Signed in as **{_prefill}**")
+                st.caption(f"Signed in as **{_prefill}**")
             else:
-                st.sidebar.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
+                st.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
 
     # Persist session to URL params so refresh keeps user for SESSION_PERSISTENCE_HOURS
@@ -2647,11 +2651,11 @@ def main():
         _persist_session_to_params(current_user)
 
     if _allowlist_enabled():
-        st.sidebar.caption("Access is limited to allowed users.")
+        st.caption("Access is limited to allowed users.")
     else:
-        st.sidebar.caption("Contact your admin to restrict access to this app.")
-    st.sidebar.markdown("---")
-    st.sidebar.caption("Developed by **RevOps** team")
+        st.caption("Contact your admin to restrict access to this app.")
+    st.markdown("---")
+    st.caption("Developed by **RevOps** team")
 
     # Helper: list of configured developer identifiers from secrets/env
     def _get_developer_ids_list() -> list[str]:
@@ -2686,7 +2690,7 @@ def main():
         is_developer = True
 
     if _developer_section_visible(current_user):
-        with st.sidebar.expander("Developer access", expanded=False):
+        with st.expander("Developer access", expanded=False):
             if is_developer:
                 st.caption("Unlocked for this session.")
                 if st.button("Lock", key="dev_lock"):
@@ -2701,7 +2705,7 @@ def main():
                     else:
                         st.error("Invalid key")
 
-    st.sidebar.divider()
+    st.divider()
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
         if not current_user:
