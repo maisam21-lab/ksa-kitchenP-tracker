@@ -851,6 +851,29 @@ def _data_status_from_pulse(last_ts: str | None) -> tuple[str, str, str]:
         return "Stale", "#dc2626", last_ts[:16] if last_ts else "—"
 
 
+def _format_updated_ago(last_ts: str | None) -> str:
+    """Return human-readable relative time for status pill, e.g. 'Updated 2 min ago'."""
+    if not last_ts:
+        return "Updated never"
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        age_sec = (now - dt).total_seconds()
+        if age_sec < 60:
+            return "Updated just now"
+        if age_sec < 3600:
+            m = int(age_sec / 60)
+            return f"Updated {m} min ago"
+        if age_sec < 86400:
+            h = int(age_sec / 3600)
+            return f"Updated {h} hour ago" if h == 1 else f"Updated {h} hours ago"
+        d = int(age_sec / 86400)
+        return f"Updated {d} day ago" if d == 1 else f"Updated {d} days ago"
+    except Exception:
+        return "Updated —"
+
+
 def _gsheet_refresh_is_stale(minutes: int = 15) -> bool:
     """True if no GSheet refresh yet or last refresh was more than `minutes` ago."""
     ts = get_last_refresh("gsheet")
@@ -2727,6 +2750,7 @@ def main():
     # Header card: row 1 (brand | status) + row 2 (controls: dark, help, user)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
+    updated_ago = _format_updated_ago(last_gsheet)
     st.markdown('<div class="header-card"></div>', unsafe_allow_html=True)
     with st.container():
         # Row 1: LEFT logo + labels | CENTER status pill | RIGHT empty
@@ -2743,7 +2767,7 @@ def main():
         with r1_center:
             st.markdown(
                 f'<span class="header-status-pill {status_class} header-status-mobile">'
-                f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")} • {status_ts}</span>',
+                f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")} • {updated_ago}</span>',
                 unsafe_allow_html=True,
             )
         with r1_right:
