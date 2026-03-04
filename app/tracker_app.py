@@ -2520,7 +2520,7 @@ def main():
     /* Keep dataframe toolbar visible (Fullscreen, search, download, etc.) */
     [data-testid="stElementToolbar"] { display: flex !important; }
     /* Remove space above section tabs and shift main content up */
-    [data-testid="stAppViewContainer"] > div { padding-top: 0.5rem !important; }
+    [data-testid="stAppViewContainer"] > div { padding-top: 0.25rem !important; }
     [data-testid="stVerticalBlock"] > div:first-child { padding-top: 0 !important; margin-top: 0 !important; }
     /* Slightly smaller base font app-wide */
     .stApp h1 { font-size: 1.4rem !important; }
@@ -2530,35 +2530,44 @@ def main():
     .section-title-banner {
         background: #0f766e !important;
         color: white !important;
-        font-size: 1.5rem !important;
+        font-size: 1.35rem !important;
         font-weight: 700 !important;
-        padding: 14px 28px !important;
-        margin: 0 0 1rem 0 !important;
+        padding: 10px 20px !important;
+        margin: 0 0 0.75rem 0 !important;
         border-radius: 0 0 10px 10px !important;
-        box-shadow: 0 2px 4px rgba(15,118,110,0.2);
+        box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Website-style header bar */
+    /* Website-style header bar — tight spacing */
     .site-header-wrapper + div {
         background: #f8fafc !important;
         border-bottom: 1px solid #e2e8f0 !important;
         border-left: 4px solid #0f766e !important;
-        padding: 14px 24px !important;
-        margin: 0 -1rem 1.5rem -1rem !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+        padding: 6px 16px 8px !important;
+        margin: 0 -1rem 0.5rem -1rem !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
         border-radius: 0 !important;
     }
+    .site-header-wrapper + div [data-testid="stVerticalBlock"] { padding-top: 0 !important; margin-top: 0 !important; }
+    .site-header-wrapper + div [data-testid="stVerticalBlock"] > div { padding-top: 0 !important; margin-top: 0 !important; padding-bottom: 0 !important; }
+    .site-header-wrapper + div [data-testid="stMetric"] { padding: 0 0 0 8px !important; }
+    .site-header-wrapper + div [data-testid="stMetric"] > div { padding: 4px 0 !important; }
+    .site-header-wrapper + div img { margin-bottom: 0 !important; display: block !important; }
+    .site-header-wrapper + div .stMarkdown { margin-top: 2px !important; margin-bottom: 0 !important; }
     .site-header-row2 + div {
         background: #fafafa !important;
         border-bottom: 1px solid #e2e8f0 !important;
         border-left: 4px solid #0f766e !important;
-        padding: 10px 24px 12px !important;
-        margin: -1.5rem -1rem 1rem -1rem !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
+        padding: 4px 16px 6px !important;
+        margin: -0.5rem -1rem 0.75rem -1rem !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
         border-radius: 0 !important;
     }
+    .site-header-row2 + div [data-testid="stVerticalBlock"] { padding-top: 0 !important; margin-top: 0 !important; }
+    .site-header-row2 + div [data-testid="stVerticalBlock"] > div { padding-top: 0 !important; margin-top: 0 !important; padding-bottom: 0 !important; }
+    .site-header-row2 + div .stCaption { margin-top: 0 !important; padding-top: 0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2584,7 +2593,7 @@ def main():
         with r1[0]:
             logo_path = _logo_path()
             if logo_path:
-                st.image(str(logo_path), width=140)
+                st.image(str(logo_path), width=100)
             else:
                 st.markdown('<span style="color: #2E7D6E; font-size: 1.15rem; font-weight: 700;">KitchenPark</span>', unsafe_allow_html=True)
             st.markdown("**KSA Kitchens Tracker**")
