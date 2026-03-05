@@ -2635,24 +2635,26 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Single-row top bar — height set dynamically via .header-resize-overrides */
+    /* Single-row top bar — dynamic (flex, responsive) */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
         min-height: 48px !important;
-        height: 48px !important;
+        height: auto !important;
         max-width: 1280px !important;
+        width: 100% !important;
         margin: 0 auto !important;
         padding: 0 12px !important;
-        border-bottom: none !important;
+        border-bottom: 1px solid rgba(0,0,0,0.06) !important;
         background: rgba(255,255,255,0.72) !important;
         backdrop-filter: blur(12px) !important;
         -webkit-backdrop-filter: blur(12px) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
     }
     @media (min-width: 1024px) { .header-top-bar + div { padding: 0 16px !important; } }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 2px !important; }
+    @media (max-width: 768px) { .header-top-bar + div { padding: 0 8px !important; } .header-brand-title { font-size: 1rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 2px !important; flex-wrap: wrap !important; }
     .header-top-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
     .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 !important; margin: 0 !important; min-height: 0 !important; }
     .header-top-bar + div [data-testid="column"] { padding: 0 1px !important; }
@@ -2660,7 +2662,7 @@ def main():
     .header-top-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
     .header-top-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
     .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; width: auto !important; }
-    /* Logo: width > height, compact */
+    /* Logo: width > height */
     .header-top-bar + div img {
         max-height: 22px !important; max-width: 110px !important; width: auto !important; height: auto !important;
         object-fit: contain !important; object-position: left center !important; display: block !important; margin: 0 !important;
@@ -2674,7 +2676,7 @@ def main():
     .header-title-block { display: inline-flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 0 !important; flex-wrap: nowrap !important; }
     .header-title-row { display: block !important; line-height: 1.2 !important; }
     .header-status-row { display: flex !important; align-items: center !important; gap: 4px !important; flex-wrap: nowrap !important; }
-    .header-brand-title { color: #111827 !important; font-size: 1.125rem !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
+    .header-brand-title { color: #111827 !important; font-size: clamp(0.9375rem, 1.5vw + 0.75rem, 1.125rem) !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
     /* Status pill */
     .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 4px !important; padding: 4px 10px !important; border-radius: 9999px !important; font-size: 0.8rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
     .header-status-pill.live { background: rgba(34,197,94,0.28) !important; color: #fff !important; border: 1px solid rgba(34,197,94,0.5) !important; }
@@ -2704,46 +2706,6 @@ def main():
     .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button { font-size: 0.875rem !important; font-weight: 500 !important; }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Dynamic header height (drag slider = resize the header)
-    st.session_state.setdefault("header_height_px", 48)
-    _h = max(36, min(72, int(st.session_state.get("header_height_px", 48))))
-    st.session_state["header_height_px"] = _h
-    _scale = _h / 48.0
-    _logo_h = max(16, min(36, round(22 * _scale)))
-    _logo_w = max(80, min(140, round(110 * _scale)))
-    _div_h = max(14, min(32, round(22 * _scale)))
-    _title_fs = round(1.125 * _scale * 16) / 16  # rem
-    _pill_fs = round(0.8 * _scale * 16) / 16
-    _updated_fs = round(0.875 * _scale * 16) / 16
-    _brand_fs = round(0.9375 * _scale * 16) / 16
-    _icon_sz = max(24, min(42, round(32 * _scale)))
-    _avatar_sz = max(26, min(44, round(34 * _scale)))
-    _avatar_fs = round(0.875 * _scale * 16) / 16
-    _signout_fs = round(0.875 * _scale * 16) / 16
-    _theme_w = max(40, min(58, round(46 * _scale)))
-    _theme_h = max(18, min(28, round(22 * _scale)))
-    _thumb_sz = max(14, min(22, round(18 * _scale)))
-    _thumb_left_dark = max(22, min(34, round(26 * _scale)))
-    st.markdown(f"""
-    <style>
-    .header-top-bar + div {{ min-height: {_h}px !important; height: {_h}px !important; border-bottom: none !important; }}
-    .header-top-bar + div img {{ max-height: {_logo_h}px !important; max-width: {_logo_w}px !important; }}
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {{ max-width: {_logo_w + 15}px !important; }}
-    .header-divider-v {{ height: {_div_h}px !important; }}
-    .header-brand-kp {{ font-size: {_brand_fs}rem !important; }}
-    .header-brand-title {{ font-size: {_title_fs}rem !important; }}
-    .header-status-pill {{ font-size: {_pill_fs}rem !important; padding: {max(2, round(4*_scale))}px {max(6, round(10*_scale))}px !important; }}
-    .header-status-dot {{ width: {max(4, min(8, round(6*_scale)))}px !important; height: {max(4, min(8, round(6*_scale)))}px !important; }}
-    .header-updated-muted {{ font-size: {_updated_fs}rem !important; }}
-    .header-icon-btn {{ width: {_icon_sz}px !important; height: {_icon_sz}px !important; }}
-    .header-theme-switch {{ width: {_theme_w}px !important; height: {_theme_h}px !important; }}
-    .header-theme-switch .header-theme-thumb {{ width: {_thumb_sz}px !important; height: {_thumb_sz}px !important; }}
-    .header-theme-switch.dark .header-theme-thumb {{ left: {_thumb_left_dark}px !important; }}
-    .header-user-avatar {{ width: {_avatar_sz}px !important; height: {_avatar_sz}px !important; font-size: {_avatar_fs}rem !important; }}
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button {{ font-size: {_signout_fs}rem !important; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -2966,17 +2928,6 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1280px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
-    _resize_col1, _resize_col2, _resize_col3 = st.columns([1, 2, 1])
-    with _resize_col2:
-        st.slider(
-            "↕ Drag to resize header",
-            min_value=36,
-            max_value=72,
-            value=_h,
-            step=2,
-            key="header_height_px",
-            help="Drag left = shorter header, right = taller header",
-        )
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
         if not current_user:
