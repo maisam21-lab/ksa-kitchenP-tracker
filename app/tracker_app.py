@@ -2660,13 +2660,13 @@ def main():
     .header-top-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
     .header-top-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
     .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; width: auto !important; }
-    /* Logo: compact size – single img in header is the logo */
+    /* Logo: width > height (horizontal bar), compact */
     .header-top-bar + div img {
-        max-height: 32px !important; max-width: 88px !important; width: auto !important; height: auto !important;
+        max-height: 26px !important; max-width: 120px !important; width: auto !important; height: auto !important;
         object-fit: contain !important; object-position: left center !important; display: block !important; margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
-        min-width: 0 !important; max-width: 100px !important; padding: 0 4px 0 0 !important;
+        min-width: 0 !important; max-width: 125px !important; padding: 0 6px 0 0 !important;
     }
     .header-left-inner { display: flex !important; align-items: center !important; gap: 4px !important; flex-wrap: nowrap !important; }
     .header-brand-kp { color: #374151 !important; font-size: 0.8125rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
@@ -2860,7 +2860,7 @@ def main():
             with l1:
                 logo_path = _logo_path()
                 if logo_path:
-                    st.image(str(logo_path), width=80)
+                    st.image(str(logo_path), width=100)
                 else:
                     st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
             with l2:
