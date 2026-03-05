@@ -2687,7 +2687,7 @@ def main():
         box-sizing: border-box !important;
     }
     @media (min-width: 1024px) { .header-top-bar + div { padding: 0 20px !important; } }
-    @media (max-width: 768px) { .header-top-bar + div { padding: 0 10px !important; min-height: 52px !important; height: auto !important; } .header-brand-title { font-size: 0.9rem !important; } .header-status-pill { font-size: 0.7rem !important; } }
+    @media (max-width: 768px) { .header-top-bar + div { padding: 0 10px !important; min-height: 52px !important; height: auto !important; } .header-brand-title { font-size: 0.95rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
 
     /* All header columns and their content: vertically centered, no extra margin */
     .header-top-bar + div [data-testid="stHorizontalBlock"] {
@@ -2715,11 +2715,11 @@ def main():
     }
     .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 !important; margin: 0 !important; min-height: 0 !important; }
     .header-top-bar + div [data-testid="column"] { padding: 0 !important; margin: 0 !important; }
-    /* Center column: search bar - flex to take space, justify center */
+    /* Center column: search bar — less space, compact */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {
-        flex: 1 1 auto !important;
-        min-width: 200px !important;
-        max-width: 400px !important;
+        flex: 0 1 auto !important;
+        min-width: 140px !important;
+        max-width: 260px !important;
         justify-content: center !important;
     }
     /* Prominent search bar: single rounded bar with icon + input (center column inner row) */
@@ -2728,7 +2728,7 @@ def main():
         align-items: center !important;
         gap: 0 !important;
         width: 100% !important;
-        max-width: 360px !important;
+        max-width: 240px !important;
         margin: 0 auto !important;
         border: 1px solid #e5e7eb !important;
         border-radius: 8px !important;
@@ -2738,15 +2738,15 @@ def main():
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child { flex: 0 0 auto !important; }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child button {
-        width: 40px !important; min-width: 40px !important; height: 36px !important;
+        width: 32px !important; min-width: 32px !important; height: 32px !important;
         margin: 0 !important; padding: 0 !important; border: none !important;
         background: transparent !important; border-radius: 0 !important;
-        font-size: 0.9rem !important;
+        font-size: 0.85rem !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:last-child { flex: 1 1 auto !important; min-width: 0 !important; }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input {
-        height: 36px !important; min-height: 36px !important;
-        margin: 0 !important; padding: 6px 12px !important;
+        height: 32px !important; min-height: 32px !important;
+        margin: 0 !important; padding: 4px 8px !important;
         border: none !important; border-left: 1px solid #e5e7eb !important;
         border-radius: 0 !important; font-size: 0.8125rem !important;
         box-shadow: none !important;
@@ -2756,25 +2756,25 @@ def main():
     .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 !important; margin: 0 !important; min-height: 0 !important; }
     .header-top-bar + div [data-testid="column"] { padding: 0 !important; margin: 0 !important; }
 
-    /* 2. Left group: logo + title — align to center of row */
+    /* 2. Left group: logo + title — more space, larger font */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         min-width: 0 !important;
         max-width: none !important;
         display: flex !important;
         align-items: center !important;
-        gap: 12px !important;
-        flex: 0 1 auto !important;
+        gap: 14px !important;
+        flex: 1 1 auto !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] {
         display: flex !important;
         align-items: center !important;
-        gap: 12px !important;
+        gap: 14px !important;
         flex: 1 1 auto !important;
         min-width: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 24px !important;
-        max-width: 100px !important;
+        max-height: 32px !important;
+        max-width: 140px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -2786,10 +2786,10 @@ def main():
     .header-left-inner {
         display: flex !important;
         align-items: center !important;
-        gap: 12px !important;
+        gap: 14px !important;
         flex-wrap: nowrap !important;
     }
-    .header-divider-v { width: 1px !important; height: 18px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
+    .header-divider-v { width: 1px !important; height: 22px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
     .header-title-block {
         display: inline-flex !important;
         flex-direction: column !important;
@@ -2801,9 +2801,9 @@ def main():
     }
     .header-title-row { display: block !important; line-height: 1.2 !important; }
     .header-status-row { display: flex !important; align-items: center !important; gap: 6px !important; flex-wrap: nowrap !important; }
-    .header-brand-kp { color: #374151 !important; font-size: 0.75rem !important; font-weight: 600 !important; margin: 0 !important; }
-    .header-brand-title { color: #111827 !important; font-size: clamp(0.8125rem, 1.2vw + 0.6rem, 0.95rem) !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
-    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 4px !important; padding: 2px 6px !important; border-radius: 9999px !important; font-size: 0.7rem !important; font-weight: 500 !important; flex-shrink: 0 !important; }
+    .header-brand-kp { color: #374151 !important; font-size: 0.875rem !important; font-weight: 600 !important; margin: 0 !important; }
+    .header-brand-title { color: #111827 !important; font-size: clamp(0.95rem, 1.4vw + 0.6rem, 1.125rem) !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 4px !important; padding: 3px 8px !important; border-radius: 9999px !important; font-size: 0.8rem !important; font-weight: 500 !important; flex-shrink: 0 !important; }
     .header-status-pill.live { background: rgba(34,197,94,0.28) !important; color: #fff !important; border: 1px solid rgba(34,197,94,0.5) !important; }
     .header-status-pill.delayed { background: rgba(234,179,8,0.2) !important; color: #713f12 !important; border: 1px solid rgba(234,179,8,0.5) !important; }
     .header-status-pill.stale { background: rgba(220,38,38,0.2) !important; color: #fff !important; border: 1px solid rgba(220,38,38,0.5) !important; }
@@ -2811,7 +2811,7 @@ def main():
     .header-status-pill.live .header-status-dot { background: #22c55e !important; }
     .header-status-pill.delayed .header-status-dot { background: #eab308 !important; }
     .header-status-pill.stale .header-status-dot { background: #dc2626 !important; }
-    .header-updated-muted { color: #9ca3af !important; font-size: 0.75rem !important; font-weight: 400 !important; margin: 0 !important; }
+    .header-updated-muted { color: #9ca3af !important; font-size: 0.8125rem !important; font-weight: 400 !important; margin: 0 !important; }
 
     /* 3. Right group: search + action icons — single row, 12px gap, no overlap */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
@@ -3067,7 +3067,7 @@ def main():
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
         # Three sections: left (logo + title) | center (search bar) | right (icons + profile + sign out)
-        left_col, center_col, right_col = st.columns([1, 2, 1])
+        left_col, center_col, right_col = st.columns([2, 1, 1])
         with left_col:
             l1, l2 = st.columns([1, 5])
             with l1:
