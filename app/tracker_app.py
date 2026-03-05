@@ -2666,29 +2666,30 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* ========== Header layout refactor: flex, aligned, no overlap ========== */
-    /* 1. Main container: flex, center vertically, space between */
+    /* ========== Header layout: single baseline, all sections aligned ========== */
+    /* 1. Main container: fixed height, flex, all items vertically centered */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        min-height: 48px !important;
-        height: auto !important;
+        min-height: 56px !important;
+        height: 56px !important;
         max-width: 1280px !important;
         width: 100% !important;
         margin: 0 auto !important;
-        padding: 0 12px !important;
+        padding: 0 16px !important;
         border-bottom: 1px solid rgba(0,0,0,0.06) !important;
         background: rgba(255,255,255,0.72) !important;
         backdrop-filter: blur(12px) !important;
         -webkit-backdrop-filter: blur(12px) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         gap: 1rem !important;
+        box-sizing: border-box !important;
     }
-    @media (min-width: 1024px) { .header-top-bar + div { padding: 0 16px !important; } }
-    @media (max-width: 768px) { .header-top-bar + div { padding: 0 8px !important; min-height: 44px !important; } .header-brand-title { font-size: 1rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
+    @media (min-width: 1024px) { .header-top-bar + div { padding: 0 20px !important; } }
+    @media (max-width: 768px) { .header-top-bar + div { padding: 0 10px !important; min-height: 52px !important; height: auto !important; } .header-brand-title { font-size: 1rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
 
-    /* Horizontal block: three columns = left | center (search) | right */
+    /* All header columns and their content: vertically centered, no extra margin */
     .header-top-bar + div [data-testid="stHorizontalBlock"] {
         width: 100% !important;
         display: flex !important;
@@ -2696,12 +2697,24 @@ def main():
         align-items: center !important;
         gap: 1rem !important;
         flex-wrap: nowrap !important;
+        min-height: 56px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] [data-testid="column"] {
         display: flex !important;
         align-items: center !important;
         flex-shrink: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
+    .header-top-bar + div [data-testid="stVerticalBlock"] {
+        padding: 0 !important;
+        margin: 0 !important;
+        min-height: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 !important; margin: 0 !important; min-height: 0 !important; }
+    .header-top-bar + div [data-testid="column"] { padding: 0 !important; margin: 0 !important; }
     /* Center column: search bar - flex to take space, justify center */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {
         flex: 1 1 auto !important;
@@ -2743,7 +2756,7 @@ def main():
     .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 !important; margin: 0 !important; min-height: 0 !important; }
     .header-top-bar + div [data-testid="column"] { padding: 0 !important; margin: 0 !important; }
 
-    /* 2. Left group: logo + title — single row, consistent gap */
+    /* 2. Left group: logo + title — align to center of row */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         min-width: 0 !important;
         max-width: none !important;
@@ -2760,8 +2773,8 @@ def main():
         min-width: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 28px !important;
-        max-width: 120px !important;
+        max-height: 24px !important;
+        max-width: 100px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -2776,14 +2789,15 @@ def main():
         gap: 12px !important;
         flex-wrap: nowrap !important;
     }
-    .header-divider-v { width: 1px !important; height: 20px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
+    .header-divider-v { width: 1px !important; height: 18px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
     .header-title-block {
         display: inline-flex !important;
         flex-direction: column !important;
         align-items: flex-start !important;
         justify-content: center !important;
-        gap: 2px !important;
+        gap: 0 !important;
         flex-wrap: nowrap !important;
+        line-height: 1.25 !important;
     }
     .header-title-row { display: block !important; line-height: 1.2 !important; }
     .header-status-row { display: flex !important; align-items: center !important; gap: 6px !important; flex-wrap: nowrap !important; }
@@ -2891,7 +2905,7 @@ def main():
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button { margin: 0 !important; }
 
-    /* 4. Right-side profile and Sign out — horizontal alignment */
+    /* 4. Right-side profile and Sign out — same row, same height as icons */
     .header-avatar-chevron { display: inline-flex !important; align-items: center !important; gap: 4px !important; }
     .header-chevron { color: #6b7280 !important; font-size: 0.75rem !important; }
     .header-user-avatar {
@@ -2910,13 +2924,18 @@ def main():
         flex-shrink: 0 !important;
     }
     .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child > [data-testid="stVerticalBlock"] > div button[class*="secondary"] {
-        font-size: 0.8125rem !important;
-        font-weight: 500 !important;
+    /* Sign out button: same vertical center as icons (32px height) */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button {
         height: 32px !important;
         min-height: 32px !important;
         padding: 0 12px !important;
         margin: 0 !important;
+        font-size: 0.8125rem !important;
+        font-weight: 500 !important;
+        line-height: 1 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
     }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
@@ -3100,17 +3119,7 @@ def main():
             _sc1, _sc2 = st.columns([1, 12])
             with _sc1:
                 if st.button("🔍", key="header_search_btn", help="Search across all data"):
-                    _q = (st.session_state.get("header_search_q") or "").strip()
-                    st.session_state["show_header_search_results"] = True
-                    st.session_state["global_search_q"] = _q
-                    _qp = getattr(st, "query_params", None)
-                    if _qp is not None:
-                        try:
-                            _qp["open_search"] = "1"
-                            if _q:
-                                _qp["q"] = _q
-                        except Exception:
-                            pass
+                    st.session_state["_header_search_trigger"] = (st.session_state.get("header_search_q") or "").strip()
                     _rerun()
             with _sc2:
                 st.text_input(
