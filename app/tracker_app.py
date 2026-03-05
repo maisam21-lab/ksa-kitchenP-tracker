@@ -2774,25 +2774,30 @@ def main():
         margin: 0 !important;
         padding: 0 !important;
     }
-    /* Title + badge + Updated: flex, align-items center, line-height 1 (no baseline drift) */
+    .header-brand-name { color: #1e293b !important; font-weight: 700 !important; font-size: 1.125rem !important; letter-spacing: -0.02em !important; margin: 0 !important; }
+    .header-divider-v { width: 1px !important; height: 32px !important; background: #e2e8f0 !important; flex-shrink: 0 !important; margin: 0 !important; }
+    .header-logo-placeholder { width: 40px !important; height: 40px !important; min-width: 40px !important; min-height: 40px !important; background: #00766c !important; color: white !important; font-weight: 700 !important; font-size: 1.25rem !important; border-radius: 8px !important; display: flex !important; align-items: center !important; justify-content: center !important; }
+    /* Title block: two lines — h1 then status row (reference) */
     .header-title-block {
         display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-        gap: 12px !important;
-        flex-wrap: wrap !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        justify-content: center !important;
+        gap: 4px !important;
+        flex-wrap: nowrap !important;
         line-height: 1 !important;
         margin: 0 !important;
         padding: 0 !important;
     }
+    .header-status-row { display: flex !important; align-items: center !important; gap: 8px !important; flex-wrap: nowrap !important; margin: 0 !important; }
     .header-brand-title {
-        color: #111827 !important;
-        font-size: 1.25rem !important;
-        font-weight: 600 !important;
-        margin: 0 !important;
+        color: #0f172a !important;
+        font-size: 0.875rem !important;
+        font-weight: 700 !important;
+        margin: 0 0 2px 0 !important;
         letter-spacing: -0.02em !important;
-        line-height: 1 !important;
+        line-height: 1.2 !important;
+        display: block !important;
     }
     .header-status-pill {
         display: inline-flex !important;
@@ -2815,12 +2820,44 @@ def main():
     .header-status-pill.stale .header-status-dot { background: #dc2626 !important; }
     .header-updated-muted {
         color: #9ca3af !important;
-        font-size: 0.8125rem !important;
-        font-weight: 400 !important;
+        font-size: 0.6875rem !important;
+        font-weight: 500 !important;
         margin: 0 !important;
         line-height: 1 !important;
         display: inline-flex !important;
         align-items: center !important;
+    }
+
+    /* CENTER GROUP: search + Vacant badge (reference) */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        flex: 0 1 auto !important;
+        min-width: 0 !important;
+        height: 100% !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] {
+        width: 100% !important;
+        max-width: 320px !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input {
+        height: 40px !important; min-height: 40px !important;
+        margin: 0 !important; padding: 8px 12px !important;
+        border: 1px solid #e5e7eb !important; border-radius: 8px !important;
+        font-size: 0.875rem !important; line-height: 1 !important;
+    }
+    .header-vacant-badge {
+        display: inline-block !important;
+        padding: 4px 8px !important;
+        background: #f9fafb !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 4px !important;
+        font-size: 10px !important;
+        font-weight: 600 !important;
+        color: #6b7280 !important;
     }
 
     /* RIGHT GROUP: take remaining space, content aligned right */
@@ -2891,7 +2928,7 @@ def main():
         min-width: 96px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child button,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:nth-child(2) button {
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:nth-child(3) button {
         width: 40px !important;
         min-width: 40px !important;
         padding: 0 !important;
@@ -3081,35 +3118,45 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left (logo + title) | right (dark, help, avatar, sign out)
+    # Single-row top bar: left (logo + brand + divider + title) | center (search + Vacant) | right (help, notification, avatar, sign out)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
     _dark = st.session_state.get("dark_mode", False)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        # Two sections: left (logo + title) | right (icons + profile + sign out)
-        left_col, right_col = st.columns([1, 1])
+        # Three sections to match reference: left | center (search) | right
+        left_col, center_col, right_col = st.columns([1, 1, 1])
         with left_col:
             l1, l2 = st.columns([1, 5])
             with l1:
                 logo_path = _logo_path()
                 if logo_path:
                     st.image(str(logo_path), width=90)
-                # No KitchenPark text when no logo — avoid duplicate branding
+                else:
+                    st.markdown('<div class="header-logo-placeholder">K</div>', unsafe_allow_html=True)
             with l2:
                 st.markdown(
                     f'<div class="header-left-inner">'
+                    f'<span class="header-brand-name">KitchenPark</span>'
+                    f'<span class="header-divider-v"></span>'
                     f'<div class="header-title-block">'
-                    f'<span class="header-brand-title">KSA Kitchens Tracker</span>'
+                    f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                    f'<div class="header-status-row">'
                     f'<span class="header-status-pill {status_class}">'
-                    f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")}</span>'
+                    f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
                     f'<span class="header-updated-muted">{updated_ago}</span>'
-                    f'</div></div>',
+                    f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
+        with center_col:
+            _sc1, _sc2 = st.columns([5, 1])
+            with _sc1:
+                st.text_input("Search", key="header_search_q", placeholder="Search anything…", label_visibility="collapsed")
+            with _sc2:
+                st.markdown('<span class="header-vacant-badge">Vacant</span>', unsafe_allow_html=True)
         with right_col:
-            r1, r2, r3, r4 = st.columns(4)
+            r1, r2, r3, r4, r5 = st.columns(5)
             with r1:
                 st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
                 if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
@@ -3118,10 +3165,12 @@ def main():
                 st.markdown('</div>', unsafe_allow_html=True)
             with r2:
                 st.markdown(
-                    '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Contact">?</a>',
+                    '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
             with r3:
+                st.markdown('<button type="button" class="header-icon-btn header-notif-btn" title="Notifications">🔔</button>', unsafe_allow_html=True)
+            with r4:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3129,7 +3178,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r4:
+            with r5:
                 if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
