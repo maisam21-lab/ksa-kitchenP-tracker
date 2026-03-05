@@ -2560,6 +2560,7 @@ def main():
         section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] .stCaption { color: #E2E8F0 !important; }
         section[data-testid="stSidebar"] input { background: #334155 !important; color: #F1F5F9 !important; border-color: #475569 !important; }
         h1 { background: #0F766E !important; color: white !important; font-weight: 700 !important; padding: 20px 28px !important; margin: 0 0 1.5rem 0 !important; border-radius: 0 10px 10px 0 !important; }
+        .header-top-bar + div h1, .header-brand-title { background: transparent !important; color: inherit !important; padding: 0 !important; margin: 0 !important; border-radius: 0 !important; }
         h2, h3, p, span, label { color: #E2E8F0 !important; }
         .stCaption { color: #94A3B8 !important; }
         .stTabs [data-baseweb="tab-list"] { background: #1E293B; padding: 8px; border-radius: 10px; overflow-x: auto !important; overflow-y: hidden !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
@@ -2591,6 +2592,7 @@ def main():
         section[data-testid="stSidebar"] { background: #FFFFFF; border-right: 4px solid #0F766E; }
         section[data-testid="stSidebar"] .stMarkdown { color: #1E293B !important; font-weight: 600 !important; }
         h1 { background: #0F766E !important; color: white !important; font-weight: 700 !important; padding: 20px 28px !important; margin: 0 0 1.5rem 0 !important; border-radius: 0 10px 10px 0 !important; }
+        .header-top-bar + div h1, .header-brand-title { background: transparent !important; color: inherit !important; padding: 0 !important; margin: 0 !important; border-radius: 0 !important; }
         h2, h3 { color: #1E293B !important; font-weight: 600 !important; }
         .stTabs [data-baseweb="tab-list"] { gap: 8px; background: #F1F5F9; padding: 8px; border-radius: 10px; overflow-x: auto !important; overflow-y: hidden !important; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
         .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { height: 10px; }
@@ -2800,6 +2802,9 @@ def main():
         letter-spacing: -0.02em !important;
         line-height: 1.2 !important;
         display: block !important;
+        background: transparent !important;
+        padding: 0 !important;
+        border-radius: 0 !important;
     }
     .header-status-pill {
         display: inline-flex !important;
