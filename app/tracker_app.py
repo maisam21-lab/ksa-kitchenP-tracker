@@ -2639,7 +2639,7 @@ def main():
     }
     /* Hide Streamlit default header (teal bar with page title and link icon) */
     header[data-testid="stHeader"] { display: none !important; }
-    /* ========== Header: single-row top bar 72px ========== */
+    /* ========== Header: Tailwind-style single row (px-6 py-3, border-gray-100, shadow-sm) ========== */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
@@ -2649,10 +2649,10 @@ def main():
         max-width: 1280px !important;
         width: 100% !important;
         margin: 0 auto !important;
-        padding: 0 24px !important;
-        border-bottom: 1px solid #e5e7eb !important;
+        padding: 12px 24px !important;
+        border-bottom: 1px solid #f3f4f6 !important;
         background: #ffffff !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
+        box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         box-sizing: border-box !important;
     }
@@ -2704,12 +2704,12 @@ def main():
         margin-bottom: 0 !important;
     }
 
-    /* LEFT GROUP: logo + divider + title/status + dark toggle */
+    /* LEFT GROUP: logo + KitchenPark + divider + title/status + dark (gap-6) */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
         flex-direction: row !important;
         align-items: center !important;
-        gap: 16px !important;
+        gap: 24px !important;
         min-width: 320px !important;
         flex: 0 1 auto !important;
         max-width: fit-content !important;
@@ -2719,7 +2719,7 @@ def main():
         display: flex !important;
         flex-direction: row !important;
         align-items: center !important;
-        gap: 0 !important;
+        gap: 12px !important;
         min-width: 320px !important;
         flex: 0 1 auto !important;
         height: 72px !important;
@@ -2730,7 +2730,23 @@ def main():
         height: 72px !important;
         min-height: 72px !important;
     }
-    /* Logo: fixed 40x40 container — prevent banner expansion */
+    /* Logo: 40x40 teal box (#00766c), rounded-lg — or image inside */
+    .header-logo-box {
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
+        background: #00766c !important;
+        border-radius: 8px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 1.25rem !important;
+        line-height: 1 !important;
+        margin: 0 !important;
+    }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
@@ -2746,10 +2762,12 @@ def main():
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
+        background: #00766c !important;
+        border-radius: 8px !important;
     }
     .header-top-bar + div img {
         max-height: 40px !important;
-        max-width: 140px !important;
+        max-width: 40px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -2757,6 +2775,15 @@ def main():
         display: block !important;
         margin: 0 !important;
         flex-shrink: 0 !important;
+    }
+    .header-kitchenpark-text {
+        font-weight: 700 !important;
+        color: #334155 !important;
+        font-size: 1.125rem !important;
+        letter-spacing: -0.025em !important;
+        line-height: 1 !important;
+        margin: 0 !important;
+        white-space: nowrap !important;
     }
     .header-left-inner {
         display: flex !important;
@@ -2779,7 +2806,8 @@ def main():
     .header-divider {
         width: 1px !important;
         min-width: 1px !important;
-        align-self: stretch !important;
+        height: 32px !important;
+        align-self: center !important;
         background: #e5e7eb !important;
         margin: 0 16px !important;
         padding: 0 !important;
@@ -2789,20 +2817,20 @@ def main():
         flex-direction: column !important;
         align-items: flex-start !important;
         justify-content: center !important;
-        gap: 6px !important;
+        gap: 4px !important;
         flex-wrap: nowrap !important;
-        line-height: 1.25 !important;
+        line-height: 1 !important;
         margin: 0 !important;
         padding: 0 !important;
     }
-    .header-status-row { display: flex !important; align-items: center !important; gap: 10px !important; flex-wrap: nowrap !important; margin: 0 !important; }
+    .header-status-row { display: flex !important; align-items: center !important; gap: 8px !important; flex-wrap: nowrap !important; margin: 0 !important; }
     .header-brand-title {
-        color: #111827 !important;
-        font-size: 1rem !important;
-        font-weight: 600 !important;
-        margin: 0 !important;
+        color: #0f172a !important;
+        font-size: 0.875rem !important;
+        font-weight: 700 !important;
+        margin: 0 0 4px 0 !important;
         letter-spacing: -0.025em !important;
-        line-height: 1.25 !important;
+        line-height: 1 !important;
         display: block !important;
         background: transparent !important;
         padding: 0 !important;
@@ -2811,39 +2839,38 @@ def main():
     .header-status-pill {
         display: inline-flex !important;
         align-items: center !important;
-        gap: 5px !important;
-        padding: 4px 10px !important;
+        gap: 4px !important;
+        padding: 2px 8px !important;
         border-radius: 9999px !important;
-        font-size: 0.75rem !important;
-        font-weight: 600 !important;
+        font-size: 10px !important;
+        font-weight: 700 !important;
         flex-shrink: 0 !important;
         margin: 0 !important;
         line-height: 1 !important;
-        letter-spacing: 0.02em !important;
     }
-    .header-status-pill.live { background: #dcfce7 !important; color: #166534 !important; border: 1px solid #86efac !important; }
-    .header-status-pill.delayed { background: #fef9c3 !important; color: #854d0e !important; border: 1px solid #fde047 !important; }
-    .header-status-pill.stale { background: #fee2e2 !important; color: #991b1b !important; border: 1px solid #fca5a5 !important; }
+    .header-status-pill.live { background: #dcfce7 !important; color: #15803d !important; border: none !important; }
+    .header-status-pill.delayed { background: #fef9c3 !important; color: #854d0e !important; border: none !important; }
+    .header-status-pill.stale { background: #fee2e2 !important; color: #991b1b !important; border: none !important; }
     .header-status-dot { width: 6px !important; height: 6px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
-    .header-status-pill.live .header-status-dot { background: #22c55e !important; }
+    .header-status-pill.live .header-status-dot { background: #16a34a !important; }
     .header-status-pill.delayed .header-status-dot { background: #eab308 !important; }
     .header-status-pill.stale .header-status-dot { background: #ef4444 !important; }
     .header-updated-muted {
-        color: #6b7280 !important;
-        font-size: 0.75rem !important;
-        font-weight: 400 !important;
+        color: #9ca3af !important;
+        font-size: 11px !important;
+        font-weight: 500 !important;
         margin: 0 !important;
         line-height: 1 !important;
         display: inline-flex !important;
         align-items: center !important;
     }
 
-    /* RIGHT GROUP: Help, Avatar, Sign out — generous gap, vertical center */
+    /* Right: help (bordered area) + avatar + Sign out — gap-4 */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
-        gap: 24px !important;
+        gap: 16px !important;
         flex: 1 1 auto !important;
         min-width: 0 !important;
         height: 72px !important;
@@ -2852,7 +2879,7 @@ def main():
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
-        gap: 24px !important;
+        gap: 16px !important;
         flex-wrap: nowrap !important;
         height: 72px !important;
     }
@@ -2864,6 +2891,13 @@ def main():
         margin: 0 !important;
         height: 72px !important;
         min-height: 72px !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child {
+        border-left: 1px solid #f3f4f6 !important;
+        border-right: 1px solid #f3f4f6 !important;
+        padding-left: 16px !important;
+        padding-right: 16px !important;
+        margin-right: 4px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stVerticalBlock"] {
         padding: 0 !important;
@@ -2905,16 +2939,18 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button:hover {
         background-color: rgba(0,0,0,0.04) !important;
     }
-    /* Sign out: prominent, px-6 py-2, border-radius, clean text */
+    /* Sign out: px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:last-child button {
         white-space: nowrap !important;
         min-width: 96px !important;
-        padding: 8px 24px !important;
+        padding: 8px 16px !important;
         border-radius: 8px !important;
         background: transparent !important;
-        border: 1px solid #e5e7eb !important;
+        border: 1px solid #d1d5db !important;
         color: #374151 !important;
         font-size: 0.875rem !important;
+        font-weight: 600 !important;
+        transition: background-color 0.15s ease, border-color 0.15s ease !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:last-child button:hover {
         background: #f9fafb !important;
@@ -2947,12 +2983,12 @@ def main():
     .header-icon-btn:hover { background: rgba(0,0,0,0.06) !important; color: #111827 !important; }
     .header-help-btn {
         border: 1px solid #e5e7eb !important;
-        border-radius: 8px !important;
+        border-radius: 9999px !important;
         font-weight: 600 !important;
-        background: #f9fafb !important;
-        color: #374151 !important;
+        background: transparent !important;
+        color: #6b7280 !important;
     }
-    .header-help-btn:hover { background: #f3f4f6 !important; border-color: #d1d5db !important; }
+    .header-help-btn:hover { background: #f9fafb !important; color: #059669 !important; border-color: #d1d5db !important; }
     .header-dark-toggle-wrap { display: inline-flex !important; align-items: center !important; margin: 0 !important; height: 40px !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button {
@@ -2988,10 +3024,10 @@ def main():
         min-width: 36px !important;
         min-height: 36px !important;
         border-radius: 50% !important;
-        background: #166534 !important;
+        background: #064e3b !important;
         color: #ffffff !important;
-        font-size: 0.8125rem !important;
-        font-weight: 600 !important;
+        font-size: 0.75rem !important;
+        font-weight: 700 !important;
         flex-shrink: 0 !important;
         margin: 0 !important;
         line-height: 1 !important;
@@ -3127,12 +3163,16 @@ def main():
     with st.container():
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            l1, l2, l3 = st.columns([1, 12, 1])
+            l1, l2, l3, l4 = st.columns([1, 2, 12, 1])
             with l1:
                 logo_path = _logo_path()
                 if logo_path:
                     st.image(str(logo_path), use_container_width=True)
+                else:
+                    st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
             with l2:
+                st.markdown('<span class="header-kitchenpark-text">KitchenPark</span>', unsafe_allow_html=True)
+            with l3:
                 st.markdown(
                     f'<div class="header-brand-status">'
                     f'<div class="header-divider"></div>'
@@ -3145,7 +3185,7 @@ def main():
                     f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
-            with l3:
+            with l4:
                 st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
                 if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
                     st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
