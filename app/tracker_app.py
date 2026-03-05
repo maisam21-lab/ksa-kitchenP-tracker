@@ -2704,7 +2704,7 @@ def main():
         margin-bottom: 0 !important;
     }
 
-    /* LEFT GROUP: logo + title/status in one row, no wrap */
+    /* LEFT GROUP: logo + divider + title/status + dark toggle */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
         flex-direction: row !important;
@@ -2719,7 +2719,7 @@ def main():
         display: flex !important;
         flex-direction: row !important;
         align-items: center !important;
-        gap: 16px !important;
+        gap: 0 !important;
         min-width: 320px !important;
         flex: 0 1 auto !important;
         height: 72px !important;
@@ -2766,12 +2766,30 @@ def main():
         margin: 0 !important;
         padding: 0 !important;
     }
+    /* Brand + status: vertical divider then title block */
+    .header-brand-status {
+        display: flex !important;
+        align-items: center !important;
+        flex: 1 !important;
+        min-width: 0 !important;
+        height: 72px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .header-divider {
+        width: 1px !important;
+        min-width: 1px !important;
+        align-self: stretch !important;
+        background: #e5e7eb !important;
+        margin: 0 16px !important;
+        padding: 0 !important;
+    }
     .header-title-block {
         display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-        gap: 10px !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        justify-content: center !important;
+        gap: 6px !important;
         flex-wrap: nowrap !important;
         line-height: 1.25 !important;
         margin: 0 !important;
@@ -2820,12 +2838,12 @@ def main():
         align-items: center !important;
     }
 
-    /* RIGHT GROUP: take remaining space, content aligned right */
+    /* RIGHT GROUP: Help, Avatar, Sign out — generous gap, vertical center */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
-        gap: 12px !important;
+        gap: 24px !important;
         flex: 1 1 auto !important;
         min-width: 0 !important;
         height: 72px !important;
@@ -2834,7 +2852,7 @@ def main():
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
-        gap: 12px !important;
+        gap: 24px !important;
         flex-wrap: nowrap !important;
         height: 72px !important;
     }
@@ -2887,13 +2905,16 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button:hover {
         background-color: rgba(0,0,0,0.04) !important;
     }
-    /* Sign out: outline/secondary style */
+    /* Sign out: prominent, px-6 py-2, border-radius, clean text */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:last-child button {
         white-space: nowrap !important;
         min-width: 96px !important;
+        padding: 8px 24px !important;
+        border-radius: 8px !important;
         background: transparent !important;
         border: 1px solid #e5e7eb !important;
         color: #374151 !important;
+        font-size: 0.875rem !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:last-child button:hover {
         background: #f9fafb !important;
@@ -2924,7 +2945,14 @@ def main():
         line-height: 1 !important;
     }
     .header-icon-btn:hover { background: rgba(0,0,0,0.06) !important; color: #111827 !important; }
-    .header-help-btn { border: 1px solid #e5e7eb !important; border-radius: 50% !important; font-weight: 600 !important; }
+    .header-help-btn {
+        border: 1px solid #e5e7eb !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        background: #f9fafb !important;
+        color: #374151 !important;
+    }
+    .header-help-btn:hover { background: #f3f4f6 !important; border-color: #d1d5db !important; }
     .header-dark-toggle-wrap { display: inline-flex !important; align-items: center !important; margin: 0 !important; height: 40px !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button {
@@ -2960,10 +2988,10 @@ def main():
         min-width: 36px !important;
         min-height: 36px !important;
         border-radius: 50% !important;
-        background: #0f766e !important;
-        color: white !important;
-        font-weight: 600 !important;
+        background: #166534 !important;
+        color: #ffffff !important;
         font-size: 0.8125rem !important;
+        font-weight: 600 !important;
         flex-shrink: 0 !important;
         margin: 0 !important;
         line-height: 1 !important;
@@ -3099,14 +3127,15 @@ def main():
     with st.container():
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            l1, l2 = st.columns([1, 5])
+            l1, l2, l3 = st.columns([1, 12, 1])
             with l1:
                 logo_path = _logo_path()
                 if logo_path:
                     st.image(str(logo_path), use_container_width=True)
             with l2:
                 st.markdown(
-                    f'<div class="header-left-inner">'
+                    f'<div class="header-brand-status">'
+                    f'<div class="header-divider"></div>'
                     f'<div class="header-title-block">'
                     f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
                     f'<div class="header-status-row">'
@@ -3116,20 +3145,20 @@ def main():
                     f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
-        with right_col:
-            r1, r2, r3, r4 = st.columns(4)
-            with r1:
+            with l3:
                 st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
                 if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
                     st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
                     _rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-            with r2:
+        with right_col:
+            r1, r2, r3 = st.columns(3)
+            with r1:
                 st.markdown(
                     '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
-            with r3:
+            with r2:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3137,7 +3166,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r4:
+            with r3:
                 if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
