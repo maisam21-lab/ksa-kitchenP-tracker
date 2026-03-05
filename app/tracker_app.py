@@ -2828,38 +2828,6 @@ def main():
         align-items: center !important;
     }
 
-    /* CENTER GROUP: search + Vacant badge (reference) */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        flex: 0 1 auto !important;
-        min-width: 0 !important;
-        height: 100% !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] {
-        width: 100% !important;
-        max-width: 320px !important;
-        display: flex !important;
-        align-items: center !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input {
-        height: 40px !important; min-height: 40px !important;
-        margin: 0 !important; padding: 8px 12px !important;
-        border: 1px solid #e5e7eb !important; border-radius: 8px !important;
-        font-size: 0.875rem !important; line-height: 1 !important;
-    }
-    .header-vacant-badge {
-        display: inline-block !important;
-        padding: 4px 8px !important;
-        background: #f9fafb !important;
-        border: 1px solid #e5e7eb !important;
-        border-radius: 4px !important;
-        font-size: 10px !important;
-        font-weight: 600 !important;
-        color: #6b7280 !important;
-    }
-
     /* RIGHT GROUP: take remaining space, content aligned right */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
         display: flex !important;
@@ -2927,8 +2895,7 @@ def main():
         white-space: nowrap !important;
         min-width: 96px !important;
     }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child button,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:nth-child(3) button {
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child button {
         width: 40px !important;
         min-width: 40px !important;
         padding: 0 !important;
@@ -3118,15 +3085,15 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left (logo + brand + divider + title) | center (search + Vacant) | right (help, notification, avatar, sign out)
+    # Single-row top bar: left (logo + brand + divider + title) | right (dark toggle, help, avatar, sign out)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
     _dark = st.session_state.get("dark_mode", False)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        # Three sections to match reference: left | center (search) | right
-        left_col, center_col, right_col = st.columns([1, 1, 1])
+        # Two sections: left | right (dark toggle aligned with other controls)
+        left_col, right_col = st.columns([1, 1])
         with left_col:
             l1, l2 = st.columns([1, 5])
             with l1:
@@ -3149,14 +3116,8 @@ def main():
                     f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
-        with center_col:
-            _sc1, _sc2 = st.columns([5, 1])
-            with _sc1:
-                st.text_input("Search", key="header_search_q", placeholder="Search anything…", label_visibility="collapsed")
-            with _sc2:
-                st.markdown('<span class="header-vacant-badge">Vacant</span>', unsafe_allow_html=True)
         with right_col:
-            r1, r2, r3, r4, r5 = st.columns(5)
+            r1, r2, r3, r4 = st.columns(4)
             with r1:
                 st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
                 if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
@@ -3169,8 +3130,6 @@ def main():
                     unsafe_allow_html=True,
                 )
             with r3:
-                st.markdown('<button type="button" class="header-icon-btn header-notif-btn" title="Notifications">🔔</button>', unsafe_allow_html=True)
-            with r4:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3178,7 +3137,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r5:
+            with r4:
                 if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
