@@ -2516,37 +2516,6 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
-    # 1) URL-driven header search: ?open_search=1&q=term — show search results in main area (no Search tab)
-    _qp = getattr(st, "query_params", None)
-    if _qp is not None:
-        _os = _qp.get("open_search")
-        _os_val = _os[0] if isinstance(_os, list) else _os if _os is not None else None
-        if _os_val:
-            st.session_state["show_header_search_results"] = True
-            _q = _qp.get("q")
-            st.session_state["global_search_q"] = str((_q[0] if isinstance(_q, list) else _q) or "").strip() if _q else ""
-            try:
-                del _qp["open_search"]
-                if "q" in _qp:
-                    del _qp["q"]
-            except Exception:
-                pass
-            _rerun()
-
-    # 2) Header search button (session-state trigger): show search results in main area
-    if "_header_search_trigger" in st.session_state:
-        st.session_state["show_header_search_results"] = True
-        st.session_state["global_search_q"] = (st.session_state.get("_header_search_trigger") or "").strip()
-        del st.session_state["_header_search_trigger"]
-        if _qp is not None:
-            try:
-                _qp["open_search"] = "1"
-                if st.session_state.get("global_search_q"):
-                    _qp["q"] = st.session_state["global_search_q"]
-            except Exception:
-                pass
-        # Do not _rerun() — continue so we reach the search-results block and show results
-
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
     _streamlit_user = getattr(st, "user", None)
     _verified_email = None
@@ -2732,8 +2701,6 @@ def main():
     }
     /* 2) Shared control height — .headerCtrl equivalent for all header controls */
     .headerCtrl,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child button,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button,
     .header-dark-toggle-wrap button,
     .header-icon-btn {
@@ -2851,78 +2818,6 @@ def main():
         display: inline-flex !important;
         align-items: center !important;
     }
-
-    /* CENTER GROUP: height 100%, align-items center */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        flex: 0 1 auto !important;
-        min-width: 140px !important;
-        max-width: 260px !important;
-        height: 100% !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] {
-        height: 100% !important;
-        min-height: 72px !important;
-        display: flex !important;
-        align-items: center !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] > div {
-        width: 100% !important;
-        display: flex !important;
-        align-items: center !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
-        display: flex !important;
-        align-items: center !important;
-        gap: 8px !important;
-        width: 100% !important;
-        max-width: 240px !important;
-        margin: 0 auto !important;
-        border: 1px solid #e5e7eb !important;
-        border-radius: 8px !important;
-        overflow: hidden !important;
-        background: #fff !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child { flex: 0 0 auto !important; }
-    /* Search icon button: 40px square */
-    /* Search icon button: 40px square (headerCtrl) */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child button {
-        width: 40px !important;
-        min-width: 40px !important;
-        height: 40px !important;
-        min-height: 40px !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: none !important;
-        background: transparent !important;
-        border-radius: 0 !important;
-        font-size: 0.9rem !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        line-height: 1 !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:last-child { flex: 1 1 auto !important; min-width: 0 !important; }
-    /* Search input: 40px height */
-    /* Search input: exactly 40px (headerCtrl) */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input {
-        height: 40px !important;
-        min-height: 40px !important;
-        margin: 0 !important;
-        padding: 8px 12px !important;
-        border: none !important;
-        border-left: 1px solid #e5e7eb !important;
-        border-radius: 0 !important;
-        font-size: 0.8125rem !important;
-        box-shadow: none !important;
-        line-height: 1 !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input:focus { box-shadow: none !important; }
 
     /* RIGHT GROUP: height 100%, align-items center */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
@@ -3182,30 +3077,15 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left (logo + title) | center (search) | right (dark, help, avatar, sign out)
+    # Single-row top bar: left (logo + title) | right (dark, help, avatar, sign out)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
-    _qp = getattr(st, "query_params", None)
-    if _qp is not None:
-        _os = _qp.get("open_search")
-        _os_val = _os[0] if isinstance(_os, list) else _os
-        if _os_val:
-            st.session_state["show_header_search_results"] = True
-            _q = _qp.get("q")
-            st.session_state["global_search_q"] = str((_q[0] if isinstance(_q, list) else _q) or "").strip() if _q else ""
-            try:
-                del _qp["open_search"]
-                if "q" in _qp:
-                    del _qp["q"]
-            except Exception:
-                pass
-            _rerun()
     _dark = st.session_state.get("dark_mode", False)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        # Three sections: left (logo + title) | center (search bar) | right (icons + profile + sign out)
-        left_col, center_col, right_col = st.columns([2, 1, 1])
+        # Two sections: left (logo + title) | right (icons + profile + sign out)
+        left_col, right_col = st.columns([3, 1])
         with left_col:
             l1, l2 = st.columns([1, 5])
             with l1:
@@ -3224,21 +3104,6 @@ def main():
                     f'</div></div>',
                     unsafe_allow_html=True,
                 )
-        with center_col:
-            st.markdown('<div class="header-search-bar-wrap">', unsafe_allow_html=True)
-            _sc1, _sc2 = st.columns([1, 12])
-            with _sc1:
-                if st.button("🔍", key="header_search_btn", help="Search across all data"):
-                    st.session_state["_header_search_trigger"] = (st.session_state.get("header_search_q") or "").strip()
-                    _rerun()
-            with _sc2:
-                st.text_input(
-                    "Search",
-                    key="header_search_q",
-                    placeholder="Search anything…",
-                    label_visibility="collapsed",
-                )
-            st.markdown('</div>', unsafe_allow_html=True)
         with right_col:
             r1, r2, r3, r4 = st.columns(4)
             with r1:
@@ -3298,7 +3163,7 @@ def main():
         user_role = "super_user"
     st.session_state["user_role"] = user_role
 
-    # Product shape: no Search tab — search is header-only; results show in main area when used
+    # Product shape: section navigation (no Search tab)
     if _is_developer() or user_role == "super_user":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Data", "Admin / Data Health"]
     else:
@@ -3325,33 +3190,6 @@ def main():
             ):
                 st.session_state["section_radio"] = opt
                 _rerun()
-
-    # Header search results (no Search tab — search only in header; results show here when used)
-    if st.session_state.get("show_header_search_results"):
-        st.caption("Search across main data, Execution Log, and every sheet tab.")
-        q = (st.session_state.get("global_search_q") or "").strip()
-        if st.button("← Close search results", key="header_search_close", type="secondary"):
-            st.session_state["show_header_search_results"] = False
-            _rerun()
-        if q:
-            results = _search_all_tabs(q)
-            if not results:
-                st.info("No matches found.")
-            else:
-                total = sum(len(rows) for rows in results.values())
-                st.success(f"Found **{total}** row(s) in **{len(results)}** tab(s).")
-                for i, (tab_id, rows) in enumerate(results.items()):
-                    with st.expander(f"**{tab_id}** — {len(rows)} row(s)", expanded=True):
-                        if rows and HAS_EXCEL:
-                            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-                        elif rows:
-                            for i, r in enumerate(rows[:50]):
-                                st.json(r)
-                            if len(rows) > 50:
-                                st.caption(f"… and {len(rows) - 50} more.")
-        else:
-            st.caption("Enter a search term in the header and click the search icon.")
-        st.stop()
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
