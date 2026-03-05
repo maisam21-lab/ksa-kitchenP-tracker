@@ -2516,13 +2516,13 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
-    # 1) URL-driven search: ?open_search=1&q=term — switch to Search tab (works after deploy / when session state is reset)
+    # 1) URL-driven header search: ?open_search=1&q=term — show search results in main area (no Search tab)
     _qp = getattr(st, "query_params", None)
     if _qp is not None:
         _os = _qp.get("open_search")
         _os_val = _os[0] if isinstance(_os, list) else _os if _os is not None else None
         if _os_val:
-            st.session_state["section_radio"] = "Search"
+            st.session_state["show_header_search_results"] = True
             _q = _qp.get("q")
             st.session_state["global_search_q"] = str((_q[0] if isinstance(_q, list) else _q) or "").strip() if _q else ""
             try:
@@ -2533,12 +2533,11 @@ def main():
                 pass
             _rerun()
 
-    # 2) Header search button (session-state trigger): switch to Search tab with query
+    # 2) Header search button (session-state trigger): show search results in main area
     if "_header_search_trigger" in st.session_state:
-        st.session_state["section_radio"] = "Search"
+        st.session_state["show_header_search_results"] = True
         st.session_state["global_search_q"] = (st.session_state.get("_header_search_trigger") or "").strip()
         del st.session_state["_header_search_trigger"]
-        # Also set URL so next run shows Search even if session state is reset (e.g. on Streamlit Cloud)
         if _qp is not None:
             try:
                 _qp["open_search"] = "1"
@@ -2724,6 +2723,12 @@ def main():
     .header-icon-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 30px !important; height: 30px !important; border-radius: 6px !important; color: #6b7280 !important; text-decoration: none !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; border: none !important; background: transparent !important; cursor: pointer !important; }
     .header-icon-btn:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; }
     .header-search-wrap input { max-height: 32px !important; font-size: 0.875rem !important; }
+    /* Header search row: align input and 🔍 button on same baseline */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child { align-items: center !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] { align-items: center !important; gap: 4px !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; min-height: 0 !important; display: flex !important; align-items: center !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child input { height: 32px !important; min-height: 32px !important; margin: 0 !important; box-sizing: border-box !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child button { height: 32px !important; min-height: 32px !important; margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; }
     .header-help-btn { border: 1px solid #e5e7eb !important; border-radius: 50% !important; font-weight: 600 !important; }
     .header-bell-wrap { position: relative !important; display: inline-flex !important; }
     .header-bell-badge { position: absolute !important; top: -1px !important; right: -1px !important; min-width: 14px !important; height: 14px !important; padding: 0 3px !important; border-radius: 999px !important; background: #0f766e !important; color: #fff !important; font-size: 0.6rem !important; font-weight: 700 !important; display: flex !important; align-items: center !important; justify-content: center !important; }
@@ -2886,10 +2891,9 @@ def main():
         _os = _qp.get("open_search")
         _os_val = _os[0] if isinstance(_os, list) else _os
         if _os_val:
-            st.session_state["section_radio"] = "Search"
+            st.session_state["show_header_search_results"] = True
             _q = _qp.get("q")
-            if _q is not None:
-                st.session_state["global_search_q"] = (_q[0] if isinstance(_q, list) else _q) or ""
+            st.session_state["global_search_q"] = str((_q[0] if isinstance(_q, list) else _q) or "").strip() if _q else ""
             try:
                 del _qp["open_search"]
                 if "q" in _qp:
@@ -2941,9 +2945,8 @@ def main():
                 with header_btn_col:
                     if st.button("🔍", key="header_search_btn", help="Search across all data"):
                         _q = (st.session_state.get("header_search_q") or "").strip()
-                        st.session_state["section_radio"] = "Search"
+                        st.session_state["show_header_search_results"] = True
                         st.session_state["global_search_q"] = _q
-                        # Use URL so Search tab opens reliably after deploy (session state can be reset)
                         _qp = getattr(st, "query_params", None)
                         if _qp is not None:
                             try:
@@ -3020,20 +3023,16 @@ def main():
         user_role = "super_user"
     st.session_state["user_role"] = user_role
 
-    # Product shape (Feb 18): AEs see Kitchen Master Data, Dashboard, Discussions, Search. Developers/super_user also see Data and Admin.
+    # Product shape: no Search tab — search is header-only; results show in main area when used
     if _is_developer() or user_role == "super_user":
-        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Data", "Search", "Admin / Data Health"]
+        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Data", "Admin / Data Health"]
     else:
-        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Search"]
-    # If user opened Search from header (open_search=1), show Search tab for this run even if it were missing
-    if "Search" not in section_options and st.session_state.get("section_radio") == "Search":
-        section_options = list(section_options) + ["Search"]
-
-    # Website-style layout: section navigation as tabs (buttons, no radio dots)
+        section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
+    # Website-style layout: section navigation as tabs
     if "section_radio" not in st.session_state:
         st.session_state["section_radio"] = section_options[0]
     section = st.session_state["section_radio"]
-    # Ensure current value is in options (e.g. after role change)
+    # Ensure current value is in options (e.g. after role change or Search tab removed)
     if section not in section_options:
         section = section_options[0]
         st.session_state["section_radio"] = section
@@ -3077,6 +3076,33 @@ def main():
             if st.button("Close", key="notif_close"):
                 st.session_state.pop("show_notifications", None)
                 _rerun()
+
+    # Header search results (no Search tab — search only in header; results show here when used)
+    if st.session_state.get("show_header_search_results"):
+        st.caption("Search across main data, Execution Log, and every sheet tab.")
+        q = (st.session_state.get("global_search_q") or "").strip()
+        if st.button("← Close search results", key="header_search_close", type="secondary"):
+            st.session_state["show_header_search_results"] = False
+            _rerun()
+        if q:
+            results = _search_all_tabs(q)
+            if not results:
+                st.info("No matches found.")
+            else:
+                total = sum(len(rows) for rows in results.values())
+                st.success(f"Found **{total}** row(s) in **{len(results)}** tab(s).")
+                for i, (tab_id, rows) in enumerate(results.items()):
+                    with st.expander(f"**{tab_id}** — {len(rows)} row(s)", expanded=True):
+                        if rows and HAS_EXCEL:
+                            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                        elif rows:
+                            for i, r in enumerate(rows[:50]):
+                                st.json(r)
+                            if len(rows) > 50:
+                                st.caption(f"… and {len(rows) - 50} more.")
+        else:
+            st.caption("Enter a search term in the header and click the search icon.")
+        st.stop()
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
@@ -4185,33 +4211,6 @@ def main():
 - Under the value cards we show how many kitchens have no List price (included as $0).  
 - Use **Value — data quality (QA)** expander for counts per metric.
             """)
-        return
-
-    # Search (all tabs)
-    if section == "Search":
-        st.caption("Find text across main data, Execution Log, and every sheet tab.")
-        # Pre-fill from header search when we navigated here via header 🔍
-        search_input = st.text_input("Search", key="global_search_q", placeholder="Type to search across all data…")
-        run_search = st.button("Search", key="btn_global_search")
-        if run_search or (search_input and (search_input or "").strip()):
-            if search_input and search_input.strip():
-                results = _search_all_tabs(search_input.strip())
-                if not results:
-                    st.info("No matches found.")
-                else:
-                    total = sum(len(rows) for rows in results.values())
-                    st.success(f"Found **{total}** row(s) in **{len(results)}** tab(s).")
-                    for i, (tab_id, rows) in enumerate(results.items()):
-                        with st.expander(f"**{tab_id}** — {len(rows)} row(s)", expanded=True):
-                            if rows and HAS_EXCEL:
-                                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-                            elif rows:
-                                for i, r in enumerate(rows[:50]):
-                                    st.json(r)
-                                if len(rows) > 50:
-                                    st.caption(f"… and {len(rows) - 50} more.")
-            else:
-                st.caption("Enter a search term and click Search.")
         return
 
     # Discussions: app-wide comments and questions (with replies)
