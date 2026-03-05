@@ -2669,22 +2669,22 @@ def main():
         min-width: 0 !important; max-width: 115px !important; padding: 0 4px 0 0 !important;
     }
     .header-left-inner { display: flex !important; align-items: center !important; gap: 2px !important; flex-wrap: nowrap !important; }
-    .header-brand-kp { color: #374151 !important; font-size: 0.75rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
+    .header-brand-kp { color: #374151 !important; font-size: 0.875rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
     .header-divider-v { width: 1px !important; height: 18px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
     .header-title-block { display: inline-flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 0 !important; flex-wrap: nowrap !important; }
-    .header-title-row { display: block !important; line-height: 1.1 !important; }
-    .header-status-row { display: flex !important; align-items: center !important; gap: 2px !important; flex-wrap: nowrap !important; }
-    .header-brand-title { color: #111827 !important; font-size: 0.875rem !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.1 !important; }
+    .header-title-row { display: block !important; line-height: 1.2 !important; }
+    .header-status-row { display: flex !important; align-items: center !important; gap: 4px !important; flex-wrap: nowrap !important; }
+    .header-brand-title { color: #111827 !important; font-size: 1rem !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
     /* Status pill */
-    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 2px !important; padding: 2px 6px !important; border-radius: 9999px !important; font-size: 0.625rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 3px !important; padding: 3px 8px !important; border-radius: 9999px !important; font-size: 0.7rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
     .header-status-pill.live { background: rgba(34,197,94,0.28) !important; color: #fff !important; border: 1px solid rgba(34,197,94,0.5) !important; }
     .header-status-pill.delayed { background: rgba(234,179,8,0.2) !important; color: #713f12 !important; border: 1px solid rgba(234,179,8,0.5) !important; }
     .header-status-pill.stale { background: rgba(220,38,38,0.2) !important; color: #fff !important; border: 1px solid rgba(220,38,38,0.5) !important; }
-    .header-status-dot { width: 4px !important; height: 4px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
+    .header-status-dot { width: 5px !important; height: 5px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
     .header-status-pill.live .header-status-dot { background: #22c55e !important; box-shadow: 0 0 8px rgba(34,197,94,0.7) !important; }
     .header-status-pill.delayed .header-status-dot { background: #eab308 !important; box-shadow: 0 0 6px rgba(234,179,8,0.5) !important; }
     .header-status-pill.stale .header-status-dot { background: #dc2626 !important; box-shadow: 0 0 6px rgba(220,38,38,0.5) !important; }
-    .header-updated-muted { color: #9ca3af !important; font-size: 0.65rem !important; font-weight: 400 !important; margin: 0 !important; }
+    .header-updated-muted { color: #9ca3af !important; font-size: 0.8rem !important; font-weight: 400 !important; margin: 0 !important; }
     /* Right: compact icons */
     .header-icon-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 28px !important; height: 28px !important; border-radius: 5px !important; color: #6b7280 !important; text-decoration: none !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; border: none !important; background: transparent !important; cursor: pointer !important; }
     .header-icon-btn:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; }
@@ -2699,9 +2699,10 @@ def main():
     .header-theme-switch .header-theme-thumb { position: absolute !important; left: 2px !important; top: 2px !important; width: 18px !important; height: 18px !important; border-radius: 50% !important; background: #fff !important; box-shadow: 0 1px 2px rgba(0,0,0,0.12) !important; transition: left 0.2s ease !important; z-index: 1 !important; }
     .header-theme-switch.dark .header-theme-thumb { left: 26px !important; }
     .header-avatar-chevron { display: inline-flex !important; align-items: center !important; gap: 2px !important; }
-    .header-chevron { color: #6b7280 !important; font-size: 0.6rem !important; }
-    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 28px !important; height: 28px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.7rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; flex-shrink: 0 !important; }
+    .header-chevron { color: #6b7280 !important; font-size: 0.7rem !important; }
+    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 30px !important; height: 30px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.8rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; flex-shrink: 0 !important; }
     .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button { font-size: 0.8125rem !important; font-weight: 500 !important; }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
     """, unsafe_allow_html=True)
@@ -2921,7 +2922,10 @@ def main():
                     st.session_state["developer_unlocked"] = False
                     _clear_session_params()
                     _rerun()
-    st.divider()
+    st.markdown(
+        '<div class="header-bottom-line" style="height:1px;background:#e5e7eb;margin:0 16px;max-width:1280px;margin-left:auto;margin-right:auto;"></div>',
+        unsafe_allow_html=True,
+    )
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
         if not current_user:
