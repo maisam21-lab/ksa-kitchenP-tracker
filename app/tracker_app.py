@@ -2651,7 +2651,7 @@ def main():
         -webkit-backdrop-filter: blur(12px) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
     }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 12px !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 8px !important; }
     @media (min-width: 1024px) { .header-top-bar + div { padding: 0 32px !important; } }
     .header-top-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
     .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 2px !important; margin: 0 !important; min-height: 0 !important; }
@@ -2660,24 +2660,24 @@ def main():
     .header-top-bar + div .stMarkdown { margin: 0 !important; padding: 0 !important; }
     .header-top-bar + div .stMarkdown p { margin: 0 !important; font-size: inherit !important; }
     .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; width: auto !important; }
-    /* Left: logo (rectangular area) + divider + title + status + updated */
+    /* Left: logo stretched (wider) + divider + title + status compact */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stImage"] img,
     .header-top-bar + div [data-testid="column"]:first-child img {
-        max-height: 52px !important; max-width: 100px !important; width: auto !important; height: auto !important;
-        object-fit: contain !important; object-position: center center !important; display: block !important; margin: 0 !important;
+        max-height: 48px !important; max-width: 160px !important; width: auto !important; height: auto !important;
+        object-fit: contain !important; object-position: left center !important; display: block !important; margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
-        min-width: 100px !important; padding-left: 8px !important;
+        min-width: 160px !important; padding-left: 4px !important;
     }
-    .header-left-inner { display: flex !important; align-items: center !important; gap: 16px !important; flex-wrap: nowrap !important; }
+    .header-left-inner { display: flex !important; align-items: center !important; gap: 8px !important; flex-wrap: nowrap !important; }
     .header-brand-kp { color: #374151 !important; font-size: 0.9375rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
-    .header-divider-v { width: 1px !important; height: 28px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
-    .header-title-block { display: inline-flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 6px !important; flex-wrap: nowrap !important; }
+    .header-divider-v { width: 1px !important; height: 24px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
+    .header-title-block { display: inline-flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 2px !important; flex-wrap: nowrap !important; }
     .header-title-row { display: block !important; }
-    .header-status-row { display: flex !important; align-items: center !important; gap: 10px !important; flex-wrap: nowrap !important; }
-    .header-brand-title { color: #111827 !important; font-size: 1.125rem !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; }
+    .header-status-row { display: flex !important; align-items: center !important; gap: 6px !important; flex-wrap: nowrap !important; }
+    .header-brand-title { color: #111827 !important; font-size: 1.0625rem !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
     /* Status pill: image style – subtle fill + glowing dot; live = green with white text */
-    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 8px !important; padding: 4px 12px !important; border-radius: 9999px !important; font-size: 0.75rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 6px !important; padding: 2px 10px !important; border-radius: 9999px !important; font-size: 0.7rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
     .header-status-pill.live { background: rgba(34,197,94,0.28) !important; color: #fff !important; border: 1px solid rgba(34,197,94,0.5) !important; }
     .header-status-pill.delayed { background: rgba(234,179,8,0.2) !important; color: #713f12 !important; border: 1px solid rgba(234,179,8,0.5) !important; }
     .header-status-pill.stale { background: rgba(220,38,38,0.2) !important; color: #fff !important; border: 1px solid rgba(220,38,38,0.5) !important; }
@@ -2685,7 +2685,7 @@ def main():
     .header-status-pill.live .header-status-dot { background: #22c55e !important; box-shadow: 0 0 8px rgba(34,197,94,0.7) !important; }
     .header-status-pill.delayed .header-status-dot { background: #eab308 !important; box-shadow: 0 0 6px rgba(234,179,8,0.5) !important; }
     .header-status-pill.stale .header-status-dot { background: #dc2626 !important; box-shadow: 0 0 6px rgba(220,38,38,0.5) !important; }
-    .header-updated-muted { color: #9ca3af !important; font-size: 0.8125rem !important; font-weight: 400 !important; margin: 0 !important; }
+    .header-updated-muted { color: #9ca3af !important; font-size: 0.75rem !important; font-weight: 400 !important; margin: 0 !important; }
     /* Right: icon buttons, theme switch, help circle, bell + badge, avatar+chevron */
     .header-icon-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 36px !important; height: 36px !important; border-radius: 8px !important; color: #6b7280 !important; text-decoration: none !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; border: none !important; background: transparent !important; cursor: pointer !important; }
     .header-icon-btn:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; }
