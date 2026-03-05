@@ -2635,7 +2635,7 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Single-row top bar — modern SaaS (flex, glassmorphism, minimalist status) */
+    /* Single-row top bar — height set dynamically via .header-resize-overrides */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
@@ -2645,7 +2645,7 @@ def main():
         max-width: 1280px !important;
         margin: 0 auto !important;
         padding: 0 12px !important;
-        border-bottom: 1px solid rgba(0,0,0,0.06) !important;
+        border-bottom: none !important;
         background: rgba(255,255,255,0.72) !important;
         backdrop-filter: blur(12px) !important;
         -webkit-backdrop-filter: blur(12px) !important;
@@ -2707,49 +2707,43 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # Header size overrides (sizable: Small / Medium / Large)
-    st.session_state.setdefault("header_size", "default")
-    _header_sz = st.session_state.get("header_size", "default")
-    if _header_sz == "compact":
-        st.markdown("""
+    # Dynamic header height (drag slider = resize the header)
+    st.session_state.setdefault("header_height_px", 48)
+    _h = max(36, min(72, int(st.session_state.get("header_height_px", 48))))
+    st.session_state["header_height_px"] = _h
+    _scale = _h / 48.0
+    _logo_h = max(16, min(36, round(22 * _scale)))
+    _logo_w = max(80, min(140, round(110 * _scale)))
+    _div_h = max(14, min(32, round(22 * _scale)))
+    _title_fs = round(1.125 * _scale * 16) / 16  # rem
+    _pill_fs = round(0.8 * _scale * 16) / 16
+    _updated_fs = round(0.875 * _scale * 16) / 16
+    _brand_fs = round(0.9375 * _scale * 16) / 16
+    _icon_sz = max(24, min(42, round(32 * _scale)))
+    _avatar_sz = max(26, min(44, round(34 * _scale)))
+    _avatar_fs = round(0.875 * _scale * 16) / 16
+    _signout_fs = round(0.875 * _scale * 16) / 16
+    _theme_w = max(40, min(58, round(46 * _scale)))
+    _theme_h = max(18, min(28, round(22 * _scale)))
+    _thumb_sz = max(14, min(22, round(18 * _scale)))
+    _thumb_left_dark = max(22, min(34, round(26 * _scale)))
+    st.markdown(f"""
     <style>
-    .header-top-bar + div { min-height: 42px !important; height: 42px !important; }
-    .header-top-bar + div img { max-height: 20px !important; max-width: 100px !important; }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child { max-width: 105px !important; }
-    .header-divider-v { height: 18px !important; }
-    .header-brand-kp { font-size: 0.8125rem !important; }
-    .header-brand-title { font-size: 0.9375rem !important; }
-    .header-status-pill { padding: 2px 8px !important; font-size: 0.7rem !important; gap: 3px !important; }
-    .header-status-dot { width: 5px !important; height: 5px !important; }
-    .header-updated-muted { font-size: 0.75rem !important; }
-    .header-icon-btn { width: 28px !important; height: 28px !important; }
-    .header-theme-switch { width: 42px !important; height: 20px !important; }
-    .header-theme-switch .header-theme-thumb { width: 16px !important; height: 16px !important; }
-    .header-theme-switch.dark .header-theme-thumb { left: 24px !important; }
-    .header-user-avatar { width: 28px !important; height: 28px !important; font-size: 0.75rem !important; }
-    .header-chevron { font-size: 0.7rem !important; }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button { font-size: 0.8125rem !important; }
-    </style>
-    """, unsafe_allow_html=True)
-    elif _header_sz == "large":
-        st.markdown("""
-    <style>
-    .header-top-bar + div { min-height: 56px !important; height: 56px !important; }
-    .header-top-bar + div img { max-height: 28px !important; max-width: 130px !important; }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child { max-width: 140px !important; }
-    .header-divider-v { height: 26px !important; }
-    .header-brand-kp { font-size: 1rem !important; }
-    .header-brand-title { font-size: 1.25rem !important; }
-    .header-status-pill { padding: 5px 12px !important; font-size: 0.9rem !important; gap: 6px !important; }
-    .header-status-dot { width: 7px !important; height: 7px !important; }
-    .header-updated-muted { font-size: 0.9375rem !important; }
-    .header-icon-btn { width: 38px !important; height: 38px !important; }
-    .header-theme-switch { width: 56px !important; height: 28px !important; }
-    .header-theme-switch .header-theme-thumb { width: 22px !important; height: 22px !important; }
-    .header-theme-switch.dark .header-theme-thumb { left: 32px !important; }
-    .header-user-avatar { width: 40px !important; height: 40px !important; font-size: 1rem !important; }
-    .header-chevron { font-size: 0.9rem !important; }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button { font-size: 0.9375rem !important; }
+    .header-top-bar + div {{ min-height: {_h}px !important; height: {_h}px !important; border-bottom: none !important; }}
+    .header-top-bar + div img {{ max-height: {_logo_h}px !important; max-width: {_logo_w}px !important; }}
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {{ max-width: {_logo_w + 15}px !important; }}
+    .header-divider-v {{ height: {_div_h}px !important; }}
+    .header-brand-kp {{ font-size: {_brand_fs}rem !important; }}
+    .header-brand-title {{ font-size: {_title_fs}rem !important; }}
+    .header-status-pill {{ font-size: {_pill_fs}rem !important; padding: {max(2, round(4*_scale))}px {max(6, round(10*_scale))}px !important; }}
+    .header-status-dot {{ width: {max(4, min(8, round(6*_scale)))}px !important; height: {max(4, min(8, round(6*_scale)))}px !important; }}
+    .header-updated-muted {{ font-size: {_updated_fs}rem !important; }}
+    .header-icon-btn {{ width: {_icon_sz}px !important; height: {_icon_sz}px !important; }}
+    .header-theme-switch {{ width: {_theme_w}px !important; height: {_theme_h}px !important; }}
+    .header-theme-switch .header-theme-thumb {{ width: {_thumb_sz}px !important; height: {_thumb_sz}px !important; }}
+    .header-theme-switch.dark .header-theme-thumb {{ left: {_thumb_left_dark}px !important; }}
+    .header-user-avatar {{ width: {_avatar_sz}px !important; height: {_avatar_sz}px !important; font-size: {_avatar_fs}rem !important; }}
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button {{ font-size: {_signout_fs}rem !important; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -2924,7 +2918,7 @@ def main():
                     unsafe_allow_html=True,
                 )
         with right_col:
-            r1, r2, r3, r4, r5, r6, r7 = st.columns(7)
+            r1, r2, r3, r4, r5, r6 = st.columns(6)
             with r1:
                 st.markdown(
                     '<a href="#" class="header-icon-btn" title="Search" aria-label="Search">'
@@ -2940,20 +2934,11 @@ def main():
                     unsafe_allow_html=True,
                 )
             with r3:
-                st.selectbox(
-                    "Header size",
-                    options=["compact", "default", "large"],
-                    format_func=lambda x: {"compact": "S", "default": "M", "large": "L"}[x],
-                    key="header_size",
-                    label_visibility="collapsed",
-                    help="Header size: S / M / L",
-                )
-            with r4:
                 st.markdown(
                     '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Contact: maysam.abukashabeh@cloudkitchens.com">?</a>',
                     unsafe_allow_html=True,
                 )
-            with r5:
+            with r4:
                 _badge_html = f'<span class="header-bell-badge">{min(_unread_count, 99)}</span>' if _unread_count > 0 else ''
                 st.markdown(
                     '<span class="header-bell-wrap">'
@@ -2962,7 +2947,7 @@ def main():
                     f'{_badge_html}</span>',
                     unsafe_allow_html=True,
                 )
-            with r6:
+            with r5:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -2970,7 +2955,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r7:
+            with r6:
                 if st.button("Sign out", key="header_sign_out", help="Sign out and clear session"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
@@ -2981,6 +2966,17 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1280px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
+    _resize_col1, _resize_col2, _resize_col3 = st.columns([1, 2, 1])
+    with _resize_col2:
+        st.slider(
+            "↕ Drag to resize header",
+            min_value=36,
+            max_value=72,
+            value=_h,
+            step=2,
+            key="header_height_px",
+            help="Drag left = shorter header, right = taller header",
+        )
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
         if not current_user:
