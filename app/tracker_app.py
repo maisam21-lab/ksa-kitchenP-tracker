@@ -2617,8 +2617,8 @@ def main():
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
     st.markdown("""
     <style>
-    /* Keep dataframe toolbar visible (Fullscreen, search, download, etc.) */
-    [data-testid="stElementToolbar"] { display: flex !important; }
+    /* Remove dataframe toolbar (download, search, fullscreen, etc.) from all sheets */
+    [data-testid="stElementToolbar"] { display: none !important; }
     /* Remove space above section tabs and shift main content up */
     [data-testid="stAppViewContainer"] > div { padding-top: 0.25rem !important; }
     [data-testid="stVerticalBlock"] > div:first-child { padding-top: 0 !important; margin-top: 0 !important; }
@@ -2644,12 +2644,12 @@ def main():
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        height: 64px !important;
         min-height: 64px !important;
+        height: auto !important;
         max-width: 1280px !important;
         width: 100% !important;
         margin: 0 auto !important;
-        padding: 0 24px !important;
+        padding: 12px 24px !important;
         border-bottom: 1px solid #e5e7eb !important;
         background: #ffffff !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
@@ -2665,8 +2665,8 @@ def main():
         align-items: center !important;
         gap: 16px !important;
         flex-wrap: nowrap !important;
-        height: 64px !important;
         min-height: 64px !important;
+        height: auto !important;
         margin: 0 !important;
         padding: 0 !important;
     }
@@ -2714,40 +2714,55 @@ def main():
         margin-bottom: 0 !important;
     }
 
-    /* LEFT GROUP: shrink to content so center gap is minimal */
+    /* LEFT GROUP: logo on top, title+status below on one line — vertical stack */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
-        align-items: center !important;
-        gap: 12px !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        justify-content: center !important;
+        gap: 8px !important;
         flex: 0 1 auto !important;
         min-width: 0 !important;
         width: auto !important;
         max-width: fit-content !important;
-        height: 100% !important;
+        min-height: 64px !important;
+        height: auto !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] {
         display: flex !important;
-        align-items: center !important;
-        gap: 12px !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
         flex: 0 1 auto !important;
         min-width: 0 !important;
         width: auto !important;
         max-width: fit-content !important;
-        height: 100% !important;
+        min-height: 64px !important;
+        height: auto !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] [data-testid="column"] {
         display: flex !important;
         align-items: center !important;
-        height: 100% !important;
-        min-height: 64px !important;
+        height: auto !important;
+        min-height: 0 !important;
+        width: 100% !important;
     }
-    /* Logo: 40px container only — must NOT define header height */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"],
+    /* Logo row: fixed height on top — left column's first child (image wrapper) */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"] > div:first-child {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        max-height: 40px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"] > div:first-child div[data-testid="stImage"],
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child div[data-testid="stImage"] {
         display: flex !important;
         align-items: center !important;
-        justify-content: center !important;
+        justify-content: flex-start !important;
         height: 40px !important;
         min-height: 40px !important;
         max-height: 40px !important;
@@ -2775,13 +2790,13 @@ def main():
         margin: 0 !important;
         padding: 0 !important;
     }
-    /* Title block: app name + status row */
+    /* Title block: app name + status row — on one line below logo */
     .header-title-block {
         display: flex !important;
-        flex-direction: column !important;
-        align-items: flex-start !important;
-        justify-content: center !important;
-        gap: 6px !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: 10px !important;
         flex-wrap: nowrap !important;
         line-height: 1.25 !important;
         margin: 0 !important;
@@ -3100,33 +3115,30 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left (logo + brand + divider + title) | right (dark toggle, help, avatar, sign out)
+    # Single-row top bar: left = logo on top, title+status below on one line | right = dark toggle, help, avatar, sign out
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
     _dark = st.session_state.get("dark_mode", False)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        # Two sections: left | right (dark toggle aligned with other controls)
+        # Left: logo on top, then title+status on one line below. Right: controls.
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            l1, l2 = st.columns([1, 5])
-            with l1:
-                logo_path = _logo_path()
-                if logo_path:
-                    st.image(str(logo_path), use_container_width=True)
-            with l2:
-                st.markdown(
-                    f'<div class="header-left-inner">'
-                    f'<div class="header-title-block">'
-                    f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
-                    f'<div class="header-status-row">'
-                    f'<span class="header-status-pill {status_class}">'
-                    f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
-                    f'<span class="header-updated-muted">{updated_ago}</span>'
-                    f'</div></div></div>',
-                    unsafe_allow_html=True,
-                )
+            logo_path = _logo_path()
+            if logo_path:
+                st.image(str(logo_path), use_container_width=True)
+            st.markdown(
+                f'<div class="header-left-inner">'
+                f'<div class="header-title-block">'
+                f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                f'<div class="header-status-row">'
+                f'<span class="header-status-pill {status_class}">'
+                f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
+                f'<span class="header-updated-muted">{updated_ago}</span>'
+                f'</div></div></div>',
+                unsafe_allow_html=True,
+            )
         with right_col:
             r1, r2, r3, r4 = st.columns(4)
             with r1:
