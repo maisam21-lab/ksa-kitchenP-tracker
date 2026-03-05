@@ -2516,6 +2516,38 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
+    # 1) URL-driven search: ?open_search=1&q=term — switch to Search tab (works after deploy / when session state is reset)
+    _qp = getattr(st, "query_params", None)
+    if _qp is not None:
+        _os = _qp.get("open_search")
+        _os_val = _os[0] if isinstance(_os, list) else _os if _os is not None else None
+        if _os_val:
+            st.session_state["section_radio"] = "Search"
+            _q = _qp.get("q")
+            st.session_state["global_search_q"] = str((_q[0] if isinstance(_q, list) else _q) or "").strip() if _q else ""
+            try:
+                del _qp["open_search"]
+                if "q" in _qp:
+                    del _qp["q"]
+            except Exception:
+                pass
+            _rerun()
+
+    # 2) Header search button (session-state trigger): switch to Search tab with query
+    if "_header_search_trigger" in st.session_state:
+        st.session_state["section_radio"] = "Search"
+        st.session_state["global_search_q"] = (st.session_state.get("_header_search_trigger") or "").strip()
+        del st.session_state["_header_search_trigger"]
+        # Also set URL so next run shows Search even if session state is reset (e.g. on Streamlit Cloud)
+        if _qp is not None:
+            try:
+                _qp["open_search"] = "1"
+                if st.session_state.get("global_search_q"):
+                    _qp["q"] = st.session_state["global_search_q"]
+            except Exception:
+                pass
+        _rerun()
+
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
     _streamlit_user = getattr(st, "user", None)
     _verified_email = None
@@ -2635,26 +2667,27 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Single-row top bar — dynamic (flex, responsive) */
+    /* Single-row top bar — dynamic (flex, responsive), compact vertical */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        min-height: 48px !important;
+        min-height: 40px !important;
         height: auto !important;
         max-width: 1280px !important;
         width: 100% !important;
         margin: 0 auto !important;
-        padding: 0 12px !important;
+        padding: 0 8px !important;
         border-bottom: 1px solid rgba(0,0,0,0.06) !important;
         background: rgba(255,255,255,0.72) !important;
         backdrop-filter: blur(12px) !important;
         -webkit-backdrop-filter: blur(12px) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
     }
-    @media (min-width: 1024px) { .header-top-bar + div { padding: 0 16px !important; } }
-    @media (max-width: 768px) { .header-top-bar + div { padding: 0 8px !important; } .header-brand-title { font-size: 1rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
+    @media (min-width: 1024px) { .header-top-bar + div { padding: 0 12px !important; } }
+    @media (max-width: 768px) { .header-top-bar + div { padding: 0 6px !important; } .header-brand-title { font-size: 1rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
     .header-top-bar + div [data-testid="stHorizontalBlock"] { width: 100% !important; display: flex !important; justify-content: space-between !important; align-items: center !important; gap: 2px !important; flex-wrap: wrap !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] [data-testid="column"] { display: flex !important; align-items: center !important; }
     .header-top-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
     .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 !important; margin: 0 !important; min-height: 0 !important; }
     .header-top-bar + div [data-testid="column"] { padding: 0 1px !important; }
@@ -2664,50 +2697,56 @@ def main():
     .header-top-bar + div [data-testid="stCheckbox"] { padding: 0 !important; width: auto !important; }
     /* Logo: width > height */
     .header-top-bar + div img {
-        max-height: 22px !important; max-width: 110px !important; width: auto !important; height: auto !important;
+        max-height: 20px !important; max-width: 100px !important; width: auto !important; height: auto !important;
         object-fit: contain !important; object-position: left center !important; display: block !important; margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
-        min-width: 0 !important; max-width: 115px !important; padding: 0 4px 0 0 !important;
+        min-width: 0 !important; max-width: 108px !important; padding: 0 4px 0 0 !important;
     }
     .header-left-inner { display: flex !important; align-items: center !important; gap: 2px !important; flex-wrap: nowrap !important; }
-    .header-brand-kp { color: #374151 !important; font-size: 0.9375rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
-    .header-divider-v { width: 1px !important; height: 22px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
+    .header-brand-kp { color: #374151 !important; font-size: 0.8125rem !important; font-weight: 600 !important; margin: 0 !important; letter-spacing: -0.01em !important; }
+    .header-divider-v { width: 1px !important; height: 18px !important; background: #e5e7eb !important; flex-shrink: 0 !important; }
     .header-title-block { display: inline-flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 0 !important; flex-wrap: nowrap !important; }
-    .header-title-row { display: block !important; line-height: 1.2 !important; }
-    .header-status-row { display: flex !important; align-items: center !important; gap: 4px !important; flex-wrap: nowrap !important; }
-    .header-brand-title { color: #111827 !important; font-size: clamp(0.9375rem, 1.5vw + 0.75rem, 1.125rem) !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
+    .header-title-row { display: block !important; line-height: 1.15 !important; }
+    .header-status-row { display: flex !important; align-items: center !important; gap: 3px !important; flex-wrap: nowrap !important; }
+    .header-brand-title { color: #111827 !important; font-size: clamp(0.875rem, 1.5vw + 0.65rem, 1.0625rem) !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.15 !important; }
     /* Status pill */
-    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 4px !important; padding: 4px 10px !important; border-radius: 9999px !important; font-size: 0.8rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
+    .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 3px !important; padding: 2px 8px !important; border-radius: 9999px !important; font-size: 0.75rem !important; font-weight: 500 !important; flex-shrink: 0 !important; letter-spacing: 0.02em !important; }
     .header-status-pill.live { background: rgba(34,197,94,0.28) !important; color: #fff !important; border: 1px solid rgba(34,197,94,0.5) !important; }
     .header-status-pill.delayed { background: rgba(234,179,8,0.2) !important; color: #713f12 !important; border: 1px solid rgba(234,179,8,0.5) !important; }
     .header-status-pill.stale { background: rgba(220,38,38,0.2) !important; color: #fff !important; border: 1px solid rgba(220,38,38,0.5) !important; }
-    .header-status-dot { width: 6px !important; height: 6px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
+    .header-status-dot { width: 5px !important; height: 5px !important; border-radius: 999px !important; flex-shrink: 0 !important; }
     .header-status-pill.live .header-status-dot { background: #22c55e !important; box-shadow: 0 0 8px rgba(34,197,94,0.7) !important; }
     .header-status-pill.delayed .header-status-dot { background: #eab308 !important; box-shadow: 0 0 6px rgba(234,179,8,0.5) !important; }
     .header-status-pill.stale .header-status-dot { background: #dc2626 !important; box-shadow: 0 0 6px rgba(220,38,38,0.5) !important; }
-    .header-updated-muted { color: #9ca3af !important; font-size: 0.875rem !important; font-weight: 400 !important; margin: 0 !important; }
+    .header-updated-muted { color: #9ca3af !important; font-size: 0.8125rem !important; font-weight: 400 !important; margin: 0 !important; }
     /* Right: compact icons */
-    .header-icon-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 32px !important; height: 32px !important; border-radius: 6px !important; color: #6b7280 !important; text-decoration: none !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; border: none !important; background: transparent !important; cursor: pointer !important; }
+    .header-icon-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 30px !important; height: 30px !important; border-radius: 6px !important; color: #6b7280 !important; text-decoration: none !important; transition: background 0.15s, color 0.15s !important; flex-shrink: 0 !important; border: none !important; background: transparent !important; cursor: pointer !important; }
     .header-icon-btn:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; }
+    .header-search-wrap input { max-height: 32px !important; font-size: 0.875rem !important; }
     .header-help-btn { border: 1px solid #e5e7eb !important; border-radius: 50% !important; font-weight: 600 !important; }
     .header-bell-wrap { position: relative !important; display: inline-flex !important; }
     .header-bell-badge { position: absolute !important; top: -1px !important; right: -1px !important; min-width: 14px !important; height: 14px !important; padding: 0 3px !important; border-radius: 999px !important; background: #0f766e !important; color: #fff !important; font-size: 0.6rem !important; font-weight: 700 !important; display: flex !important; align-items: center !important; justify-content: center !important; }
-    .header-theme-switch { display: inline-flex !important; align-items: center !important; width: 46px !important; height: 22px !important; border-radius: 999px !important; background: #e5e7eb !important; position: relative !important; text-decoration: none !important; color: #6b7280 !important; flex-shrink: 0 !important; }
+    .header-theme-switch { display: inline-flex !important; align-items: center !important; width: 46px !important; height: 20px !important; border-radius: 999px !important; background: #e5e7eb !important; position: relative !important; text-decoration: none !important; color: #6b7280 !important; flex-shrink: 0 !important; }
     .header-theme-switch:hover { background: #d1d5db !important; color: #374151 !important; }
     .header-theme-switch .header-theme-sun, .header-theme-switch .header-theme-moon { position: absolute !important; top: 50% !important; transform: translateY(-50%) !important; font-size: 0.65rem !important; z-index: 0 !important; }
     .header-theme-switch .header-theme-sun { left: 5px !important; }
     .header-theme-switch .header-theme-moon { right: 5px !important; }
-    .header-theme-switch .header-theme-thumb { position: absolute !important; left: 2px !important; top: 2px !important; width: 18px !important; height: 18px !important; border-radius: 50% !important; background: #fff !important; box-shadow: 0 1px 2px rgba(0,0,0,0.12) !important; transition: left 0.2s ease !important; z-index: 1 !important; }
+    .header-theme-switch .header-theme-thumb { position: absolute !important; left: 2px !important; top: 2px !important; width: 16px !important; height: 16px !important; border-radius: 50% !important; background: #fff !important; box-shadow: 0 1px 2px rgba(0,0,0,0.12) !important; transition: left 0.2s ease !important; z-index: 1 !important; }
     .header-theme-switch.dark .header-theme-thumb { left: 26px !important; }
-    .header-dark-toggle-wrap { display: inline-flex !important; }
-    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button { min-width: 32px !important; height: 32px !important; padding: 0 !important; border-radius: 6px !important; background: transparent !important; border: 1px solid #e5e7eb !important; color: #6b7280 !important; font-size: 1rem !important; }
-    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; }
+    .header-dark-toggle-wrap { display: inline-flex !important; align-items: center !important; min-width: 40px !important; justify-content: center !important; }
+    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
+    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button { min-width: 32px !important; width: 32px !important; height: 32px !important; padding: 0 !important; margin: 0 !important; border-radius: 6px !important; background: transparent !important; border: none !important; color: #6b7280 !important; font-size: 1rem !important; box-shadow: none !important; line-height: 1 !important; vertical-align: middle !important; }
+    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; border: none !important; box-shadow: none !important; }
+    /* Dark mode column (2nd in right group): force vertical alignment with other header icons */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) { align-items: center !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; min-height: 0 !important; display: flex !important; align-items: center !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) button { margin: 0 !important; padding: 0 !important; }
     .header-avatar-chevron { display: inline-flex !important; align-items: center !important; gap: 2px !important; }
     .header-chevron { color: #6b7280 !important; font-size: 0.8rem !important; }
-    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 34px !important; height: 34px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; flex-shrink: 0 !important; }
+    .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 30px !important; height: 30px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.8125rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; flex-shrink: 0 !important; }
     .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button { font-size: 0.875rem !important; font-weight: 500 !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button { font-size: 0.8125rem !important; font-weight: 500 !important; }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
     """, unsafe_allow_html=True)
@@ -2844,6 +2883,20 @@ def main():
             except Exception:
                 pass
             _rerun()
+        _os = _qp.get("open_search")
+        _os_val = _os[0] if isinstance(_os, list) else _os
+        if _os_val:
+            st.session_state["section_radio"] = "Search"
+            _q = _qp.get("q")
+            if _q is not None:
+                st.session_state["global_search_q"] = (_q[0] if isinstance(_q, list) else _q) or ""
+            try:
+                del _qp["open_search"]
+                if "q" in _qp:
+                    del _qp["q"]
+            except Exception:
+                pass
+            _rerun()
     _dark = st.session_state.get("dark_mode", False)
     _last_read = st.session_state.get("notifications_last_read_at") or "1970-01-01T00:00:00Z"
     _unread_count = get_unread_notification_count(_last_read)
@@ -2873,16 +2926,37 @@ def main():
                     unsafe_allow_html=True,
                 )
         with right_col:
-            r1, r2, r3, r4, r5, r6 = st.columns(6)
+            # Layout: Search (wide) | Dark mode | Help | Bell | Avatar | Sign out
+            r1, r2, r3, r4, r5, r6 = st.columns([2, 1, 1, 1, 1, 1])
             with r1:
-                st.markdown(
-                    '<a href="#" class="header-icon-btn" title="Search" aria-label="Search">'
-                    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></a>',
-                    unsafe_allow_html=True,
-                )
+                st.markdown('<div class="header-search-wrap">', unsafe_allow_html=True)
+                header_search_col, header_btn_col = st.columns([3, 1])
+                with header_search_col:
+                    st.text_input(
+                        "Search",
+                        key="header_search_q",
+                        placeholder="Search anything…",
+                        label_visibility="collapsed",
+                    )
+                with header_btn_col:
+                    if st.button("🔍", key="header_search_btn", help="Search across all data"):
+                        _q = (st.session_state.get("header_search_q") or "").strip()
+                        st.session_state["section_radio"] = "Search"
+                        st.session_state["global_search_q"] = _q
+                        # Use URL so Search tab opens reliably after deploy (session state can be reset)
+                        _qp = getattr(st, "query_params", None)
+                        if _qp is not None:
+                            try:
+                                _qp["open_search"] = "1"
+                                if _q:
+                                    _qp["q"] = _q
+                            except Exception:
+                                pass
+                        _rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
             with r2:
-                st.markdown('<div class="header-dark-toggle-wrap">', unsafe_allow_html=True)
-                if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode (light / dark)"):
+                st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
+                if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
                     st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
                     _rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -2946,11 +3020,14 @@ def main():
         user_role = "super_user"
     st.session_state["user_role"] = user_role
 
-    # Product shape (Feb 18): AEs see only three sections. Developers/super_user also see Data (sources/tabs) and Admin.
+    # Product shape (Feb 18): AEs see Kitchen Master Data, Dashboard, Discussions, Search. Developers/super_user also see Data and Admin.
     if _is_developer() or user_role == "super_user":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Data", "Search", "Admin / Data Health"]
     else:
-        section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
+        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Search"]
+    # If user opened Search from header (open_search=1), show Search tab for this run even if it were missing
+    if "Search" not in section_options and st.session_state.get("section_radio") == "Search":
+        section_options = list(section_options) + ["Search"]
 
     # Website-style layout: section navigation as tabs (buttons, no radio dots)
     if "section_radio" not in st.session_state:
@@ -4113,8 +4190,10 @@ def main():
     # Search (all tabs)
     if section == "Search":
         st.caption("Find text across main data, Execution Log, and every sheet tab.")
+        # Pre-fill from header search when we navigated here via header 🔍
         search_input = st.text_input("Search", key="global_search_q", placeholder="Type to search across all data…")
-        if st.button("Search", key="btn_global_search") or search_input:
+        run_search = st.button("Search", key="btn_global_search")
+        if run_search or (search_input and (search_input or "").strip()):
             if search_input and search_input.strip():
                 results = _search_all_tabs(search_input.strip())
                 if not results:
