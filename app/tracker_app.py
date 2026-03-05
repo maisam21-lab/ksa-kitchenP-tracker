@@ -2635,6 +2635,8 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
+    /* Hide Streamlit default header (teal bar with page title and link icon) */
+    header[data-testid="stHeader"] { display: none !important; }
     /* ========== Header: NORMALIZED heights — 72px row, 40px controls, no wrapping ========== */
     /* 1) Header outer: height 72px, flex, align center */
     .header-top-bar + div {
@@ -3095,27 +3097,17 @@ def main():
         # Two sections: left | right (dark toggle aligned with other controls)
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            l1, l2 = st.columns([1, 5])
-            with l1:
-                logo_path = _logo_path()
-                if logo_path:
-                    st.image(str(logo_path), width=90)
-                else:
-                    st.markdown('<div class="header-logo-placeholder">K</div>', unsafe_allow_html=True)
-            with l2:
-                st.markdown(
-                    f'<div class="header-left-inner">'
-                    f'<span class="header-brand-name">KitchenPark</span>'
-                    f'<span class="header-divider-v"></span>'
-                    f'<div class="header-title-block">'
-                    f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
-                    f'<div class="header-status-row">'
-                    f'<span class="header-status-pill {status_class}">'
-                    f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
-                    f'<span class="header-updated-muted">{updated_ago}</span>'
-                    f'</div></div></div>',
-                    unsafe_allow_html=True,
-                )
+            st.markdown(
+                f'<div class="header-left-inner">'
+                f'<div class="header-title-block">'
+                f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                f'<div class="header-status-row">'
+                f'<span class="header-status-pill {status_class}">'
+                f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
+                f'<span class="header-updated-muted">{updated_ago}</span>'
+                f'</div></div></div>',
+                unsafe_allow_html=True,
+            )
         with right_col:
             r1, r2, r3, r4 = st.columns(4)
             with r1:
