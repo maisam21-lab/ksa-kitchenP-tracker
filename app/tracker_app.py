@@ -2713,21 +2713,25 @@ def main():
         margin-bottom: 0 !important;
     }
 
-    /* LEFT GROUP: display flex, align-items center, height 100% */
+    /* LEFT GROUP: shrink to content so center gap is minimal */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
         align-items: center !important;
         gap: 12px !important;
-        flex: 1 1 auto !important;
+        flex: 0 1 auto !important;
         min-width: 0 !important;
+        width: auto !important;
+        max-width: fit-content !important;
         height: 100% !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] {
         display: flex !important;
         align-items: center !important;
         gap: 12px !important;
-        flex: 1 1 auto !important;
+        flex: 0 1 auto !important;
         min-width: 0 !important;
+        width: auto !important;
+        max-width: fit-content !important;
         height: 100% !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] [data-testid="column"] {
@@ -2819,13 +2823,13 @@ def main():
         align-items: center !important;
     }
 
-    /* RIGHT GROUP: height 100%, align-items center */
+    /* RIGHT GROUP: take remaining space, content aligned right */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
         gap: 12px !important;
-        flex: 0 0 auto !important;
+        flex: 1 1 auto !important;
         min-width: 0 !important;
         height: 100% !important;
     }
@@ -3085,7 +3089,7 @@ def main():
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
         # Two sections: left (logo + title) | right (icons + profile + sign out)
-        left_col, right_col = st.columns([3, 1])
+        left_col, right_col = st.columns([1, 1])
         with left_col:
             l1, l2 = st.columns([1, 5])
             with l1:
