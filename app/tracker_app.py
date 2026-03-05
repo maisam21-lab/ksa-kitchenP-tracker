@@ -2887,20 +2887,6 @@ def main():
     }
     .header-icon-btn:hover { background: rgba(0,0,0,0.06) !important; color: #111827 !important; }
     .header-help-btn { border: 1px solid #e5e7eb !important; border-radius: 50% !important; font-weight: 600 !important; }
-    .header-bell-wrap { position: relative !important; display: inline-flex !important; align-items: center !important; }
-    .header-bell-badge {
-        position: absolute !important;
-        top: -2px !important;
-        right: -2px !important;
-        min-width: 14px !important;
-        height: 14px !important;
-        padding: 0 3px !important;
-        border-radius: 999px !important;
-        background: #0f766e !important;
-        color: #fff !important; font-size: 0.6rem !important;
-        display: flex !important; align-items: center !important; justify-content: center !important;
-        pointer-events: none !important;
-    }
     .header-dark-toggle-wrap { display: inline-flex !important; align-items: center !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button { margin: 0 !important; }
@@ -3058,21 +3044,12 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left (KitchenPark text | divider | title + pill + updated) | right (search, toggle, help, bell, avatar▼, sign out)
+    # Single-row top bar: left (logo + title) | center (search) | right (dark, help, avatar, sign out)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
     _qp = getattr(st, "query_params", None)
     if _qp is not None:
-        _on = _qp.get("open_notifications")
-        _on_val = _on[0] if isinstance(_on, list) else _on
-        if _on_val:
-            st.session_state["show_notifications"] = True
-            try:
-                del _qp["open_notifications"]
-            except Exception:
-                pass
-            _rerun()
         _os = _qp.get("open_search")
         _os_val = _os[0] if isinstance(_os, list) else _os
         if _os_val:
@@ -3087,8 +3064,6 @@ def main():
                 pass
             _rerun()
     _dark = st.session_state.get("dark_mode", False)
-    _last_read = st.session_state.get("notifications_last_read_at") or "1970-01-01T00:00:00Z"
-    _unread_count = get_unread_notification_count(_last_read)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
         # Three sections: left (logo + title) | center (search bar) | right (icons + profile + sign out)
@@ -3130,7 +3105,7 @@ def main():
                 )
             st.markdown('</div>', unsafe_allow_html=True)
         with right_col:
-            r1, r2, r3, r4, r5 = st.columns(5)
+            r1, r2, r3, r4 = st.columns(4)
             with r1:
                 st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
                 if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
@@ -3143,15 +3118,6 @@ def main():
                     unsafe_allow_html=True,
                 )
             with r3:
-                _badge_html = f'<span class="header-bell-badge">{min(_unread_count, 99)}</span>' if _unread_count > 0 else ''
-                st.markdown(
-                    '<span class="header-bell-wrap">'
-                    '<a href="?open_notifications=1" class="header-icon-btn" title="Notifications">'
-                    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></a>'
-                    f'{_badge_html}</span>',
-                    unsafe_allow_html=True,
-                )
-            with r4:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3159,7 +3125,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r5:
+            with r4:
                 if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
@@ -3223,32 +3189,6 @@ def main():
                 use_container_width=True,
             ):
                 st.session_state["section_radio"] = opt
-                _rerun()
-
-    # Notifications panel (opened from header bell)
-    if st.session_state.get("show_notifications"):
-        feed = list_notifications_feed(50)
-        with st.expander("Notifications", expanded=True):
-            if st.button("Mark all as read", key="notif_mark_read"):
-                st.session_state["notifications_last_read_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                _rerun()
-            st.caption("Recent activity and comments across records.")
-            if not feed:
-                st.info("No recent activity or comments.")
-            else:
-                for item in feed:
-                    ts = (item.get("at") or "")[:19].replace("T", " ")
-                    rid = item.get("record_id") or "—"
-                    if item.get("type") == "activity":
-                        author = item.get("author") or "Someone"
-                        action = item.get("action") or "updated"
-                        st.markdown(f"**{author}** {action} record `{rid}` — *{ts}*")
-                    else:
-                        author = item.get("author") or "Anonymous"
-                        snippet = (item.get("snippet") or "").strip().replace('"', "'") or "—"
-                        st.markdown(f"**{author}** commented on `{rid}`: \"{snippet}\" — *{ts}*")
-            if st.button("Close", key="notif_close"):
-                st.session_state.pop("show_notifications", None)
                 _rerun()
 
     # Header search results (no Search tab — search only in header; results show here when used)
