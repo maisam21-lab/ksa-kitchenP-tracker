@@ -2752,22 +2752,26 @@ def main():
         margin: 0 !important;
     }
     .header-divider-v { width: 1px !important; height: 24px !important; background: #e5e7eb !important; flex-shrink: 0 !important; margin: 0 !important; }
-    /* Title/status block: column, justify-content center so badge under title */
+    /* Title + badge + updated on one horizontal line */
     .header-title-block {
         display: flex !important;
-        flex-direction: column !important;
-        justify-content: center !important;
-        align-items: flex-start !important;
-        gap: 2px !important;
-        flex-wrap: nowrap !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: 12px !important;
+        flex-wrap: wrap !important;
         line-height: 1.25 !important;
         margin: 0 !important;
         padding: 0 !important;
     }
-    .header-title-row { display: block !important; line-height: 1.2 !important; margin: 0 !important; }
-    .header-status-row { display: flex !important; align-items: center !important; gap: 6px !important; flex-wrap: nowrap !important; margin: 0 !important; }
-    .header-brand-kp { color: #374151 !important; font-size: 0.875rem !important; font-weight: 600 !important; margin: 0 !important; }
-    .header-brand-title { color: #111827 !important; font-size: clamp(0.95rem, 1.4vw + 0.6rem, 1.125rem) !important; font-weight: 700 !important; margin: 0 !important; letter-spacing: -0.02em !important; line-height: 1.2 !important; }
+    .header-brand-title {
+        color: #111827 !important;
+        font-size: 1.25rem !important;
+        font-weight: 600 !important;
+        margin: 0 !important;
+        letter-spacing: -0.02em !important;
+        line-height: 1.2 !important;
+    }
     .header-status-pill { display: inline-flex !important; align-items: center !important; gap: 4px !important; padding: 3px 8px !important; border-radius: 9999px !important; font-size: 0.8rem !important; font-weight: 500 !important; flex-shrink: 0 !important; margin: 0 !important; }
     .header-status-pill.live { background: rgba(34,197,94,0.28) !important; color: #fff !important; border: 1px solid rgba(34,197,94,0.5) !important; }
     .header-status-pill.delayed { background: rgba(234,179,8,0.2) !important; color: #713f12 !important; border: 1px solid rgba(234,179,8,0.5) !important; }
@@ -3060,19 +3064,16 @@ def main():
                 logo_path = _logo_path()
                 if logo_path:
                     st.image(str(logo_path), width=90)
-                else:
-                    st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
+                # No KitchenPark text when no logo — avoid duplicate branding
             with l2:
                 st.markdown(
                     f'<div class="header-left-inner">'
-                    f'<span class="header-divider-v"></span>'
                     f'<div class="header-title-block">'
-                    f'<span class="header-title-row header-brand-title">KSA Kitchens Tracker</span>'
-                    f'<div class="header-status-row">'
+                    f'<span class="header-brand-title">KSA Kitchens Tracker</span>'
                     f'<span class="header-status-pill {status_class}">'
                     f'<span class="header-status-dot"></span> {status_label.upper().replace(" ", " ")}</span>'
                     f'<span class="header-updated-muted">{updated_ago}</span>'
-                    f'</div></div></div>',
+                    f'</div></div>',
                     unsafe_allow_html=True,
                 )
         with center_col:
