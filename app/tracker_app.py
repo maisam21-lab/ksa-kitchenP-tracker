@@ -2639,24 +2639,24 @@ def main():
     }
     /* Hide Streamlit default header (teal bar with page title and link icon) */
     header[data-testid="stHeader"] { display: none !important; }
-    /* ========== Header: modern website-style design ========== */
+    /* ========== Header: single-row top bar 72px ========== */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        min-height: 64px !important;
-        height: auto !important;
+        height: 72px !important;
+        min-height: 72px !important;
         max-width: 1280px !important;
         width: 100% !important;
         margin: 0 auto !important;
-        padding: 12px 24px !important;
+        padding: 0 24px !important;
         border-bottom: 1px solid #e5e7eb !important;
         background: #ffffff !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         box-sizing: border-box !important;
     }
-    @media (max-width: 768px) { .header-top-bar + div { padding: 0 16px !important; height: auto !important; min-height: 56px !important; } .header-brand-title { font-size: 0.9375rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
+    @media (max-width: 768px) { .header-top-bar + div { padding: 0 16px !important; min-height: 56px !important; height: 56px !important; } .header-brand-title { font-size: 0.9375rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
 
     .header-top-bar + div [data-testid="stHorizontalBlock"] {
         width: 100% !important;
@@ -2665,48 +2665,38 @@ def main():
         align-items: center !important;
         gap: 16px !important;
         flex-wrap: nowrap !important;
-        min-height: 64px !important;
-        height: auto !important;
+        height: 72px !important;
+        min-height: 72px !important;
         margin: 0 !important;
         padding: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] [data-testid="column"] {
         display: flex !important;
         align-items: center !important;
-        align-self: stretch !important;
         flex-shrink: 0 !important;
         margin: 0 !important;
         padding: 0 !important;
         min-height: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-        height: 100% !important;
-        min-height: 64px !important;
+        height: 72px !important;
+        min-height: 72px !important;
     }
     .header-top-bar + div [data-testid="stVerticalBlock"] {
         padding: 0 !important;
         margin: 0 !important;
         min-height: 0 !important;
-        height: 100% !important;
+        height: 72px !important;
         display: flex !important;
         align-items: center !important;
-        align-self: stretch !important;
     }
     .header-top-bar + div [data-testid="stVerticalBlock"] > div {
         padding: 0 !important;
         margin: 0 !important;
         min-height: 0 !important;
-        width: 100% !important;
+        max-width: 100% !important;
         display: flex !important;
         align-items: center !important;
-    }
-    /* 2) Shared control height — .headerCtrl equivalent for all header controls */
-    .headerCtrl,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button,
-    .header-dark-toggle-wrap button,
-    .header-icon-btn {
-        height: 40px !important;
-        min-height: 40px !important;
     }
     .header-top-bar + div [data-testid="stVerticalBlock"] *,
     .header-top-bar + div [data-testid="stHorizontalBlock"] [data-testid="column"] * {
@@ -2714,66 +2704,52 @@ def main():
         margin-bottom: 0 !important;
     }
 
-    /* LEFT GROUP: logo on top, title+status below on one line — vertical stack */
+    /* LEFT GROUP: logo + title/status in one row, no wrap */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
-        flex-direction: column !important;
-        align-items: flex-start !important;
-        justify-content: center !important;
-        gap: 8px !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 16px !important;
+        min-width: 320px !important;
         flex: 0 1 auto !important;
-        min-width: 0 !important;
-        width: auto !important;
         max-width: fit-content !important;
-        min-height: 64px !important;
-        height: auto !important;
+        height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] {
         display: flex !important;
-        flex-direction: column !important;
-        align-items: flex-start !important;
-        gap: 8px !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 16px !important;
+        min-width: 320px !important;
         flex: 0 1 auto !important;
-        min-width: 0 !important;
-        width: auto !important;
-        max-width: fit-content !important;
-        min-height: 64px !important;
-        height: auto !important;
+        height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] [data-testid="column"] {
         display: flex !important;
         align-items: center !important;
-        height: auto !important;
-        min-height: 0 !important;
-        width: 100% !important;
+        height: 72px !important;
+        min-height: 72px !important;
     }
-    /* Logo row: fixed height on top — left column's first child (image wrapper) */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"] > div:first-child {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-        height: 40px !important;
-        min-height: 40px !important;
-        max-height: 40px !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"] > div:first-child div[data-testid="stImage"],
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child div[data-testid="stImage"] {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-        height: 40px !important;
-        min-height: 40px !important;
-        max-height: 40px !important;
+    /* Logo: fixed 40x40 container — prevent banner expansion */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
         width: 40px !important;
         min-width: 40px !important;
+        max-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        max-height: 40px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
         margin: 0 !important;
         padding: 0 !important;
+        overflow: hidden !important;
     }
     .header-top-bar + div img {
         max-height: 40px !important;
-        max-width: 40px !important;
+        max-width: 140px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -2790,7 +2766,6 @@ def main():
         margin: 0 !important;
         padding: 0 !important;
     }
-    /* Title block: app name + status row — on one line below logo */
     .header-title-block {
         display: flex !important;
         flex-direction: row !important;
@@ -2853,7 +2828,7 @@ def main():
         gap: 12px !important;
         flex: 1 1 auto !important;
         min-width: 0 !important;
-        height: 100% !important;
+        height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] {
         display: flex !important;
@@ -2861,7 +2836,7 @@ def main():
         justify-content: flex-end !important;
         gap: 12px !important;
         flex-wrap: nowrap !important;
-        height: 100% !important;
+        height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"] {
         flex: 0 0 auto !important;
@@ -2869,14 +2844,14 @@ def main():
         align-items: center !important;
         padding: 0 !important;
         margin: 0 !important;
-        height: 100% !important;
-        min-height: 64px !important;
+        height: 72px !important;
+        min-height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stVerticalBlock"] {
         padding: 0 !important;
         margin: 0 !important;
         min-height: 0 !important;
-        height: 100% !important;
+        height: 72px !important;
         display: flex !important;
         align-items: center !important;
     }
@@ -2886,7 +2861,7 @@ def main():
         padding: 0 !important;
         display: flex !important;
         align-items: center !important;
-        height: 100% !important;
+        height: 72px !important;
     }
     .header-top-bar + div form,
     .header-top-bar + div [data-testid="stVerticalBlock"] > div > div {
@@ -3115,30 +3090,32 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: left = logo on top, title+status below on one line | right = dark toggle, help, avatar, sign out
+    # Single-row top bar: logo + title/status (left) | dark mode, help, avatar, sign out (right)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
     _dark = st.session_state.get("dark_mode", False)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        # Left: logo on top, then title+status on one line below. Right: controls.
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            logo_path = _logo_path()
-            if logo_path:
-                st.image(str(logo_path), use_container_width=True)
-            st.markdown(
-                f'<div class="header-left-inner">'
-                f'<div class="header-title-block">'
-                f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
-                f'<div class="header-status-row">'
-                f'<span class="header-status-pill {status_class}">'
-                f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
-                f'<span class="header-updated-muted">{updated_ago}</span>'
-                f'</div></div></div>',
-                unsafe_allow_html=True,
-            )
+            l1, l2 = st.columns([1, 5])
+            with l1:
+                logo_path = _logo_path()
+                if logo_path:
+                    st.image(str(logo_path), use_container_width=True)
+            with l2:
+                st.markdown(
+                    f'<div class="header-left-inner">'
+                    f'<div class="header-title-block">'
+                    f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                    f'<div class="header-status-row">'
+                    f'<span class="header-status-pill {status_class}">'
+                    f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
+                    f'<span class="header-updated-muted">{updated_ago}</span>'
+                    f'</div></div></div>',
+                    unsafe_allow_html=True,
+                )
         with right_col:
             r1, r2, r3, r4 = st.columns(4)
             with r1:
