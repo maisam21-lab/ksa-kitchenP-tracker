@@ -2700,6 +2700,9 @@ def main():
     .header-theme-switch .header-theme-moon { right: 5px !important; }
     .header-theme-switch .header-theme-thumb { position: absolute !important; left: 2px !important; top: 2px !important; width: 18px !important; height: 18px !important; border-radius: 50% !important; background: #fff !important; box-shadow: 0 1px 2px rgba(0,0,0,0.12) !important; transition: left 0.2s ease !important; z-index: 1 !important; }
     .header-theme-switch.dark .header-theme-thumb { left: 26px !important; }
+    .header-dark-toggle-wrap { display: inline-flex !important; }
+    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button { min-width: 32px !important; height: 32px !important; padding: 0 !important; border-radius: 6px !important; background: transparent !important; border: 1px solid #e5e7eb !important; color: #6b7280 !important; font-size: 1rem !important; }
+    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button:hover { background: rgba(0,0,0,0.04) !important; color: #111827 !important; }
     .header-avatar-chevron { display: inline-flex !important; align-items: center !important; gap: 2px !important; }
     .header-chevron { color: #6b7280 !important; font-size: 0.8rem !important; }
     .header-user-avatar { display: inline-flex !important; align-items: center !important; justify-content: center !important; width: 34px !important; height: 34px !important; border-radius: 50% !important; background: #0f766e !important; color: white !important; font-weight: 600 !important; font-size: 0.875rem !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; flex-shrink: 0 !important; }
@@ -2830,18 +2833,8 @@ def main():
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
-    # Theme toggle via query param so we can use a link-styled switch
     _qp = getattr(st, "query_params", None)
     if _qp is not None:
-        _tv = _qp.get("toggle_dark")
-        _val = _tv[0] if isinstance(_tv, list) else _tv
-        if _val:
-            st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
-            try:
-                del _qp["toggle_dark"]
-            except Exception:
-                pass
-            _rerun()
         _on = _qp.get("open_notifications")
         _on_val = _on[0] if isinstance(_on, list) else _on
         if _on_val:
@@ -2888,13 +2881,11 @@ def main():
                     unsafe_allow_html=True,
                 )
             with r2:
-                _switch_class = "header-theme-switch dark" if _dark else "header-theme-switch"
-                st.markdown(
-                    f'<a href="?toggle_dark=1" class="{_switch_class}" title="Toggle dark mode" aria-label="Toggle dark mode">'
-                    '<span class="header-theme-sun">☀</span><span class="header-theme-moon">☾</span>'
-                    '<span class="header-theme-thumb"></span></a>',
-                    unsafe_allow_html=True,
-                )
+                st.markdown('<div class="header-dark-toggle-wrap">', unsafe_allow_html=True)
+                if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode (light / dark)"):
+                    st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
+                    _rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
             with r3:
                 st.markdown(
                     '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Contact: maysam.abukashabeh@cloudkitchens.com">?</a>',
