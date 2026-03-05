@@ -2666,8 +2666,8 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* ========== Header: single flex row, fixed height, all items on same center line ========== */
-    /* 1. Main header container — single flex row */
+    /* ========== Header: NORMALIZED heights — 72px row, 40px controls, no wrapping ========== */
+    /* 1) Header outer: height 72px, flex, align center */
     .header-top-bar + div {
         display: flex !important;
         align-items: center !important;
@@ -2730,9 +2730,16 @@ def main():
         display: flex !important;
         align-items: center !important;
     }
-    .header-top-bar + div [data-testid="column"] { padding: 0 !important; margin: 0 !important; }
-
-    /* Force all header content to center: no top/bottom margin anywhere */
+    /* 2) Shared control height — .headerCtrl equivalent for all header controls */
+    .headerCtrl,
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input,
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child button,
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button,
+    .header-dark-toggle-wrap button,
+    .header-icon-btn {
+        height: 40px !important;
+        min-height: 40px !important;
+    }
     .header-top-bar + div [data-testid="stVerticalBlock"] *,
     .header-top-bar + div [data-testid="stHorizontalBlock"] [data-testid="column"] * {
         margin-top: 0 !important;
@@ -2762,25 +2769,28 @@ def main():
         height: 100% !important;
         min-height: 72px !important;
     }
-    /* Logo column: full row height (72px), center logo vertically so it sits on same line as title */
+    /* Logo: 40px container only — must NOT define header height */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"],
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child div[data-testid="stImage"] {
         display: flex !important;
         align-items: center !important;
-        justify-content: flex-start !important;
-        height: 100% !important;
-        min-height: 72px !important;
+        justify-content: center !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        max-height: 40px !important;
+        width: 40px !important;
+        min-width: 40px !important;
         margin: 0 !important;
         padding: 0 !important;
     }
     .header-top-bar + div img {
         max-height: 40px !important;
-        height: auto !important;
+        max-width: 40px !important;
         width: auto !important;
-        max-width: 140px !important;
+        height: auto !important;
         object-fit: contain !important;
-        object-position: left center !important;
+        object-position: center !important;
         display: block !important;
         margin: 0 !important;
         flex-shrink: 0 !important;
@@ -2868,7 +2878,7 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
         display: flex !important;
         align-items: center !important;
-        gap: 0 !important;
+        gap: 8px !important;
         width: 100% !important;
         max-width: 240px !important;
         margin: 0 auto !important;
@@ -2880,6 +2890,7 @@ def main():
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child { flex: 0 0 auto !important; }
     /* Search icon button: 40px square */
+    /* Search icon button: 40px square (headerCtrl) */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child button {
         width: 40px !important;
         min-width: 40px !important;
@@ -2894,14 +2905,16 @@ def main():
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
+        line-height: 1 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:last-child { flex: 1 1 auto !important; min-width: 0 !important; }
     /* Search input: 40px height */
+    /* Search input: exactly 40px (headerCtrl) */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input {
         height: 40px !important;
         min-height: 40px !important;
         margin: 0 !important;
-        padding: 6px 10px !important;
+        padding: 8px 12px !important;
         border: none !important;
         border-left: 1px solid #e5e7eb !important;
         border-radius: 0 !important;
@@ -2960,12 +2973,12 @@ def main():
         padding: 0 !important;
     }
     .header-top-bar + div label { margin: 0 !important; padding: 0 !important; min-height: 0 !important; }
-    /* All right-group buttons: 40px height (icon buttons 40px square, Sign out 40px) */
+    /* Right-group buttons: 40px height, consistent padding (px-3 py-2). Sign out: no wrap, min-width 96px */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child button {
         height: 40px !important;
         min-height: 40px !important;
         margin: 0 !important;
-        padding: 0 12px !important;
+        padding: 8px 12px !important;
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
@@ -2973,6 +2986,10 @@ def main():
         font-size: 0.8125rem !important;
         font-weight: 500 !important;
         line-height: 1 !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:last-child button {
+        white-space: nowrap !important;
+        min-width: 96px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child button,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:nth-child(2) button {
