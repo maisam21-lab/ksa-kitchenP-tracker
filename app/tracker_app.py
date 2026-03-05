@@ -2545,7 +2545,7 @@ def main():
                     _qp["q"] = st.session_state["global_search_q"]
             except Exception:
                 pass
-        _rerun()
+        # Do not _rerun() — continue so we reach the search-results block and show results
 
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
     _streamlit_user = getattr(st, "user", None)
@@ -2732,6 +2732,13 @@ def main():
     }
     .header-top-bar + div [data-testid="column"] { padding: 0 !important; margin: 0 !important; }
 
+    /* Force all header content to center: no top/bottom margin anywhere */
+    .header-top-bar + div [data-testid="stVerticalBlock"] *,
+    .header-top-bar + div [data-testid="stHorizontalBlock"] [data-testid="column"] * {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+    }
+
     /* LEFT GROUP: display flex, align-items center, height 100% */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
@@ -2752,16 +2759,18 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] [data-testid="column"] {
         display: flex !important;
         align-items: center !important;
+        height: 100% !important;
+        min-height: 72px !important;
     }
-    /* Logo: 40px-tall container, center logo; image max-height 40px */
+    /* Logo column: full row height (72px), center logo vertically so it sits on same line as title */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"],
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child div[data-testid="stImage"] {
         display: flex !important;
         align-items: center !important;
         justify-content: flex-start !important;
-        height: 40px !important;
-        min-height: 40px !important;
+        height: 100% !important;
+        min-height: 72px !important;
         margin: 0 !important;
         padding: 0 !important;
     }
@@ -2845,8 +2854,16 @@ def main():
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] {
         height: 100% !important;
+        min-height: 72px !important;
         display: flex !important;
         align-items: center !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] > div {
+        width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
         display: flex !important;
@@ -2918,6 +2935,8 @@ def main():
         align-items: center !important;
         padding: 0 !important;
         margin: 0 !important;
+        height: 100% !important;
+        min-height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stVerticalBlock"] {
         padding: 0 !important;
