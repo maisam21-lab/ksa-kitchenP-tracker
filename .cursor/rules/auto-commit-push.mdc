@@ -1,5 +1,5 @@
 ---
-description: Always commit and push changes after making edits
+description: Always commit and push changes after making edits (do not wait for user to say "push")
 alwaysApply: true
 ---
 
@@ -7,8 +7,8 @@ alwaysApply: true
 
 After making code or config changes, **always commit and push** without waiting for the user to ask.
 
-1. Stage changes: `git add -A` (exclude files in .gitignore)
+1. Stage changes: `git add` the modified files (respect .gitignore)
 2. Commit with a clear message summarizing what changed
-3. Push to the remote: `git push`
+3. Push to the remote: `git push origin main`
 
-Do not ask for confirmation—execute these steps automatically when edits are complete.
+Do not ask for confirmation—execute these steps automatically when edits are complete. The user prefers updates pushed to `origin main` without being told to push.
