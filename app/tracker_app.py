@@ -2688,7 +2688,7 @@ def main():
     @media (min-width: 1024px) { .header-top-bar + div { padding: 0 16px !important; } }
     @media (max-width: 768px) { .header-top-bar + div { padding: 0 8px !important; min-height: 44px !important; } .header-brand-title { font-size: 1rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
 
-    /* Horizontal block and columns: full width flex, center align */
+    /* Horizontal block: three columns = left | center (search) | right */
     .header-top-bar + div [data-testid="stHorizontalBlock"] {
         width: 100% !important;
         display: flex !important;
@@ -2702,6 +2702,43 @@ def main():
         align-items: center !important;
         flex-shrink: 0 !important;
     }
+    /* Center column: search bar - flex to take space, justify center */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) {
+        flex: 1 1 auto !important;
+        min-width: 200px !important;
+        max-width: 400px !important;
+        justify-content: center !important;
+    }
+    /* Prominent search bar: single rounded bar with icon + input (center column inner row) */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        align-items: center !important;
+        gap: 0 !important;
+        width: 100% !important;
+        max-width: 360px !important;
+        margin: 0 auto !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        background: #fff !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child { flex: 0 0 auto !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:first-child button {
+        width: 40px !important; min-width: 40px !important; height: 36px !important;
+        margin: 0 !important; padding: 0 !important; border: none !important;
+        background: transparent !important; border-radius: 0 !important;
+        font-size: 1rem !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="column"]:last-child { flex: 1 1 auto !important; min-width: 0 !important; }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input {
+        height: 36px !important; min-height: 36px !important;
+        margin: 0 !important; padding: 6px 12px !important;
+        border: none !important; border-left: 1px solid #e5e7eb !important;
+        border-radius: 0 !important; font-size: 0.875rem !important;
+        box-shadow: none !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) input:focus { box-shadow: none !important; }
     .header-top-bar + div [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; }
     .header-top-bar + div [data-testid="stVerticalBlock"] > div { padding: 0 !important; margin: 0 !important; min-height: 0 !important; }
     .header-top-bar + div [data-testid="column"] { padding: 0 !important; margin: 0 !important; }
@@ -3035,7 +3072,8 @@ def main():
     _unread_count = get_unread_notification_count(_last_read)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        left_col, right_col = st.columns([2, 1])
+        # Three sections: left (logo + title) | center (search bar) | right (icons + profile + sign out)
+        left_col, center_col, right_col = st.columns([1, 2, 1])
         with left_col:
             l1, l2 = st.columns([1, 5])
             with l1:
@@ -3045,7 +3083,6 @@ def main():
                 else:
                     st.markdown('<span class="header-brand-kp">KitchenPark</span>', unsafe_allow_html=True)
             with l2:
-                # When logo is shown, no duplicate "KitchenPark" text; divider then title block
                 st.markdown(
                     f'<div class="header-left-inner">'
                     f'<span class="header-divider-v"></span>'
@@ -3058,55 +3095,54 @@ def main():
                     f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
+        with center_col:
+            st.markdown('<div class="header-search-bar-wrap">', unsafe_allow_html=True)
+            _sc1, _sc2 = st.columns([1, 12])
+            with _sc1:
+                if st.button("🔍", key="header_search_btn", help="Search across all data"):
+                    _q = (st.session_state.get("header_search_q") or "").strip()
+                    st.session_state["show_header_search_results"] = True
+                    st.session_state["global_search_q"] = _q
+                    _qp = getattr(st, "query_params", None)
+                    if _qp is not None:
+                        try:
+                            _qp["open_search"] = "1"
+                            if _q:
+                                _qp["q"] = _q
+                        except Exception:
+                            pass
+                    _rerun()
+            with _sc2:
+                st.text_input(
+                    "Search",
+                    key="header_search_q",
+                    placeholder="Search anything…",
+                    label_visibility="collapsed",
+                )
+            st.markdown('</div>', unsafe_allow_html=True)
         with right_col:
-            # Layout: Search (wide) | Dark mode | Help | Bell | Avatar | Sign out
-            r1, r2, r3, r4, r5, r6 = st.columns([2, 1, 1, 1, 1, 1])
+            r1, r2, r3, r4, r5 = st.columns(5)
             with r1:
-                st.markdown('<div class="header-search-wrap">', unsafe_allow_html=True)
-                header_search_col, header_btn_col = st.columns([3, 1])
-                with header_search_col:
-                    st.text_input(
-                        "Search",
-                        key="header_search_q",
-                        placeholder="Search anything…",
-                        label_visibility="collapsed",
-                    )
-                with header_btn_col:
-                    if st.button("🔍", key="header_search_btn", help="Search across all data"):
-                        _q = (st.session_state.get("header_search_q") or "").strip()
-                        st.session_state["show_header_search_results"] = True
-                        st.session_state["global_search_q"] = _q
-                        _qp = getattr(st, "query_params", None)
-                        if _qp is not None:
-                            try:
-                                _qp["open_search"] = "1"
-                                if _q:
-                                    _qp["q"] = _q
-                            except Exception:
-                                pass
-                        _rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-            with r2:
                 st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
                 if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
                     st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
                     _rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-            with r3:
+            with r2:
                 st.markdown(
-                    '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Contact: maysam.abukashabeh@cloudkitchens.com">?</a>',
+                    '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Contact">?</a>',
                     unsafe_allow_html=True,
                 )
-            with r4:
+            with r3:
                 _badge_html = f'<span class="header-bell-badge">{min(_unread_count, 99)}</span>' if _unread_count > 0 else ''
                 st.markdown(
                     '<span class="header-bell-wrap">'
-                    '<a href="?open_notifications=1" class="header-icon-btn" title="Notifications" aria-label="Notifications">'
+                    '<a href="?open_notifications=1" class="header-icon-btn" title="Notifications">'
                     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></a>'
                     f'{_badge_html}</span>',
                     unsafe_allow_html=True,
                 )
-            with r5:
+            with r4:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3114,8 +3150,8 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r6:
-                if st.button("Sign out", key="header_sign_out", help="Sign out and clear session"):
+            with r5:
+                if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
                     st.session_state["developer_unlocked"] = False
