@@ -3097,17 +3097,23 @@ def main():
         # Two sections: left | right (dark toggle aligned with other controls)
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            st.markdown(
-                f'<div class="header-left-inner">'
-                f'<div class="header-title-block">'
-                f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
-                f'<div class="header-status-row">'
-                f'<span class="header-status-pill {status_class}">'
-                f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
-                f'<span class="header-updated-muted">{updated_ago}</span>'
-                f'</div></div></div>',
-                unsafe_allow_html=True,
-            )
+            l1, l2 = st.columns([1, 5])
+            with l1:
+                logo_path = _logo_path()
+                if logo_path:
+                    st.image(str(logo_path), use_container_width=True)
+            with l2:
+                st.markdown(
+                    f'<div class="header-left-inner">'
+                    f'<div class="header-title-block">'
+                    f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                    f'<div class="header-status-row">'
+                    f'<span class="header-status-pill {status_class}">'
+                    f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
+                    f'<span class="header-updated-muted">{updated_ago}</span>'
+                    f'</div></div></div>',
+                    unsafe_allow_html=True,
+                )
         with right_col:
             r1, r2, r3, r4 = st.columns(4)
             with r1:
