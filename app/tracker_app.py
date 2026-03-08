@@ -2704,7 +2704,7 @@ def main():
         margin-bottom: 0 !important;
     }
 
-    /* LEFT GROUP: logo + KitchenPark + divider + title/status + dark (gap-6) */
+    /* LEFT GROUP: logo + divider + title/status + dark (gap-6) */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
         flex-direction: row !important;
@@ -2720,7 +2720,7 @@ def main():
         flex-direction: row !important;
         align-items: center !important;
         gap: 12px !important;
-        min-width: 320px !important;
+        min-width: 280px !important;
         flex: 0 1 auto !important;
         height: 72px !important;
     }
@@ -2775,15 +2775,6 @@ def main():
         display: block !important;
         margin: 0 !important;
         flex-shrink: 0 !important;
-    }
-    .header-kitchenpark-text {
-        font-weight: 700 !important;
-        color: #334155 !important;
-        font-size: 1.125rem !important;
-        letter-spacing: -0.025em !important;
-        line-height: 1 !important;
-        margin: 0 !important;
-        white-space: nowrap !important;
     }
     .header-left-inner {
         display: flex !important;
@@ -2991,8 +2982,8 @@ def main():
     .header-help-btn:hover { background: #f9fafb !important; color: #059669 !important; border-color: #d1d5db !important; }
     .header-dark-toggle-wrap { display: inline-flex !important; align-items: center !important; margin: 0 !important; height: 40px !important; }
     /* Keep dark toggle in same row and vertically centered (prevent stacking below) */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(4) [data-testid="stVerticalBlock"],
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(4) > div {
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(3) [data-testid="stVerticalBlock"],
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(3) > div {
         display: flex !important;
         flex-direction: row !important;
         align-items: center !important;
@@ -3003,7 +2994,7 @@ def main():
         margin: 0 !important;
         padding: 0 !important;
     }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(4) [data-testid="stVerticalBlock"] > div {
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(3) [data-testid="stVerticalBlock"] > div {
         display: flex !important;
         align-items: center !important;
         margin: 0 !important;
@@ -3011,7 +3002,7 @@ def main():
     }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
     .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(4) button {
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(3) button {
         margin: 0 !important;
         height: 40px !important;
         min-height: 40px !important;
@@ -3183,7 +3174,7 @@ def main():
     with st.container():
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            l1, l2, l3, l4 = st.columns([1, 2, 12, 1])
+            l1, l2, l3 = st.columns([1, 12, 1])
             with l1:
                 logo_path = _logo_path()
                 if logo_path:
@@ -3191,8 +3182,6 @@ def main():
                 else:
                     st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
             with l2:
-                st.markdown('<span class="header-kitchenpark-text">KitchenPark</span>', unsafe_allow_html=True)
-            with l3:
                 st.markdown(
                     f'<div class="header-brand-status">'
                     f'<div class="header-divider"></div>'
@@ -3205,7 +3194,7 @@ def main():
                     f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
-            with l4:
+            with l3:
                 st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
                 if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
                     st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
