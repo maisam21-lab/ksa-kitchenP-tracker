@@ -2883,7 +2883,7 @@ def main():
         height: 72px !important;
         min-height: 72px !important;
     }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child {
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:nth-child(2) {
         border-left: 1px solid #f3f4f6 !important;
         border-right: 1px solid #f3f4f6 !important;
         padding-left: 16px !important;
@@ -2975,6 +2975,13 @@ def main():
         color: #6b7280 !important;
     }
     .header-help-btn:hover { background: #f9fafb !important; color: #059669 !important; border-color: #d1d5db !important; }
+    /* Header search input: compact like Ctrl+F */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child input {
+        max-width: 180px !important;
+        height: 36px !important;
+        min-height: 36px !important;
+        font-size: 0.8125rem !important;
+    }
     /* Avatar: 36px circle centered in 40px container */
     .header-avatar-chevron {
         display: inline-flex !important;
@@ -3156,13 +3163,20 @@ def main():
                     unsafe_allow_html=True,
                 )
         with right_col:
-            r1, r2, r3 = st.columns(3)
+            r1, r2, r3, r4 = st.columns([2, 1, 1, 1])
             with r1:
+                search_query = st.text_input(
+                    "Search",
+                    placeholder="Search in page (Ctrl+F style)...",
+                    key="header_search_query",
+                    label_visibility="collapsed",
+                )
+            with r2:
                 st.markdown(
                     '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
-            with r2:
+            with r3:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3170,7 +3184,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r3:
+            with r4:
                 if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
@@ -3181,6 +3195,81 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1280px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
+    # In-page search: highlight matches like Ctrl+F (query from header_search_query)
+    _search_q = (st.session_state.get("header_search_query") or "").strip()
+    if _search_q:
+        _search_escaped = html.escape(_search_q, quote=True)
+        st.markdown(
+            f'<div id="app-search-query" data-query="{_search_escaped}"></div>'
+            '<style>.app-search-highlight{background:#fef08a;border-radius:2px;}.app-search-current{background:#facc15 !important;}</style>'
+            r'''
+            <script>
+            (function(){
+                var el = document.getElementById("app-search-query");
+                if (!el) return;
+                var q = (el.getAttribute("data-query") || "").trim();
+                if (!q) return;
+                var container = document.querySelector("[data-testid=\"stAppViewContainer\"]") || document.body;
+                var regex = new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
+                var toReplace = [];
+                var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+                    acceptNode: function(n) {
+                        var p = n.parentNode;
+                        if (!p || p.nodeName === "SCRIPT" || p.nodeName === "STYLE" || p.nodeName === "NOSCRIPT") return NodeFilter.FILTER_REJECT;
+                        if (p.closest && p.closest("script, style, noscript")) return NodeFilter.FILTER_REJECT;
+                        return NodeFilter.FILTER_ACCEPT;
+                    }
+                }, false);
+                var textNode;
+                while (textNode = walker.nextNode()) {
+                    var text = textNode.textContent;
+                    if (!regex.test(text)) continue;
+                    toReplace.push({ node: textNode, text: text });
+                }
+                var marks = [];
+                toReplace.forEach(function(item) {
+                    var textNode = item.node;
+                    var text = item.text;
+                    regex.lastIndex = 0;
+                    var parent = textNode.parentNode;
+                    if (!parent || parent.classList && parent.classList.contains("app-search-highlight")) return;
+                    var frag = document.createDocumentFragment();
+                    var idx = 0;
+                    var m;
+                    regex.lastIndex = 0;
+                    while ((m = regex.exec(text)) !== null) {
+                        if (m.index > idx) frag.appendChild(document.createTextNode(text.slice(idx, m.index)));
+                        var mark = document.createElement("mark");
+                        mark.className = "app-search-highlight";
+                        mark.textContent = m[0];
+                        marks.push(mark);
+                        frag.appendChild(mark);
+                        idx = m.index + m[0].length;
+                    }
+                    if (idx < text.length) frag.appendChild(document.createTextNode(text.slice(idx)));
+                    parent.replaceChild(frag, textNode);
+                });
+                if (marks.length === 0) return;
+                var bar = document.createElement("div");
+                bar.id = "app-search-bar";
+                bar.style.cssText = "position:fixed;bottom:16px;right:16px;z-index:9999;background:#111;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);";
+                bar.innerHTML = "<span>" + marks.length + " match(es)</span><button type=\"button\" id=\"app-search-prev\">Prev</button><button type=\"button\" id=\"app-search-next\">Next</button>";
+                document.body.appendChild(bar);
+                var cur = 0;
+                function goTo(i) {
+                    if (marks.length === 0) return;
+                    cur = (i + marks.length) % marks.length;
+                    marks.forEach(function(m){ m.classList.remove("app-search-current"); });
+                    marks[cur].classList.add("app-search-current");
+                    marks[cur].scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+                document.getElementById("app-search-prev").onclick = function(){ goTo(cur - 1); };
+                document.getElementById("app-search-next").onclick = function(){ goTo(cur + 1); };
+                goTo(0);
+            })();
+            </script>''',
+            unsafe_allow_html=True,
+        )
     # Access control: when allowlist is on, identity is already verified (or developer); just check allowlist membership
     if _allowlist_enabled() and not _is_developer():
         if not current_user:
