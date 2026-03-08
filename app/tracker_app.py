@@ -3565,7 +3565,6 @@ def main():
                     st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                 else:
                     st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets. Column **Sheet** shows the source.")
-                    st.caption("Tip: For accurate dashboard value totals, ensure **List Price** is filled in your source sheets (all calculations use List price only).")
                     cols_combined = list(combined_rows[0].keys()) if combined_rows else []
                     search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
                     rows_shown = combined_rows
