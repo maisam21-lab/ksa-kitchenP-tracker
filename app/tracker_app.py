@@ -3477,6 +3477,14 @@ def main():
                     else:
                         help_lines.append("Local: put your service account JSON in **scripts/credentials.json** and set `$env:GOOGLE_APPLICATION_CREDENTIALS = \".\\scripts\\credentials.json\"` before running Streamlit. Check the terminal for errors.")
                     st.info("\n".join(help_lines))
+                else:
+                    with st.expander("Connect Kitchen Master Data to BigQuery", expanded=False):
+                        st.caption("Add the following to **.streamlit/secrets.toml** (create the file if it doesn't exist). Use the same service account as Google Sheets or set **GOOGLE_APPLICATION_CREDENTIALS** to your key file path.")
+                        st.code("""[bigquery_master_kitchens]
+project_id = "css-operations"
+query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
+""", language="toml")
+                        st.caption("Then add credentials: either paste the full service account JSON under **[gsheet_service_account]** in secrets (same as Sheets), or set GOOGLE_APPLICATION_CREDENTIALS to scripts/credentials.json before running the app. See **docs/CONNECT_BIGQUERY.md** for full steps.")
                 # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
                 last_refresh = get_last_refresh("gsheet")
                 # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
