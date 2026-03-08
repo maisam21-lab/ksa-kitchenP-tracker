@@ -3575,7 +3575,10 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                     st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                 else:
                     st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets. Column **Sheet** shows the source.")
-                    cols_combined = list(combined_rows[0].keys()) if combined_rows else []
+                    cols_combined = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict)))) if combined_rows else []
+                    if combined_rows and isinstance(combined_rows[0], dict):
+                        _df_temp = pd.DataFrame(combined_rows)
+                        cols_combined = sorted(_df_temp.columns.tolist())
                     search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
                     rows_shown = combined_rows
                     header_q = (st.session_state.get("header_search_query") or "").strip()
@@ -3586,7 +3589,9 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                         term = search_combined.strip().lower()
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
                     with st.expander("Conditional filters (AND)", expanded=False):
-                        st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row.")
+                        st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row. **Scroll the Column dropdown** to see all columns.")
+                        if cols_combined:
+                            st.caption(f"**{len(cols_combined)} columns** available to filter.")
                         cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
                         cond_rules = []
                         for i in range(1, 6):
@@ -3767,8 +3772,13 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                     all_keys.update(r.keys() if isinstance(r, dict) else [])
                 rows_filtered = [r for r in rows_filtered if any(term in str(r.get(k) or "").lower() for k in (all_keys or ["_"]))]
             with st.expander("Conditional filters (AND)", expanded=False):
-                st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row.")
-                cols_refine = list(rows[0].keys()) if rows else []
+                st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row. **Scroll the Column dropdown** to see all columns.")
+                cols_refine = sorted(set().union(*(r.keys() for r in rows if isinstance(r, dict)))) if rows else []
+                if rows and isinstance(rows[0], dict):
+                    _df_ref = pd.DataFrame(rows)
+                    cols_refine = sorted(_df_ref.columns.tolist())
+                if cols_refine:
+                    st.caption(f"**{len(cols_refine)} columns** available to filter.")
                 cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
                 cond_rules_refine = []
                 for i in range(1, 6):
