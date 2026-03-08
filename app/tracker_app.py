@@ -2560,20 +2560,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     else:
         expand_tab = st.checkbox("Expand table", key=f"expand_generic_{key_suffix}", help="Show table in a larger view")
         st.dataframe(df_display, use_container_width=True, hide_index=True, height=700 if expand_tab else 400)
-    # CSV download disabled app-wide (maximize/fullscreen only)
-    if False and allow_download and key_suffix != "master_other":
-        buf = io.StringIO()
-        if rows_shown:
-            w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows_shown)
-        st.download_button(
-            "Download CSV",
-            data=buf.getvalue(),
-            file_name=f"{tab_id.replace(' ', '_')}.csv",
-            mime="text/csv",
-            key=f"dl_{key_suffix}",
-        )
+    # CSV download disabled app-wide (no Download CSV button)
 
 
 def main():
