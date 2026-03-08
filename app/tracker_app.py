@@ -333,8 +333,8 @@ def _is_main_tracker_tab(tab_id: str) -> bool:
 
 # Short descriptions for tab tooltips (hover); Tracker is not shown as a tab (moved to Dashboard)
 TAB_DESCRIPTIONS = {
-    "Kitchens": "All kitchen details. View, filter, and download.",
-    "Master Kitchens list": "Master list of all kitchens. View, filter, and download.",
+    "Kitchens": "All kitchen details. View and filter.",
+    "Master Kitchens list": "Master list of all kitchens. View and filter.",
     "Sellable No Status": "Sellable no-status data. View and filter.",
     "All no status kitchens": "All no-status kitchens. View and filter.",
     "LF Comp": "LF Comp data. View and filter.",
@@ -2555,7 +2555,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     else:
         expand_tab = st.checkbox("Expand table", key=f"expand_generic_{key_suffix}", help="Show table in a larger view")
         st.dataframe(df_display, use_container_width=True, hide_index=True, height=700 if expand_tab else 400)
-    if allow_download and key_suffix != "master_other":
+    # CSV download disabled app-wide (maximize/fullscreen only)
+    if False and allow_download and key_suffix != "master_other":
         buf = io.StringIO()
         if rows_shown:
             w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
@@ -3424,7 +3425,7 @@ def main():
             last_refresh = (superset_meta or {}).get("last_refresh_ts_utc")
             if _superset_stale_warning(superset_meta or {}):
                 st.warning("Last refresh is older than 30 minutes or last run failed. Data may be stale.")
-            st.caption("Filter kitchen details and download your report.")
+            st.caption("Filter kitchen details and view your report.")
             chosen_label = "Master Kitchens (Live)"
             source_id = "superset"
             rows = superset_rows
@@ -3452,7 +3453,7 @@ def main():
                 _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
                 cap_col, btn_col = st.columns([3, 1])
                 with cap_col:
-                    st.caption(f"Filter kitchen details and download your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
+                    st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
                 with btn_col:
                     if st.button("Refresh now", key="master_bq_refresh_now"):
                         st.session_state[_bq_cache_key] = None
@@ -4726,7 +4727,8 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                 st.caption("No data yet. Import or add data in the **Data** section below.")
             else:
                 csv_content = export_csv(rows_for_export)
-                st.download_button("Download full CSV (ksa_kitchen_tracker.csv)", data=csv_content, file_name="ksa_kitchen_tracker.csv", mime="text/csv", key="dl_csv")
+                # CSV download disabled app-wide
+                # st.download_button("Download full CSV (ksa_kitchen_tracker.csv)", data=csv_content, file_name="ksa_kitchen_tracker.csv", mime="text/csv", key="dl_csv")
                 report_html = build_summary_report_html(rows_for_export)
                 st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
         st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
@@ -4816,7 +4818,8 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                 w = csv.DictWriter(buf, fieldnames=["facility_id", "facility_name", "current_multiplier", "suggested_multiplier", "updated_by", "updated_at"], extrasaction="ignore")
                 w.writeheader()
                 w.writerows(rows_m)
-                st.download_button("Export CSV", data=buf.getvalue(), file_name="facility_multipliers.csv", mime="text/csv", key="pm_export")
+                # CSV download disabled app-wide
+                # st.download_button("Export CSV", data=buf.getvalue(), file_name="facility_multipliers.csv", mime="text/csv", key="pm_export")
         else:
             st.info("Multipliers module not loaded (app/multipliers.py).")
         return
