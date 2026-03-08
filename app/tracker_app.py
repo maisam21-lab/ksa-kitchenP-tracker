@@ -3219,67 +3219,72 @@ def main():
             r'''
             <script>
             (function(){
-                var el = document.getElementById("app-search-query");
-                if (!el) return;
-                var q = (el.getAttribute("data-query") || "").trim();
-                if (!q) return;
-                var container = document.querySelector("[data-testid=\"stAppViewContainer\"]") || document.body;
-                var regex = new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
-                var toReplace = [];
-                var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
-                    acceptNode: function(n) {
-                        var p = n.parentNode;
-                        if (!p || p.nodeName === "SCRIPT" || p.nodeName === "STYLE" || p.nodeName === "NOSCRIPT") return NodeFilter.FILTER_REJECT;
-                        if (p.closest && p.closest("script, style, noscript")) return NodeFilter.FILTER_REJECT;
-                        return NodeFilter.FILTER_ACCEPT;
+                function runSearch() {
+                    var el = document.getElementById("app-search-query");
+                    if (!el) return;
+                    var q = (el.getAttribute("data-query") || "").trim();
+                    if (!q) return;
+                    var container = document.querySelector("[data-testid=\"stAppViewContainer\"]") || document.body;
+                    var regex = new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
+                    var toReplace = [];
+                    var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+                        acceptNode: function(n) {
+                            var p = n.parentNode;
+                            if (!p || p.nodeName === "SCRIPT" || p.nodeName === "STYLE" || p.nodeName === "NOSCRIPT") return NodeFilter.FILTER_REJECT;
+                            if (p.closest && p.closest("script, style, noscript")) return NodeFilter.FILTER_REJECT;
+                            return NodeFilter.FILTER_ACCEPT;
+                        }
+                    }, false);
+                    var textNode;
+                    while (textNode = walker.nextNode()) {
+                        var text = textNode.textContent;
+                        if (!regex.test(text)) continue;
+                        toReplace.push({ node: textNode, text: text });
                     }
-                }, false);
-                var textNode;
-                while (textNode = walker.nextNode()) {
-                    var text = textNode.textContent;
-                    if (!regex.test(text)) continue;
-                    toReplace.push({ node: textNode, text: text });
-                }
-                var marks = [];
-                toReplace.forEach(function(item) {
-                    var textNode = item.node;
-                    var text = item.text;
-                    regex.lastIndex = 0;
-                    var parent = textNode.parentNode;
-                    if (!parent || parent.classList && parent.classList.contains("app-search-highlight")) return;
-                    var frag = document.createDocumentFragment();
-                    var idx = 0;
-                    var m;
-                    regex.lastIndex = 0;
-                    while ((m = regex.exec(text)) !== null) {
-                        if (m.index > idx) frag.appendChild(document.createTextNode(text.slice(idx, m.index)));
-                        var mark = document.createElement("mark");
-                        mark.className = "app-search-highlight";
-                        mark.textContent = m[0];
-                        marks.push(mark);
-                        frag.appendChild(mark);
-                        idx = m.index + m[0].length;
-                    }
-                    if (idx < text.length) frag.appendChild(document.createTextNode(text.slice(idx)));
-                    parent.replaceChild(frag, textNode);
-                });
-                if (marks.length === 0) return;
-                var bar = document.createElement("div");
-                bar.id = "app-search-bar";
-                bar.style.cssText = "position:fixed;bottom:16px;right:16px;z-index:9999;background:#111;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);";
-                bar.innerHTML = "<span>" + marks.length + " match(es)</span><button type=\"button\" id=\"app-search-prev\">Prev</button><button type=\"button\" id=\"app-search-next\">Next</button>";
-                document.body.appendChild(bar);
-                var cur = 0;
-                function goTo(i) {
+                    var marks = [];
+                    toReplace.forEach(function(item) {
+                        var textNode = item.node;
+                        var text = item.text;
+                        regex.lastIndex = 0;
+                        var parent = textNode.parentNode;
+                        if (!parent || parent.classList && parent.classList.contains("app-search-highlight")) return;
+                        var frag = document.createDocumentFragment();
+                        var idx = 0;
+                        var m;
+                        regex.lastIndex = 0;
+                        while ((m = regex.exec(text)) !== null) {
+                            if (m.index > idx) frag.appendChild(document.createTextNode(text.slice(idx, m.index)));
+                            var mark = document.createElement("mark");
+                            mark.className = "app-search-highlight";
+                            mark.textContent = m[0];
+                            marks.push(mark);
+                            frag.appendChild(mark);
+                            idx = m.index + m[0].length;
+                        }
+                        if (idx < text.length) frag.appendChild(document.createTextNode(text.slice(idx)));
+                        parent.replaceChild(frag, textNode);
+                    });
+                    var prevBar = document.getElementById("app-search-bar");
+                    if (prevBar) prevBar.remove();
                     if (marks.length === 0) return;
-                    cur = (i + marks.length) % marks.length;
-                    marks.forEach(function(m){ m.classList.remove("app-search-current"); });
-                    marks[cur].classList.add("app-search-current");
-                    marks[cur].scrollIntoView({ behavior: "smooth", block: "center" });
+                    var bar = document.createElement("div");
+                    bar.id = "app-search-bar";
+                    bar.style.cssText = "position:fixed;bottom:16px;right:16px;z-index:9999;background:#111;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);";
+                    bar.innerHTML = "<span>" + marks.length + " match(es)</span><button type=\"button\" id=\"app-search-prev\">Prev</button><button type=\"button\" id=\"app-search-next\">Next</button>";
+                    document.body.appendChild(bar);
+                    var cur = 0;
+                    function goTo(i) {
+                        if (marks.length === 0) return;
+                        cur = (i + marks.length) % marks.length;
+                        marks.forEach(function(m){ m.classList.remove("app-search-current"); });
+                        marks[cur].classList.add("app-search-current");
+                        marks[cur].scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                    document.getElementById("app-search-prev").onclick = function(){ goTo(cur - 1); };
+                    document.getElementById("app-search-next").onclick = function(){ goTo(cur + 1); };
+                    goTo(0);
                 }
-                document.getElementById("app-search-prev").onclick = function(){ goTo(cur - 1); };
-                document.getElementById("app-search-next").onclick = function(){ goTo(cur + 1); };
-                goTo(0);
+                setTimeout(runSearch, 600);
             })();
             </script>''',
             unsafe_allow_html=True,
