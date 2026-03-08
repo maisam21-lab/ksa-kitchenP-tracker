@@ -2732,10 +2732,10 @@ def main():
     }
     /* Logo: KitchenPark wordmark — larger so it’s clearly visible (was too small) */
     .header-logo-box {
-        width: 56px !important;
-        height: 56px !important;
-        min-width: 56px !important;
-        min-height: 56px !important;
+        width: 72px !important;
+        height: 72px !important;
+        min-width: 72px !important;
+        min-height: 72px !important;
         background: #00766c !important;
         border-radius: 6px !important;
         display: flex !important;
@@ -2751,11 +2751,11 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
         width: auto !important;
-        min-width: 56px !important;
-        max-width: 280px !important;
-        height: 56px !important;
-        min-height: 56px !important;
-        max-height: 56px !important;
+        min-width: 72px !important;
+        max-width: 340px !important;
+        height: 72px !important;
+        min-height: 72px !important;
+        max-height: 72px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: flex-start !important;
@@ -2766,8 +2766,8 @@ def main():
         border-radius: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 56px !important;
-        max-width: 280px !important;
+        max-height: 72px !important;
+        max-width: 340px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
