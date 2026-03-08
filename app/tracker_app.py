@@ -107,6 +107,56 @@ def _row_has_opportunity_name(row) -> bool:
         pass
     return False
 
+
+def _apply_conditional_filters(rows: list[dict], rules: list[dict], columns: list[str] | None = None) -> list[dict]:
+    """Filter rows by a list of rules (AND). Each rule: {"col": str, "op": str, "val": str}. Op: contains, equals, not equals, starts with, ends with, is empty, is not empty."""
+    if not rules or not rows:
+        return rows
+    cols = columns or (list(rows[0].keys()) if rows else [])
+    out = []
+    for r in rows:
+        match = True
+        for rule in rules:
+            col = rule.get("col") or (rule.get("column") if isinstance(rule.get("column"), str) else None)
+            if not col or col not in cols:
+                continue
+            op = (rule.get("op") or "").strip().lower()
+            val = (rule.get("val") or rule.get("value") or "").strip()
+            cell = r.get(col)
+            cell_str = str(cell).strip() if cell is not None else ""
+            if op == "contains":
+                if val.lower() not in cell_str.lower():
+                    match = False
+                    break
+            elif op == "equals":
+                if cell_str.lower() != val.lower():
+                    match = False
+                    break
+            elif op == "not equals":
+                if cell_str.lower() == val.lower():
+                    match = False
+                    break
+            elif op == "starts with":
+                if not cell_str.lower().startswith(val.lower()):
+                    match = False
+                    break
+            elif op == "ends with":
+                if not cell_str.lower().endswith(val.lower()):
+                    match = False
+                    break
+            elif op == "is empty":
+                if cell is not None and cell_str != "":
+                    match = False
+                    break
+            elif op == "is not empty":
+                if cell is None or cell_str == "":
+                    match = False
+                    break
+        if match:
+            out.append(r)
+    return out
+
+
 # Standardized column order for stakeholder export (matches ETL output)
 EXPORT_COLUMNS = [
     "record_id", "report_date", "site_id", "site_name", "region",
@@ -3526,6 +3576,22 @@ def main():
                     if (search_combined or "").strip():
                         term = search_combined.strip().lower()
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
+                    with st.expander("Conditional filters (AND)", expanded=False):
+                        st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row.")
+                        cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
+                        cond_rules = []
+                        for i in range(1, 6):
+                            c1, c2, c3 = st.columns([2, 2, 2])
+                            with c1:
+                                cond_col = st.selectbox("Column", ["— None —"] + cols_combined, key=f"master_combined_cond_{i}_col", label_visibility="visible" if i == 1 else "collapsed")
+                            with c2:
+                                cond_op = st.selectbox("Operator", ["— None —"] + cond_ops, key=f"master_combined_cond_{i}_op", label_visibility="visible" if i == 1 else "collapsed")
+                            with c3:
+                                cond_val = st.text_input("Value", key=f"master_combined_cond_{i}_val", placeholder="Value (not used for Is empty/Is not empty)", label_visibility="visible" if i == 1 else "collapsed")
+                            if cond_col and cond_col != "— None —" and cond_op and cond_op != "— None —":
+                                cond_rules.append({"col": cond_col, "op": cond_op.lower(), "val": (cond_val or "").strip()})
+                        if cond_rules:
+                            rows_shown = _apply_conditional_filters(rows_shown, cond_rules, cols_combined)
                     st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s).")
                     df_combined = pd.DataFrame(rows_shown)
                     df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
@@ -3589,6 +3655,10 @@ def main():
             if st.session_state.pop("master_clear_filters", False):
                 for key in ("master_f_date_multi", "master_f_site_multi", "master_f_region_multi", "master_f_metric_multi", "master_search", "master_f_status_filter"):
                     st.session_state[key] = [] if "multi" in key else ("" if key == "master_search" else None)
+                for i in range(1, 6):
+                    st.session_state[f"master_cond_{i}_col"] = "— None —"
+                    st.session_state[f"master_cond_{i}_op"] = "— None —"
+                    st.session_state[f"master_cond_{i}_val"] = ""
                 st.session_state["master_from_date"] = None
                 st.session_state["master_to_date"] = None
                 _rerun()
@@ -3687,12 +3757,35 @@ def main():
                 for r in rows_filtered:
                     all_keys.update(r.keys() if isinstance(r, dict) else [])
                 rows_filtered = [r for r in rows_filtered if any(term in str(r.get(k) or "").lower() for k in (all_keys or ["_"]))]
+            with st.expander("Conditional filters (AND)", expanded=False):
+                st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row.")
+                cols_refine = list(rows[0].keys()) if rows else []
+                cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
+                cond_rules_refine = []
+                for i in range(1, 6):
+                    c1, c2, c3 = st.columns([2, 2, 2])
+                    with c1:
+                        cond_col = st.selectbox("Column", ["— None —"] + cols_refine, key=f"master_cond_{i}_col", label_visibility="visible" if i == 1 else "collapsed")
+                    with c2:
+                        cond_op = st.selectbox("Operator", ["— None —"] + cond_ops, key=f"master_cond_{i}_op", label_visibility="visible" if i == 1 else "collapsed")
+                    with c3:
+                        cond_val = st.text_input("Value", key=f"master_cond_{i}_val", placeholder="Value (not used for Is empty/Is not empty)", label_visibility="visible" if i == 1 else "collapsed")
+                    if cond_col and cond_col != "— None —" and cond_op and cond_op != "— None —":
+                        cond_rules_refine.append({"col": cond_col, "op": cond_op.lower(), "val": (cond_val or "").strip()})
+                if cond_rules_refine:
+                    rows_filtered = _apply_conditional_filters(rows_filtered, cond_rules_refine, cols_refine)
             st.markdown("---")
             if use_facility_tabs:
                 facility_tabs = st.tabs(facility_list)
                 search_term = (search or "").strip().lower() if search else ""
                 header_q = (st.session_state.get("header_search_query") or "").strip()
                 header_term = header_q.lower() if header_q else ""
+                cond_rules_fac = []
+                for i in range(1, 6):
+                    col = st.session_state.get(f"master_cond_{i}_col") or ""
+                    op = st.session_state.get(f"master_cond_{i}_op") or ""
+                    if col and col != "— None —" and op and op != "— None —":
+                        cond_rules_fac.append({"col": col, "op": op.lower(), "val": (st.session_state.get(f"master_cond_{i}_val") or "").strip()})
                 for tab_idx, fac_name in enumerate(facility_list):
                     with facility_tabs[tab_idx]:
                         if fac_name == "(No facility)":
@@ -3703,6 +3796,8 @@ def main():
                             rows_f = [r for r in rows_f if _row_status(r) == status_filter]
                         if header_term:
                             rows_f = [r for r in rows_f if any(header_term in str(r.get(k) or "").lower() for k in (r.keys() if isinstance(r, dict) else []))]
+                        if cond_rules_fac:
+                            rows_f = _apply_conditional_filters(rows_f, cond_rules_fac, list(rows_f[0].keys()) if rows_f else [])
                         if search_term:
                             rows_f = [r for r in rows_f if any(search_term in str(r.get(k) or "").lower() for k in (r.keys() if isinstance(r, dict) else []))]
                         st.caption(f"**{len(rows_f)}** kitchens · *{fac_name}*")
