@@ -2644,8 +2644,8 @@ def main():
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        height: 72px !important;
-        min-height: 72px !important;
+        height: 300px !important;
+        min-height: 300px !important;
         max-width: 1280px !important;
         width: 100% !important;
         margin: 0 auto !important;
@@ -2665,8 +2665,8 @@ def main():
         align-items: center !important;
         gap: 16px !important;
         flex-wrap: nowrap !important;
-        height: 72px !important;
-        min-height: 72px !important;
+        height: 300px !important;
+        min-height: 300px !important;
         margin: 0 !important;
         padding: 0 !important;
     }
@@ -2679,8 +2679,8 @@ def main():
         min-height: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-        height: 72px !important;
-        min-height: 72px !important;
+        height: 300px !important;
+        min-height: 300px !important;
     }
     .header-top-bar + div [data-testid="stVerticalBlock"] {
         padding: 0 !important;
@@ -2727,15 +2727,15 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] [data-testid="column"] {
         display: flex !important;
         align-items: center !important;
-        height: 72px !important;
-        min-height: 72px !important;
+        height: 300px !important;
+        min-height: 300px !important;
     }
     /* Logo: KitchenPark wordmark — larger so it’s clearly visible (was too small) */
     .header-logo-box {
-        width: 72px !important;
-        height: 72px !important;
-        min-width: 72px !important;
-        min-height: 72px !important;
+        width: 600px !important;
+        height: 300px !important;
+        min-width: 600px !important;
+        min-height: 300px !important;
         background: #00766c !important;
         border-radius: 6px !important;
         display: flex !important;
@@ -2751,11 +2751,11 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
         width: auto !important;
-        min-width: 72px !important;
-        max-width: 340px !important;
-        height: 72px !important;
-        min-height: 72px !important;
-        max-height: 72px !important;
+        min-width: 600px !important;
+        max-width: 600px !important;
+        height: 300px !important;
+        min-height: 300px !important;
+        max-height: 300px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: flex-start !important;
@@ -2766,8 +2766,8 @@ def main():
         border-radius: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 72px !important;
-        max-width: 340px !important;
+        max-height: 300px !important;
+        max-width: 600px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -2880,8 +2880,8 @@ def main():
         align-items: center !important;
         padding: 0 !important;
         margin: 0 !important;
-        height: 72px !important;
-        min-height: 72px !important;
+        height: 300px !important;
+        min-height: 300px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child {
         border-left: 1px solid #f3f4f6 !important;
@@ -2988,8 +2988,8 @@ def main():
         flex-direction: row !important;
         align-items: center !important;
         flex-wrap: nowrap !important;
-        height: 72px !important;
-        min-height: 72px !important;
+        height: 300px !important;
+        min-height: 300px !important;
         gap: 0 !important;
         margin: 0 !important;
         padding: 0 !important;
