@@ -2883,7 +2883,7 @@ def main():
         height: 72px !important;
         min-height: 72px !important;
     }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:nth-child(2) {
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child {
         border-left: 1px solid #f3f4f6 !important;
         border-right: 1px solid #f3f4f6 !important;
         padding-left: 16px !important;
@@ -2905,21 +2905,6 @@ def main():
         display: flex !important;
         align-items: center !important;
         height: 72px !important;
-    }
-    /* Keep dark toggle (right column 1st child) on same line as help, avatar, sign out */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child [data-testid="stVerticalBlock"],
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child > div {
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        flex-wrap: nowrap !important;
-        height: 72px !important;
-        min-height: 72px !important;
-        gap: 0 !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child [data-testid="stVerticalBlock"] > div {
-        display: flex !important;
-        align-items: center !important;
     }
     .header-top-bar + div form,
     .header-top-bar + div [data-testid="stVerticalBlock"] > div > div {
@@ -2963,11 +2948,6 @@ def main():
         border-color: #d1d5db !important;
         color: #111827 !important;
     }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child button {
-        width: 40px !important;
-        min-width: 40px !important;
-        padding: 0 !important;
-    }
     .header-icon-btn {
         display: inline-flex !important;
         align-items: center !important;
@@ -2995,39 +2975,6 @@ def main():
         color: #6b7280 !important;
     }
     .header-help-btn:hover { background: #f9fafb !important; color: #059669 !important; border-color: #d1d5db !important; }
-    .header-dark-toggle-wrap { display: inline-flex !important; align-items: center !important; margin: 0 !important; height: 40px !important; }
-    /* Keep dark toggle in same row and vertically centered (prevent stacking below) */
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"],
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) > div {
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        flex-wrap: nowrap !important;
-        height: 72px !important;
-        min-height: 72px !important;
-        gap: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] > div {
-        display: flex !important;
-        align-items: center !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
-    .header-dark-toggle-wrap [data-testid="stVerticalBlock"] button,
-    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) button {
-        margin: 0 !important;
-        height: 40px !important;
-        min-height: 40px !important;
-        width: 40px !important;
-        min-width: 40px !important;
-        padding: 0 !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }
     /* Avatar: 36px circle centered in 40px container */
     .header-avatar-chevron {
         display: inline-flex !important;
@@ -3180,11 +3127,10 @@ def main():
         st.session_state["developer_unlocked"] = True
         is_developer = True
 
-    # Single-row top bar: logo + title/status (left) | dark toggle, help, avatar, sign out (right, same line)
+    # Single-row top bar: logo + title/status (left) | help, avatar, sign out (right)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
-    _dark = st.session_state.get("dark_mode", False)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
         left_col, right_col = st.columns([1, 1])
@@ -3210,19 +3156,13 @@ def main():
                     unsafe_allow_html=True,
                 )
         with right_col:
-            r1, r2, r3, r4 = st.columns(4)
+            r1, r2, r3 = st.columns(3)
             with r1:
-                st.markdown('<div class="header-dark-toggle-wrap" title="Toggle dark mode">', unsafe_allow_html=True)
-                if st.button("☀" if _dark else "☾", key="header_dark_toggle", help="Toggle dark mode"):
-                    st.session_state["dark_mode"] = not st.session_state.get("dark_mode", False)
-                    _rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-            with r2:
                 st.markdown(
                     '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
-            with r3:
+            with r2:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3230,7 +3170,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r4:
+            with r3:
                 if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
