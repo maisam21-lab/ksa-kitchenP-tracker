@@ -2730,20 +2730,20 @@ def main():
         height: 72px !important;
         min-height: 72px !important;
     }
-    /* Logo: 72x72 teal box / KitchenPark pill — larger for visibility */
+    /* Logo: KitchenPark wordmark size (ref: ~36px height, ~220px width) */
     .header-logo-box {
-        width: 72px !important;
-        height: 72px !important;
-        min-width: 72px !important;
-        min-height: 72px !important;
+        width: 44px !important;
+        height: 36px !important;
+        min-width: 44px !important;
+        min-height: 36px !important;
         background: #00766c !important;
-        border-radius: 8px !important;
+        border-radius: 6px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 1.75rem !important;
+        font-size: 1.25rem !important;
         line-height: 1 !important;
         margin: 0 !important;
     }
@@ -2751,11 +2751,11 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
         width: auto !important;
-        min-width: 72px !important;
-        max-width: 140px !important;
-        height: 72px !important;
-        min-height: 72px !important;
-        max-height: 72px !important;
+        min-width: 44px !important;
+        max-width: 220px !important;
+        height: 36px !important;
+        min-height: 36px !important;
+        max-height: 36px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: flex-start !important;
@@ -2763,11 +2763,11 @@ def main():
         padding: 0 !important;
         overflow: hidden !important;
         background: transparent !important;
-        border-radius: 8px !important;
+        border-radius: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 72px !important;
-        max-width: 140px !important;
+        max-height: 36px !important;
+        max-width: 220px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
