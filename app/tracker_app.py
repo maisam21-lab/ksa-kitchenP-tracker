@@ -3266,23 +3266,33 @@ def main():
                     });
                     var prevBar = document.getElementById("app-search-bar");
                     if (prevBar) prevBar.remove();
-                    if (marks.length === 0) return;
                     var bar = document.createElement("div");
                     bar.id = "app-search-bar";
                     bar.style.cssText = "position:fixed;bottom:16px;right:16px;z-index:9999;background:#111;color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);";
-                    bar.innerHTML = "<span>" + marks.length + " match(es)</span><button type=\"button\" id=\"app-search-prev\">Prev</button><button type=\"button\" id=\"app-search-next\">Next</button>";
+                    if (marks.length === 0) {
+                        bar.innerHTML = "<span id=\"app-search-status\">No matches</span>";
+                    } else {
+                        bar.innerHTML = "<span id=\"app-search-status\">1 of " + marks.length + "</span><button type=\"button\" id=\"app-search-prev\">Prev</button><button type=\"button\" id=\"app-search-next\">Next</button>";
+                    }
                     document.body.appendChild(bar);
                     var cur = 0;
+                    function updateStatus() {
+                        var status = document.getElementById("app-search-status");
+                        if (status) status.textContent = marks.length === 0 ? "No matches" : (cur + 1) + " of " + marks.length;
+                    }
                     function goTo(i) {
                         if (marks.length === 0) return;
                         cur = (i + marks.length) % marks.length;
                         marks.forEach(function(m){ m.classList.remove("app-search-current"); });
                         marks[cur].classList.add("app-search-current");
                         marks[cur].scrollIntoView({ behavior: "smooth", block: "center" });
+                        updateStatus();
                     }
-                    document.getElementById("app-search-prev").onclick = function(){ goTo(cur - 1); };
-                    document.getElementById("app-search-next").onclick = function(){ goTo(cur + 1); };
-                    goTo(0);
+                    if (marks.length > 0) {
+                        document.getElementById("app-search-prev").onclick = function(){ goTo(cur - 1); };
+                        document.getElementById("app-search-next").onclick = function(){ goTo(cur + 1); };
+                        goTo(0);
+                    }
                 }
                 setTimeout(runSearch, 600);
             })();
