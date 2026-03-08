@@ -2471,7 +2471,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Kitchens":
         st.caption("**Main view:** All kitchens under accounts in all countries. Filter by **Account Country** or search in any column to navigate.")
     if tab_id == "Master Kitchens list":
-        st.caption("**Master list:** All kitchens. Filter by **Account Country** or search in any column.")
+        st.caption("**Master list:** All kitchens. Filter or search in any column.")
     if tab_id == "SF Churn Data":
         st.caption("To match the live Kitchen Tracker columns, set **sf_tab_queries** → \"SF Churn Data\" to the **same Report ID** as the live churn report. See **docs/SETUP_SF_SECRETS.md**.")
     # For Kitchens / Master Kitchens list: ensure Account Country, labels, column order
@@ -2481,6 +2481,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if is_kitchens_tab:
         rows, cols = _apply_kitchen_labels(rows, cols)
         cols = _kitchens_column_order(cols)
+    # Master Kitchens list: hide Account Country column from display
+    if tab_id == "Master Kitchens list":
+        cols = [c for c in cols if c != "Account Country"]
     # Cleaner filtering: one search box + optional single-column filter in expander
     search_all = st.text_input(
         "Search in all columns",
@@ -2516,10 +2519,12 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                     rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
+    # Build display dataframe with selected columns only (Master list excludes Account Country)
+    display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
+    df_display = pd.DataFrame(rows_shown)[display_cols] if display_cols and rows_shown else pd.DataFrame(rows_shown)
     # Status color coding (match sheet/dashboard reference): Vacant = light green, Occupied = light red, Sold = light red, Churning = amber, no status/Blocked/NA/empty = dark red
     _status_colors = {"Vacant": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
     _no_status_bg = "#B22222"  # dark red for no status, Blocked, NA, or empty
-    df_display = pd.DataFrame(rows_shown)
     status_col = None
     for c in df_display.columns:
         if str(c).strip().lower() in ("status", "status__c"):
@@ -3391,7 +3396,7 @@ def main():
 
     # Product shape: section navigation (no Search tab)
     if _is_developer() or user_role == "super_user":
-        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Data", "Admin / Data Health"]
+        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Admin / Data Health"]
     else:
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
     # Website-style layout: section navigation as tabs
@@ -4684,73 +4689,6 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                         st.markdown(_render_discussion_message(r.get("message", "")))
                     st.divider()
         return
-
-    # —— Data: all sheet tabs as horizontal tabs ——
-    if section == "Data":
-        st.caption("Use the **Kitchens** tab; filter or search below.")
-        # Data source: Google Sheet only (Salesforce source removed from UI)
-        st.session_state["data_source"] = "gsheet"
-        last_refresh_gsheet = get_last_refresh("gsheet")
-        # Auto-refresh when no data or stale (>15 min), no click needed (same cooldown as Kitchen Master Data)
-        import time
-        _now_sec = time.time()
-        _last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
-        if _gsheet_refresh_is_stale(15) and (_now_sec - _last_run) >= 900:
-            st.session_state["gsheet_auto_refresh_last_run"] = _now_sec
-            ok, msg = _refresh_from_online_sheet()
-            if ok:
-                set_last_refresh("gsheet")
-                _rerun()
-            last_refresh_gsheet = get_last_refresh("gsheet")
-        _show_refresh_btn = _is_developer() or user_role == "super_user"
-        if _show_refresh_btn:
-            col_cap, col_btn = st.columns([3, 1])
-            with col_cap:
-                st.caption(f"Current source: **Google Sheet (GSheet)**. Last refresh: **{last_refresh_gsheet or 'Never'}**. Data is refreshed every 15 minutes by the scheduler; you can use the button for an immediate update.")
-            with col_btn:
-                if st.button("Refresh from Google Sheet", key="data_refresh_btn"):
-                    ok, msg = _refresh_from_online_sheet()
-                    if ok:
-                        set_last_refresh("gsheet")
-                        st.success("Data loaded from Google Sheet.")
-                    else:
-                        st.error(msg or "Google Sheet refresh failed.")
-                    if ok:
-                        _rerun()
-        else:
-            st.caption(f"Current source: **Google Sheet (GSheet)**. Last refresh: **{last_refresh_gsheet or 'Never'}**. Data is refreshed every 15 minutes by the scheduler.")
-        st.divider()
-        # Exports (moved from separate section)
-        rows_for_export = list_rows()
-        with st.expander("Exports", expanded=False):
-            if not rows_for_export:
-                st.caption("No data yet. Import or add data in the **Data** section below.")
-            else:
-                csv_content = export_csv(rows_for_export)
-                # CSV download disabled app-wide
-                # st.download_button("Download full CSV (ksa_kitchen_tracker.csv)", data=csv_content, file_name="ksa_kitchen_tracker.csv", mime="text/csv", key="dl_csv")
-                report_html = build_summary_report_html(rows_for_export)
-                st.download_button("Download summary report (HTML)", data=report_html, file_name="tracker_summary_report.html", mime="text/html", key="dl_report_exports")
-        st.caption("Data is refreshed every 15 minutes by the scheduler (no manual refresh).")
-        st.caption("Data from **online sheet**. Tabs match your Google Sheet order (refresh to update). Scroll the tab bar to see all.")
-        # Tabs in same order as worksheets in the sheet (from last refresh); fallback to stored order if empty
-        all_tab_ids = [t for t in list_gsheet_tab_ids_in_sheet_order() if t != MAIN_TRACKER_TAB_ID]
-        if not all_tab_ids:
-            all_tab_ids = [t for t in list_tab_ids_for_source("gsheet") if t != MAIN_TRACKER_TAB_ID]
-        if not all_tab_ids:
-            st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
-        else:
-            sheet_tabs = st.tabs(all_tab_ids)
-            tab_tips = [TAB_DESCRIPTIONS.get(tid, f"View and filter: {tid}") for tid in all_tab_ids]
-            st.markdown(
-                f'<script>(function(){{var d = {json.dumps(tab_tips)}; '
-                'var tabs = document.querySelectorAll(".stTabs [data-baseweb=\\"tab\\"]"); '
-                'tabs.forEach(function(tab, i){{ if(d[i]) tab.setAttribute("title", d[i]); }}); }})();</script>',
-                unsafe_allow_html=True,
-            )
-            for tab_index, tab_id in enumerate(all_tab_ids):
-                with sheet_tabs[tab_index]:
-                    _render_generic_tab(tab_id, key_suffix=(tab_id or str(tab_index)).replace(" ", "_"), is_developer=is_developer, source="gsheet")
 
     # —— Super-user tools (Prompt 7, 8, 9) ——
     if section == "Currency Converter":
