@@ -2730,12 +2730,12 @@ def main():
         height: 72px !important;
         min-height: 72px !important;
     }
-    /* Logo: 40x40 teal box (#00766c), rounded-lg — or image inside */
+    /* Logo: 52x52 teal box (#00766c), rounded-lg — or image inside */
     .header-logo-box {
-        width: 40px !important;
-        height: 40px !important;
-        min-width: 40px !important;
-        min-height: 40px !important;
+        width: 52px !important;
+        height: 52px !important;
+        min-width: 52px !important;
+        min-height: 52px !important;
         background: #00766c !important;
         border-radius: 8px !important;
         display: flex !important;
@@ -2743,19 +2743,19 @@ def main():
         justify-content: center !important;
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 1.25rem !important;
+        font-size: 1.5rem !important;
         line-height: 1 !important;
         margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
-        width: 40px !important;
-        min-width: 40px !important;
-        max-width: 40px !important;
-        height: 40px !important;
-        min-height: 40px !important;
-        max-height: 40px !important;
+        width: 52px !important;
+        min-width: 52px !important;
+        max-width: 52px !important;
+        height: 52px !important;
+        min-height: 52px !important;
+        max-height: 52px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
@@ -2766,8 +2766,8 @@ def main():
         border-radius: 8px !important;
     }
     .header-top-bar + div img {
-        max-height: 40px !important;
-        max-width: 40px !important;
+        max-height: 52px !important;
+        max-width: 52px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
