@@ -2550,9 +2550,11 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             style = f"background-color: {bg}" if bg else ""
             return [style] * len(row)
         styled = df_display.style.apply(_row_bg, axis=1)
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        expand_tab = st.checkbox("Expand table", key=f"expand_generic_{key_suffix}", help="Show table in a larger view")
+        st.dataframe(styled, use_container_width=True, hide_index=True, height=700 if expand_tab else 400)
     else:
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        expand_tab = st.checkbox("Expand table", key=f"expand_generic_{key_suffix}", help="Show table in a larger view")
+        st.dataframe(df_display, use_container_width=True, hide_index=True, height=700 if expand_tab else 400)
     if allow_download and key_suffix != "master_other":
         buf = io.StringIO()
         if rows_shown:
@@ -2673,8 +2675,10 @@ def main():
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
     st.markdown("""
     <style>
-    /* Remove dataframe toolbar (download, search, fullscreen, etc.) from all sheets */
-    [data-testid="stElementToolbar"] { display: none !important; }
+    /* Dataframe toolbar (fullscreen/maximize, etc.) — show so users can maximize each sheet; hide download only */
+    [data-testid="stElementToolbar"] { display: flex !important; visibility: visible !important; }
+    /* Hide only the Download CSV button in dataframe toolbar (2nd button: Search, Download, Fullscreen) — maximize stays enabled */
+    [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
     /* Remove space above section tabs and shift main content up */
     [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
     [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
@@ -3631,7 +3635,8 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                                     bg = _sc.get("Occupied", bg)
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
-                    st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None})
+                    expand_table = st.checkbox("Expand table", key="expand_combined_sheet", help="Show table in a larger view")
+                    st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700 if expand_table else 400)
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -3849,7 +3854,8 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                                                 bg = _sc.get("Occupied", bg)
                                         return [f"background-color: {bg}" if bg else ""] * len(row)
                                     display_f = display_f.style.apply(_row_bg_f, axis=1)
-                                st.dataframe(display_f, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None})
+                                expand_f = st.checkbox("Expand table", key=f"expand_facility_sheet_{tab_idx}", help="Show table in a larger view")
+                                st.dataframe(display_f, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700 if expand_f else 400)
                             else:
                                 for r in rows_f[:50]:
                                     st.json(r)
@@ -3890,7 +3896,8 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                                 bg = _sc.get("Occupied", bg)
                         return [f"background-color: {bg}" if bg else ""] * len(row)
                     display_df = display_df.style.apply(_row_bg_m, axis=1)
-                st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None})
+                expand_master = st.checkbox("Expand table", key="expand_master_sheet", help="Show table in a larger view")
+                st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700 if expand_master else 400)
             elif rows_filtered and not use_facility_tabs:
                 for r in rows_filtered[:100]:
                     st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
