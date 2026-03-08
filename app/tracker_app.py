@@ -2906,6 +2906,21 @@ def main():
         align-items: center !important;
         height: 72px !important;
     }
+    /* Keep dark toggle (right column 1st child) on same line as help, avatar, sign out */
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child [data-testid="stVerticalBlock"],
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child > div {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        height: 72px !important;
+        min-height: 72px !important;
+        gap: 0 !important;
+    }
+    .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child [data-testid="stVerticalBlock"] > div {
+        display: flex !important;
+        align-items: center !important;
+    }
     .header-top-bar + div form,
     .header-top-bar + div [data-testid="stVerticalBlock"] > div > div {
         margin: 0 !important;
