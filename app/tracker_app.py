@@ -2730,12 +2730,12 @@ def main():
         height: 72px !important;
         min-height: 72px !important;
     }
-    /* Logo: KitchenPark wordmark size (ref: ~36px height, ~220px width) */
+    /* Logo: KitchenPark wordmark — larger so it’s clearly visible (was too small) */
     .header-logo-box {
-        width: 44px !important;
-        height: 36px !important;
-        min-width: 44px !important;
-        min-height: 36px !important;
+        width: 56px !important;
+        height: 56px !important;
+        min-width: 56px !important;
+        min-height: 56px !important;
         background: #00766c !important;
         border-radius: 6px !important;
         display: flex !important;
@@ -2743,7 +2743,7 @@ def main():
         justify-content: center !important;
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 1.25rem !important;
+        font-size: 1.5rem !important;
         line-height: 1 !important;
         margin: 0 !important;
     }
@@ -2751,11 +2751,11 @@ def main():
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
         width: auto !important;
-        min-width: 44px !important;
-        max-width: 220px !important;
-        height: 36px !important;
-        min-height: 36px !important;
-        max-height: 36px !important;
+        min-width: 56px !important;
+        max-width: 280px !important;
+        height: 56px !important;
+        min-height: 56px !important;
+        max-height: 56px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: flex-start !important;
@@ -2766,8 +2766,8 @@ def main():
         border-radius: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 36px !important;
-        max-width: 220px !important;
+        max-height: 56px !important;
+        max-width: 280px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
