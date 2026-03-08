@@ -2676,7 +2676,9 @@ def main():
     /* Remove dataframe toolbar (download, search, fullscreen, etc.) from all sheets */
     [data-testid="stElementToolbar"] { display: none !important; }
     /* Remove space above section tabs and shift main content up */
-    [data-testid="stAppViewContainer"] > div { padding-top: 0.25rem !important; }
+    [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
+    [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
+    .block-container { padding-top: 0 !important; }
     [data-testid="stVerticalBlock"] > div:first-child { padding-top: 0 !important; margin-top: 0 !important; }
     /* Slightly smaller base font app-wide */
     .stApp h1 { font-size: 1.2rem !important; }
