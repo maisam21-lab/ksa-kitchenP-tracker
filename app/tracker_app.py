@@ -2649,22 +2649,36 @@ def main():
         max-width: 1280px !important;
         width: 100% !important;
         margin: 0 auto !important;
-        padding: 12px 24px !important;
+        padding: clamp(12px, 2vw, 24px) clamp(16px, 3vw, 24px) !important;
         border-bottom: 1px solid #f3f4f6 !important;
         background: #ffffff !important;
         box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         box-sizing: border-box !important;
     }
-    @media (max-width: 768px) { .header-top-bar + div { padding: 0 16px !important; min-height: 56px !important; height: 56px !important; } .header-brand-title { font-size: 0.9375rem !important; } .header-status-pill { font-size: 0.75rem !important; } }
+    @media (max-width: 768px) {
+        .header-top-bar + div { padding: 12px 16px !important; min-height: auto !important; height: auto !important; }
+        .header-top-bar + div [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; height: auto !important; min-height: 56px !important; gap: 12px !important; }
+        .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"] { height: auto !important; min-height: 44px !important; }
+        .header-top-bar + div [data-testid="stVerticalBlock"] { height: auto !important; }
+        .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child { min-width: 0 !important; }
+        .header-brand-title { font-size: 0.9375rem !important; }
+        .header-status-pill { font-size: 0.75rem !important; }
+        .header-divider { margin: 0 8px !important; }
+    }
+    @media (max-width: 480px) {
+        .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] { min-width: 0 !important; gap: 8px !important; }
+        .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; justify-content: flex-end !important; }
+        .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"] { height: auto !important; min-height: 40px !important; }
+    }
 
     .header-top-bar + div [data-testid="stHorizontalBlock"] {
         width: 100% !important;
         display: flex !important;
         justify-content: space-between !important;
         align-items: center !important;
-        gap: 16px !important;
-        flex-wrap: nowrap !important;
+        gap: clamp(12px, 2vw, 16px) !important;
+        flex-wrap: wrap !important;
         height: 72px !important;
         min-height: 72px !important;
         margin: 0 !important;
@@ -2704,23 +2718,23 @@ def main():
         margin-bottom: 0 !important;
     }
 
-    /* LEFT GROUP: logo + divider + title/status + dark (gap-6) */
+    /* LEFT GROUP: logo + divider + title/status */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
         display: flex !important;
         flex-direction: row !important;
         align-items: center !important;
-        gap: 24px !important;
-        min-width: 320px !important;
+        gap: clamp(16px, 2.5vw, 24px) !important;
+        min-width: 0 !important;
         flex: 0 1 auto !important;
-        max-width: fit-content !important;
+        max-width: 100% !important;
         height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         align-items: center !important;
-        gap: 12px !important;
-        min-width: 280px !important;
+        gap: clamp(8px, 1.5vw, 12px) !important;
+        min-width: 0 !important;
         flex: 0 1 auto !important;
         height: 72px !important;
     }
@@ -2856,12 +2870,12 @@ def main():
         align-items: center !important;
     }
 
-    /* Right: help (bordered area) + avatar + Sign out — gap-4 */
+    /* Right: search + help + avatar + Sign out */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
-        gap: 16px !important;
+        gap: clamp(8px, 1.5vw, 16px) !important;
         flex: 1 1 auto !important;
         min-width: 0 !important;
         height: 72px !important;
@@ -2870,8 +2884,8 @@ def main():
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
-        gap: 16px !important;
-        flex-wrap: nowrap !important;
+        gap: clamp(8px, 1.5vw, 16px) !important;
+        flex-wrap: wrap !important;
         height: 72px !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"] {
@@ -2975,7 +2989,7 @@ def main():
         color: #6b7280 !important;
     }
     .header-help-btn:hover { background: #f9fafb !important; color: #059669 !important; border-color: #d1d5db !important; }
-    /* Header search input: compact like Ctrl+F */
+    /* Header search input: compact */
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child [data-testid="column"]:first-child input {
         max-width: 180px !important;
         height: 36px !important;
@@ -3167,7 +3181,7 @@ def main():
             with r1:
                 search_query = st.text_input(
                     "Search",
-                    placeholder="Search in page (Ctrl+F style)...",
+                    placeholder="Search in page...",
                     key="header_search_query",
                     label_visibility="collapsed",
                 )
@@ -3195,7 +3209,7 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1280px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
-    # In-page search: highlight matches like Ctrl+F (query from header_search_query)
+    # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
         _search_escaped = html.escape(_search_q, quote=True)
