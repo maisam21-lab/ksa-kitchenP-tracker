@@ -2730,12 +2730,12 @@ def main():
         height: 72px !important;
         min-height: 72px !important;
     }
-    /* Logo: 52x52 teal box (#00766c), rounded-lg — or image inside */
+    /* Logo: 72x72 teal box / KitchenPark pill — larger for visibility */
     .header-logo-box {
-        width: 52px !important;
-        height: 52px !important;
-        min-width: 52px !important;
-        min-height: 52px !important;
+        width: 72px !important;
+        height: 72px !important;
+        min-width: 72px !important;
+        min-height: 72px !important;
         background: #00766c !important;
         border-radius: 8px !important;
         display: flex !important;
@@ -2743,31 +2743,31 @@ def main():
         justify-content: center !important;
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 1.5rem !important;
+        font-size: 1.75rem !important;
         line-height: 1 !important;
         margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
-        width: 52px !important;
-        min-width: 52px !important;
-        max-width: 52px !important;
-        height: 52px !important;
-        min-height: 52px !important;
-        max-height: 52px !important;
+        width: auto !important;
+        min-width: 72px !important;
+        max-width: 140px !important;
+        height: 72px !important;
+        min-height: 72px !important;
+        max-height: 72px !important;
         display: flex !important;
         align-items: center !important;
-        justify-content: center !important;
+        justify-content: flex-start !important;
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
-        background: #00766c !important;
+        background: transparent !important;
         border-radius: 8px !important;
     }
     .header-top-bar + div img {
-        max-height: 52px !important;
-        max-width: 52px !important;
+        max-height: 72px !important;
+        max-width: 140px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
