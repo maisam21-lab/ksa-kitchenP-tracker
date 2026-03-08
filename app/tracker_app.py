@@ -2443,6 +2443,12 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         term = search_all.strip().lower()
         all_keys = list(rows[0].keys()) if rows else []
         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in all_keys)]
+    # Header search (global): filter sheet by text in header search box
+    header_q = (st.session_state.get("header_search_query") or "").strip()
+    if header_q:
+        q = header_q.lower()
+        all_keys = list(rows[0].keys()) if rows else []
+        rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in all_keys)]
     with st.expander("Filter by one column (optional)", expanded=False):
         chosen_col = st.selectbox("Column", ["— None —"] + cols, key=f"f_{key_suffix}_col")
         col_val = None
@@ -3181,7 +3187,7 @@ def main():
             with r1:
                 search_query = st.text_input(
                     "Search",
-                    placeholder="Search in page...",
+                    placeholder="Search in sheets…",
                     key="header_search_query",
                     label_visibility="collapsed",
                 )
@@ -3513,6 +3519,10 @@ def main():
                     cols_combined = list(combined_rows[0].keys()) if combined_rows else []
                     search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
                     rows_shown = combined_rows
+                    header_q = (st.session_state.get("header_search_query") or "").strip()
+                    if header_q:
+                        q = header_q.lower()
+                        rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in cols_combined)]
                     if (search_combined or "").strip():
                         term = search_combined.strip().lower()
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
@@ -3664,6 +3674,13 @@ def main():
                             and (from_date is None or _parse_rd(r.get("report_date")) >= from_date)
                             and (to_date is None or _parse_rd(r.get("report_date")) <= to_date))
                     ]
+            header_q = (st.session_state.get("header_search_query") or "").strip()
+            if header_q:
+                q = header_q.lower()
+                all_keys = set()
+                for r in rows_filtered:
+                    all_keys.update(r.keys() if isinstance(r, dict) else [])
+                rows_filtered = [r for r in rows_filtered if any(q in str(r.get(k) or "").lower() for k in (all_keys or ["_"]))]
             if (search or "").strip():
                 term = (search or "").strip().lower()
                 all_keys = set()
@@ -3674,6 +3691,8 @@ def main():
             if use_facility_tabs:
                 facility_tabs = st.tabs(facility_list)
                 search_term = (search or "").strip().lower() if search else ""
+                header_q = (st.session_state.get("header_search_query") or "").strip()
+                header_term = header_q.lower() if header_q else ""
                 for tab_idx, fac_name in enumerate(facility_list):
                     with facility_tabs[tab_idx]:
                         if fac_name == "(No facility)":
@@ -3682,6 +3701,8 @@ def main():
                             rows_f = [r for r in rows if _row_facility(r) == fac_name]
                         if status_filter and status_filter != "All":
                             rows_f = [r for r in rows_f if _row_status(r) == status_filter]
+                        if header_term:
+                            rows_f = [r for r in rows_f if any(header_term in str(r.get(k) or "").lower() for k in (r.keys() if isinstance(r, dict) else []))]
                         if search_term:
                             rows_f = [r for r in rows_f if any(search_term in str(r.get(k) or "").lower() for k in (r.keys() if isinstance(r, dict) else []))]
                         st.caption(f"**{len(rows_f)}** kitchens · *{fac_name}*")
