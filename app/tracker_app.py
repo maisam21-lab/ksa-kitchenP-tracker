@@ -2681,6 +2681,37 @@ def main():
     /* Hide any standalone "Download as CSV" button next to dataframes (do not hide other buttons) */
     div[data-testid="stHorizontalBlock"] button[aria-label*="ownload"],
     div[data-testid="stHorizontalBlock"] button[title*="Download"] { display: none !important; visibility: hidden !important; }
+    /* Toolbar expand/fullscreen: make the expanded view fill the entire viewport so the whole sheet is visible */
+    [data-testid="stFullscreenFrame"],
+    [data-testid="stFullscreenFrame"] > div,
+    div[data-testid="stAppViewContainer"] [data-testid="stFullscreenFrame"],
+    section[data-testid="stFullscreenFrame"],
+    .stFullscreenFrame,
+    [class*="fullscreenFrame"],
+    [class*="FullscreenFrame"] {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: 100vw !important;
+        max-height: 100vh !important;
+        z-index: 999999 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: var(--background-color, #0f172a) !important;
+        overflow: auto !important;
+    }
+    [data-testid="stFullscreenFrame"] [data-testid="stDataFrame"],
+    [data-testid="stFullscreenFrame"] .glide-data-grid-container,
+    [data-testid="stFullscreenFrame"] [class*="dataFrame"],
+    .stFullscreenFrame [data-testid="stDataFrame"],
+    [class*="fullscreenFrame"] [data-testid="stDataFrame"] {
+        width: 100% !important;
+        min-height: calc(100vh - 2rem) !important;
+        height: calc(100vh - 2rem) !important;
+        max-height: none !important;
+    }
     /* Remove space above section tabs and shift main content up */
     [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
     [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
