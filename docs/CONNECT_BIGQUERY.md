@@ -1,6 +1,6 @@
 # Connect the app to BigQuery
 
-Use this to connect **Kitchen Master Data** (and optional SF Churn / go-live) to your BigQuery project.
+Use this to connect **Kitchen Master Data** (and optional SF Churn / go-live) to your BigQuery project. You can use **BigQuery and Google Sheet together**: when both are configured, the app lets you choose the data source in Kitchen Master Data.
 
 ---
 
@@ -15,7 +15,7 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
 ```
 
 - **project_id** — Your BigQuery project (e.g. `css-operations`) that can query the `sales` dataset.
-- **query_file** — Path to the SQL file (relative to repo root). The app runs the `SELECT` from this file.
+- **query_file** — Path to the SQL file (relative to repo root). The app runs the `SELECT` from this file. The query in that file returns Master Kitchens SA/BH from `css-operations.sales` (sf_kitchens, sf_facilities, sf_accounts, sf_opportunities) with `is_live` and `stage_name`.
 
 To use an inline query instead of a file:
 
@@ -59,11 +59,42 @@ Ensure that service account has **BigQuery Data Viewer** (or equivalent) on the 
 
 ---
 
-## 3. Verify
+## 3. Streamlit Cloud (deployed app)
+
+For the app deployed at e.g. `https://ksa-kitchenp-tracker-*.streamlit.app`:
+
+1. Open your app on Streamlit Cloud → **Settings** (or **Manage app** → **Secrets**).
+2. Add secrets in TOML format. You need **both** BigQuery and (if you use Google Sheet) the Sheets service account:
+
+   ```toml
+   [bigquery_master_kitchens]
+   project_id = "css-operations"
+   query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
+
+   [gsheet_service_account]
+   type = "service_account"
+   project_id = "your-project"
+   private_key_id = "..."
+   private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   client_email = "your-sa@your-project.iam.gserviceaccount.com"
+   client_id = "..."
+   auth_uri = "https://accounts.google.com/o/oauth2/auth"
+   token_uri = "https://oauth2.googleapis.com/token"
+   auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+   client_x509_cert_url = "..."
+   ```
+
+3. **Redeploy** the app after saving secrets so the new config is applied.
+4. Ensure the service account has **BigQuery Data Viewer** on `css-operations` (or the project you use) and that the Google Sheet is shared with the service account email (Viewer).
+
+---
+
+## 4. Verify
 
 1. Open **Kitchen Master Data** in the app sidebar.
-2. If connected, you’ll see **Master Kitchens (BigQuery)** and the table will load (data refreshes every 3 min; use **Refresh now** to refetch).
-3. If you see **Connect Kitchen Master Data to BigQuery**, secrets or credentials are missing — check steps 1 and 2.
+2. If BigQuery is connected, you’ll see **Master Kitchens (BigQuery)** and the table will load (data refreshes every 3 min; use **Refresh now** to refetch).
+3. If both BigQuery and Google Sheet have data, a **Data source** radio appears: choose **BigQuery (SA/BH)** for fresh data from `css-operations.sales`, or **Google Sheet** for data from the last sheet refresh. Use **Refresh from Google Sheet** to pull the latest sheet data.
+4. If you see **Connect Kitchen Master Data to BigQuery**, secrets or credentials are missing — check steps 1 and 2.
 
 ---
 

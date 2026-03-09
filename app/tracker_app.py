@@ -2455,8 +2455,8 @@ def _kitchens_column_order(cols: list[str]) -> list[str]:
     return cols
 
 
-def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=True):
-    """View/filter/download for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download=False hides CSV download (e.g. Kitchen Master Data)."""
+def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False):
+    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide)."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if not rows and tab_id == "Kitchens":
@@ -2668,10 +2668,19 @@ def main():
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
     st.markdown("""
     <style>
-    /* Dataframe toolbar (fullscreen/maximize, etc.) — show so users can maximize each sheet; hide download only */
-    [data-testid="stElementToolbar"] { display: flex !important; visibility: visible !important; }
-    /* Hide only the Download CSV button in dataframe toolbar (2nd button: Search, Download, Fullscreen) — maximize stays enabled */
-    [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
+    /* Disable download on all sheets: hide the entire dataframe toolbar (Search, Download, Fullscreen) so no export is possible */
+    [data-testid="stElementToolbar"] { display: none !important; visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
+    /* Fallback: hide any toolbar child that could be download (in case toolbar testid changes) */
+    [data-testid="stElementToolbar"] > *:nth-child(1),
+    [data-testid="stElementToolbar"] > *:nth-child(2),
+    [data-testid="stElementToolbar"] > *:nth-child(3),
+    [data-testid="stElementToolbar"] button { display: none !important; visibility: hidden !important; }
+    /* Hide any "Download as CSV" or export button elsewhere in the app next to dataframes */
+    div[data-testid="stVerticalBlock"] button[aria-label*="ownload"],
+    div[data-testid="stVerticalBlock"] button[title*="ownload"],
+    div[data-testid="stHorizontalBlock"] button[aria-label*="ownload"],
+    div[data-testid="stHorizontalBlock"] button[title*="Download"],
+    a[download], button[aria-label*=" CSV"], button[title*=" CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
     /* Remove space above section tabs and shift main content up */
     [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
     [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
@@ -3443,19 +3452,89 @@ def main():
                     bq_error = None
             if bq_rows is not None:
                 _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
-                cap_col, btn_col = st.columns([3, 1])
-                with cap_col:
-                    st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
-                with btn_col:
-                    if st.button("Refresh now", key="master_bq_refresh_now"):
-                        st.session_state[_bq_cache_key] = None
-                        st.session_state[_bq_ts_key] = 0
-                        _rerun()
-                chosen_label = "Master Kitchens (BigQuery)"
-                source_id = "bigquery"
-                rows = bq_rows
-                source_options = []
-                is_other_sheet = False
+                # Check if GSheet also has data so we can offer both sources
+                sources = _master_kitchens_sources()
+                gsheet_tab_options = [s[0] for s in sources]
+                source_ids_gsheet = {s[0]: s[1] for s in sources}
+                both_sources_available = bool(gsheet_tab_options)
+                _src_key = "master_kitchens_data_source"
+                if both_sources_available:
+                    r1, r2 = st.columns([2, 1])
+                    with r1:
+                        selected = st.radio(
+                            "Data source",
+                            options=["bigquery", "gsheet"],
+                            format_func=lambda x: "BigQuery (SA/BH) — fresh from css-operations.sales" if x == "bigquery" else "Google Sheet — from last refresh",
+                            key="master_kitchens_source_radio",
+                            horizontal=True,
+                        )
+                        st.session_state[_src_key] = selected
+                    with r2:
+                        if _show_refresh_btn and st.button("Refresh from Google Sheet", key="master_refresh_gsheet_bq_section"):
+                            ok, msg = _refresh_from_online_sheet()
+                            if ok:
+                                set_last_refresh("gsheet")
+                                st.session_state["data_source"] = "gsheet"
+                                st.success("Sheets updated.")
+                            else:
+                                st.error(msg or "Refresh failed.")
+                            _rerun()
+                else:
+                    st.session_state[_src_key] = "bigquery"
+                use_bq = st.session_state.get(_src_key) == "bigquery"
+                if use_bq:
+                    cap_col, btn_col = st.columns([3, 1])
+                    with cap_col:
+                        st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
+                    with btn_col:
+                        if st.button("Refresh now", key="master_bq_refresh_now"):
+                            st.session_state[_bq_cache_key] = None
+                            st.session_state[_bq_ts_key] = 0
+                            _rerun()
+                    chosen_label = "Master Kitchens (BigQuery)"
+                    source_id = "bigquery"
+                    rows = bq_rows
+                    source_options = []
+                    is_other_sheet = False
+                else:
+                    # User chose Google Sheet; use GSheet tabs (same as no-BQ path)
+                    first_tab = gsheet_tab_options[0]
+                    _sel_key = "master_sheets_selection"
+                    if _sel_key not in st.session_state:
+                        st.session_state[_sel_key] = [first_tab]
+                    _initial_sel = st.session_state.get(_sel_key) or [first_tab]
+                    if not isinstance(_initial_sel, list):
+                        _initial_sel = [_initial_sel] if _initial_sel else [first_tab]
+                    source_id = source_ids_gsheet.get((_initial_sel or [first_tab])[0], first_tab)
+                    rows = list_generic_tab(source_id, source="gsheet")
+                    source_options = gsheet_tab_options
+                    source_ids = source_ids_gsheet  # so render block can use source_ids.get()
+                    chosen_label = "Master Kitchens (Google Sheet)"
+                    is_other_sheet = True
+                    cap_col, btn_col = st.columns([3, 1])
+                    with cap_col:
+                        st.caption("Select **one facility** or **multiple facilities** (sheets). One selected → that facility only; multiple selected → combined table with a **Sheet** column.")
+                    with btn_col:
+                        sel_col, clr_col = st.columns(2)
+                        with sel_col:
+                            if st.button("Select all", key="master_sheets_select_all"):
+                                st.session_state[_sel_key] = list(source_options)
+                                _rerun()
+                        with clr_col:
+                            if st.button("Clear", key="master_sheets_clear"):
+                                st.session_state[_sel_key] = [first_tab]
+                                _rerun()
+                    chosen_labels = st.multiselect(
+                        "Facilities (sheets)",
+                        options=source_options,
+                        key=_sel_key,
+                        help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
+                    )
+                    if not chosen_labels:
+                        chosen_labels = [first_tab]
+                    chosen_labels = [t for t in (chosen_labels or []) if t in source_options] or [first_tab]
+                    source_id = source_ids_gsheet.get(chosen_labels[0], first_tab)
+                    rows = list_generic_tab(source_id, source="gsheet")
             else:
                 # BigQuery configured but returned no data — show help and any error
                 _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
