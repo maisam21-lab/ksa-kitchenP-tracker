@@ -2668,19 +2668,19 @@ def main():
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
     st.markdown("""
     <style>
-    /* Disable download on all sheets: hide the entire dataframe toolbar (Search, Download, Fullscreen) so no export is possible */
-    [data-testid="stElementToolbar"] { display: none !important; visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
-    /* Fallback: hide any toolbar child that could be download (in case toolbar testid changes) */
-    [data-testid="stElementToolbar"] > *:nth-child(1),
-    [data-testid="stElementToolbar"] > *:nth-child(2),
-    [data-testid="stElementToolbar"] > *:nth-child(3),
-    [data-testid="stElementToolbar"] button { display: none !important; visibility: hidden !important; }
-    /* Hide any "Download as CSV" or export button elsewhere in the app next to dataframes */
-    div[data-testid="stVerticalBlock"] button[aria-label*="ownload"],
-    div[data-testid="stVerticalBlock"] button[title*="ownload"],
+    /* Disable download on all sheets but keep Search and Maximize/Fullscreen in dataframe toolbar */
+    [data-testid="stElementToolbar"] { display: flex !important; visibility: visible !important; }
+    /* Hide only the 2nd toolbar control (Download CSV) — keep 1st=Search, 3rd=Fullscreen */
+    [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
+    [data-testid="stElementToolbar"] button:nth-of-type(2) { display: none !important; visibility: hidden !important; }
+    /* Hide by aria-label/title so download is disabled even if DOM order differs */
+    [data-testid="stElementToolbar"] [aria-label*="ownload"],
+    [data-testid="stElementToolbar"] [aria-label*=" CSV"],
+    [data-testid="stElementToolbar"] [title*="ownload"],
+    [data-testid="stElementToolbar"] [title*=" CSV"] { display: none !important; visibility: hidden !important; }
+    /* Hide any standalone "Download as CSV" button next to dataframes (do not hide other buttons) */
     div[data-testid="stHorizontalBlock"] button[aria-label*="ownload"],
-    div[data-testid="stHorizontalBlock"] button[title*="Download"],
-    a[download], button[aria-label*=" CSV"], button[title*=" CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+    div[data-testid="stHorizontalBlock"] button[title*="Download"] { display: none !important; visibility: hidden !important; }
     /* Remove space above section tabs and shift main content up */
     [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
     [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
