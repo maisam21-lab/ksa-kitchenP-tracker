@@ -3788,8 +3788,7 @@ def main():
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 if _HAS_AGGRI:
-                    # Grid with in-sheet column filters: filter row under headers + column menu
-                    st.caption("**Filter:** Use the filter row under each column header, or click the ⋮ menu on a header for Filter / Sort.")
+                    st.caption("**Filter:** Use the filter row under each column header, or the ⋮ menu on a header for Filter / Sort.")
                     gb = GridOptionsBuilder.from_dataframe(display_df)
                     gb.configure_default_column(
                         filterable=True,
@@ -3797,12 +3796,18 @@ def main():
                         resizable=True,
                         floatingFilter=True,
                     )
+                    for col in display_df.columns:
+                        if pd.api.types.is_numeric_dtype(display_df[col]):
+                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
+                        elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
+                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+                        else:
+                            gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
                     gb.configure_grid_options(
                         domLayout="normal",
                         suppressMenuHide=False,
                     )
                     go = gb.build()
-                    # Ensure defaultColDef has filter and floatingFilter (visible on column headers)
                     if "defaultColDef" not in go:
                         go["defaultColDef"] = {}
                     go["defaultColDef"]["filter"] = True
