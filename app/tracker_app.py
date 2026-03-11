@@ -3788,13 +3788,44 @@ def main():
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 if _HAS_AGGRI:
-                    st.caption("**Filter:** Use the filter row under each column header, or the ⋮ menu on a header for Filter / Sort.")
+                    # Column filter row (Excel-like): streamlit-aggrid often doesn't show floating filter row or Filter tab in menu, so we filter the dataframe here
+                    st.caption("**Column filters** — use the row below to filter by column. Then use the ⋮ menu for sort / pin / hide.")
+                    cols_list = list(display_df.columns)
+                    n_filter_cols = min(6, len(cols_list))
+                    filter_cols = cols_list[:n_filter_cols]
+                    filter_vals = {}
+                    use_cols = st.columns(n_filter_cols)
+                    for i, col in enumerate(filter_cols):
+                        with use_cols[i]:
+                            ser = display_df[col].dropna().astype(str).str.strip()
+                            uniq = ser[ser != ""].unique()
+                            if len(uniq) <= 30 and len(uniq) >= 1:
+                                opts = ["— All —"] + sorted(uniq.tolist())
+                                sel = st.selectbox(col, opts, key=f"master_f_{col}", label_visibility="collapsed", placeholder=col)
+                                filter_vals[col] = None if (sel is None or sel == "— All —") else sel
+                            else:
+                                txt = st.text_input(col, key=f"master_f_{col}", label_visibility="collapsed", placeholder=col)
+                                filter_vals[col] = (txt or "").strip() or None
+                    if any(filter_vals.get(c) for c in filter_cols):
+                        mask = pd.Series(True, index=display_df.index)
+                        for col in filter_cols:
+                            v = filter_vals.get(col)
+                            if v is None:
+                                continue
+                            if display_df[col].dtype.kind in ("i", "u", "f") and isinstance(v, str) and v.isdigit():
+                                mask &= display_df[col].astype(str).str.contains(v, regex=False, na=False)
+                            else:
+                                mask &= display_df[col].astype(str).str.strip().str.lower().str.contains(v.lower(), regex=False, na=False)
+                        display_df = display_df.loc[mask].reset_index(drop=True)
                     gb = GridOptionsBuilder.from_dataframe(display_df)
                     gb.configure_default_column(
-                        filterable=True,
+                        filter=True,
                         sortable=True,
                         resizable=True,
                         floatingFilter=True,
+                        suppressHeaderMenuButton=False,
+                        suppressHeaderFilterButton=False,
+                        menuTabs=["filterMenuTab", "generalMenuTab"],
                     )
                     for col in display_df.columns:
                         if pd.api.types.is_numeric_dtype(display_df[col]):
@@ -3806,12 +3837,18 @@ def main():
                     gb.configure_grid_options(
                         domLayout="normal",
                         suppressMenuHide=False,
+                        columnMenu="legacy",
                     )
                     go = gb.build()
                     if "defaultColDef" not in go:
                         go["defaultColDef"] = {}
                     go["defaultColDef"]["filter"] = True
                     go["defaultColDef"]["floatingFilter"] = True
+                    go["defaultColDef"]["suppressHeaderMenuButton"] = False
+                    go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                    for cdef in go.get("columnDefs") or []:
+                        cdef["filter"] = cdef.get("filter", True)
+                        cdef["floatingFilter"] = True
                     AgGrid(display_df, gridOptions=go, use_container_width=True, height=700, theme="streamlit")
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
