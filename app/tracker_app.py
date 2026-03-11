@@ -3295,7 +3295,7 @@ def main():
     updated_ago = _format_updated_ago(last_gsheet)
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        left_col, right_col = st.columns([1, 1])
+        left_col, right_col = st.columns([4, 1])  # Left fills space (title + status); right compact for help/avatar/sign out
         with left_col:
             l1, l2 = st.columns([1, 12])
             with l1:
