@@ -2247,6 +2247,35 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
     return out
 
 
+def _fetch_bq_export_sheet() -> tuple[list[dict] | None, str | None]:
+    """Load Kitchen Master Data from a Google Sheet that is fed by BigQuery (pipeline/scheduled query).
+    Expects secrets bq_export_sheet_id = \"sheet-id\" or full docs URL. Uses same [gsheet_service_account].
+    Returns (rows, None) on success or (None, error_message)."""
+    secrets = getattr(st, "secrets", None) or {}
+    sheet_id_or_url = (secrets.get("bq_export_sheet_id") or "").strip()
+    if not sheet_id_or_url:
+        return None, None
+    # Allow full URL: extract ID from docs.google.com/spreadsheets/d/ID/...
+    sheet_id = sheet_id_or_url
+    if "docs.google.com" in sheet_id_or_url and "/d/" in sheet_id_or_url:
+        try:
+            sheet_id = sheet_id_or_url.split("/d/")[1].split("/")[0].strip()
+        except Exception:
+            return None, "Invalid bq_export_sheet_id URL"
+    creds_path = _get_google_credentials_path()
+    if not creds_path:
+        return None, "No Google credentials (need [gsheet_service_account] or GOOGLE_APPLICATION_CREDENTIALS)"
+    try:
+        data = _fetch_online_sheet(sheet_id, creds_path)
+    except Exception as e:
+        return None, str(e)
+    # Use first worksheet with data
+    for _title, rows in data.items():
+        if rows:
+            return rows, None
+    return None, "Sheet has no data"
+
+
 def _row_key(row: dict, *keys) -> str:
     """First non-empty key (case-insensitive) from row."""
     row_lower = {str(k).strip().lower(): v for k, v in (row or {}).items()}
@@ -3565,7 +3594,43 @@ def main():
                     source_id = source_ids_gsheet.get(chosen_labels[0], first_tab)
                     rows = list_generic_tab(source_id, source="gsheet")
             else:
-                # BigQuery configured but returned no data — show help and any error
+                # BigQuery not available — try optional "BQ export" sheet (pipeline/scheduled query → Sheet)
+                _bq_export_sheet_id = (getattr(st, "secrets", None) or {}).get("bq_export_sheet_id") or ""
+                bq_export_rows, bq_export_error = None, None
+                if _bq_export_sheet_id:
+                    _export_cache_key = "bq_export_sheet_rows"
+                    _export_ts_key = "bq_export_sheet_fetched_at"
+                    _export_ttl = 300  # 5 min
+                    now_sec = time.time()
+                    if (st.session_state.get(_export_ts_key) or 0) + _export_ttl > now_sec and st.session_state.get(_export_cache_key):
+                        bq_export_rows = st.session_state[_export_cache_key]
+                    else:
+                        bq_export_rows, bq_export_error = _fetch_bq_export_sheet()
+                        if bq_export_rows:
+                            st.session_state[_export_cache_key] = bq_export_rows
+                            st.session_state[_export_ts_key] = now_sec
+                if bq_export_rows:
+                    cap_col, btn_col = st.columns([3, 1])
+                    with cap_col:
+                        st.caption("**Master Kitchens (from BQ export sheet)** — Data is pushed to this sheet by your BigQuery pipeline or scheduled query. Refresh the sheet in Google to update.")
+                    with btn_col:
+                        if st.button("Refresh from sheet", key="master_bq_export_refresh"):
+                            st.session_state["bq_export_sheet_fetched_at"] = 0
+                            _rerun()
+                    chosen_label = "Master Kitchens (from BQ export sheet)"
+                    source_id = "bigquery_export_sheet"
+                    rows = bq_export_rows
+                    source_options = []
+                    is_other_sheet = False
+                else:
+                    # BigQuery configured but returned no data — show help and any error
+                    if _bq_export_sheet_id:
+                        if bq_export_error:
+                            st.error("**BQ export sheet could not be loaded**")
+                            st.code(bq_export_error, language=None)
+                            st.markdown("**Check:** 1) Use the **spreadsheet ID** from the URL (the long string between `/d/` and `/edit`), not the number after `#gid=`. 2) In Secrets the key must be **top-level**: `bq_export_sheet_id = \"...\"` (no section like [x] around it). 3) Share the sheet with your **service account email** (Viewer). 4) The **first tab** must have a header row and data.")
+                        else:
+                            st.warning("BQ export sheet is configured but the first worksheet has no data. Add a header row and at least one row of data, then click **Refresh from sheet** below.")
                 _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
                 _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
                 _from_secrets = _get_google_credentials_path() == "__FROM_SECRETS__"
@@ -3583,12 +3648,14 @@ def main():
                         help_lines.append("Local: put your service account JSON in **scripts/credentials.json** and set `$env:GOOGLE_APPLICATION_CREDENTIALS = \".\\scripts\\credentials.json\"` before running Streamlit. Check the terminal for errors.")
                     st.info("\n".join(help_lines))
                 else:
-                    with st.expander("Connect Kitchen Master Data to BigQuery", expanded=False):
+                    st.caption("**BigQuery config not found.** Add the block below to `.streamlit/secrets.toml` (local) or to **Settings → Secrets** (Streamlit Cloud). Run the app from the repo root so the query file path exists.")
+                    with st.expander("Connect Kitchen Master Data to BigQuery", expanded=True):
                         st.caption("Add the following to **.streamlit/secrets.toml** (create the file if it doesn't exist). Use the same service account as Google Sheets or set **GOOGLE_APPLICATION_CREDENTIALS** to your key file path.")
                         st.code("""[bigquery_master_kitchens]
 project_id = "css-operations"
 query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
 """, language="toml")
+                        st.caption("**Or** use a sheet fed by BigQuery (pipeline/scheduled query): add a **top-level** secret: `bq_export_sheet_id = \"your-spreadsheet-id\"` — use the long ID from the URL (between /d/ and /edit), not the number after #gid=. Then share the sheet with your service account (Viewer).")
                         st.caption("Then add credentials: either paste the full service account JSON under **[gsheet_service_account]** in secrets (same as Sheets), or set GOOGLE_APPLICATION_CREDENTIALS to scripts/credentials.json before running the app. See **docs/CONNECT_BIGQUERY.md** for full steps.")
                 # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
                 last_refresh = get_last_refresh("gsheet")
@@ -3684,6 +3751,9 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                     if combined_rows and isinstance(combined_rows[0], dict):
                         _df_temp = pd.DataFrame(combined_rows)
                         cols_combined = sorted(_df_temp.columns.tolist())
+                    # Master Kitchens: hide Account Country (and common variants)
+                    _hide_combined = {"account country", "account_country", "facility_country"}
+                    cols_combined = [c for c in cols_combined if str(c).strip().lower() not in _hide_combined]
                     search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
                     rows_shown = combined_rows
                     header_q = (st.session_state.get("header_search_query") or "").strip()
@@ -3713,6 +3783,9 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                             rows_shown = _apply_conditional_filters(rows_shown, cond_rules, cols_combined)
                     st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s).")
                     df_combined = pd.DataFrame(rows_shown)
+                    _disp_cols = [c for c in df_combined.columns if c in cols_combined]
+                    if _disp_cols:
+                        df_combined = df_combined[_disp_cols]
                     df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
                     status_col_combined = None
                     for c in df_combined.columns:
@@ -3927,6 +4000,9 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                         st.caption(f"**{len(rows_f)}** kitchens · *{fac_name}*")
                         if rows_f:
                             all_cols_f = list(rows_f[0].keys()) if rows_f else []
+                            # Master Kitchens: hide Account Country (and common variants)
+                            _hide_master = {"account country", "account_country", "facility_country"}
+                            all_cols_f = [c for c in all_cols_f if str(c).strip().lower() not in _hide_master]
                             default_show_f = st.session_state.get(f"master_col_f_{tab_idx}") or all_cols_f
                             default_show_f = [c for c in default_show_f if c in all_cols_f] or all_cols_f
                             cols_show_f = st.multiselect("Columns", options=all_cols_f, default=default_show_f, key=f"master_col_f_{tab_idx}", placeholder="All")
@@ -3968,6 +4044,9 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                 st.info("No rows match your filters. Try clearing or relaxing filters.")
             if rows_filtered and not use_facility_tabs:
                 all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
+                # Master Kitchens: hide Account Country (and common variants) from the sheet
+                _hide_in_master = {"account country", "account_country", "facility_country"}
+                all_cols = [c for c in all_cols if str(c).strip().lower() not in _hide_in_master]
                 default_show = st.session_state.get("master_columns_show") or all_cols
                 default_show = [c for c in default_show if c in all_cols] or all_cols
                 cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="master_columns_show", placeholder="All columns")

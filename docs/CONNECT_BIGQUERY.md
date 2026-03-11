@@ -15,7 +15,7 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
 ```
 
 - **project_id** — Your BigQuery project (e.g. `css-operations`) that can query the `sales` dataset.
-- **query_file** — Path to the SQL file (relative to repo root). The app runs the `SELECT` from this file. The query in that file returns Master Kitchens SA/BH from `css-operations.sales` (sf_kitchens, sf_facilities, sf_accounts, sf_opportunities) with `is_live` and `stage_name`.
+- **query_file** — **Path to the SQL file in this repo** (relative to repo root), e.g. `"docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"`. Do **not** use a BigQuery Console URL here; the app reads the file from disk and runs its `SELECT`.
 
 To use an inline query instead of a file:
 
@@ -98,6 +98,36 @@ For the app deployed at e.g. `https://ksa-kitchenp-tracker-*.streamlit.app`:
 
 ---
 
+## Workaround: BigQuery → Google Sheet → App (no BQ service account)
+
+If your service account does **not** have BigQuery Data Viewer yet, you can still show Master Kitchens by having BigQuery push data into a Google Sheet; the app then reads that sheet.
+
+### 1. Automate BigQuery → Google Sheet
+
+- **Option A — BigQuery Pipelines** (GCP Console): Create a pipeline that runs your Master Kitchens query with **your user credentials**, then add a task to export the result to a **Google Sheet** (or to Cloud Storage, then load into a Sheet). Schedule the pipeline (e.g. daily).
+- **Option B — Scheduled query + manual export**: Run the query in BigQuery, export the result to a new Google Sheet. If your org has a way to schedule “export to Sheets,” use that; otherwise refresh the sheet when you run the query.
+
+Use the same SQL as in **`docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql`** (or equivalent) so the columns match what the app expects.
+
+### 2. Share the sheet and add one secret
+
+1. **Share the Google Sheet** with your app’s service account email (the `client_email` in `[gsheet_service_account]`) as **Viewer**.
+2. In **Streamlit Cloud → Settings → Secrets** (or local `.streamlit/secrets.toml`), add:
+
+   ```toml
+   bq_export_sheet_id = "YOUR_SHEET_ID"
+   ```
+
+   Use the sheet ID from the URL: `https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit`. You can paste the full URL; the app will use the ID.
+
+### 3. Use the app
+
+Open **Kitchen Master Data**. The app will load **Master Kitchens (from BQ export sheet)** from that sheet (cached for 5 minutes; use **Refresh from sheet** to refetch). No BigQuery access is required for the app’s service account.
+
+When you later get BigQuery Data Viewer for the service account, you can add `[bigquery_master_kitchens]` and the app will prefer live BigQuery; you can remove `bq_export_sheet_id` if you like.
+
+---
+
 ## Optional: SF Churn Data and go-live from BigQuery
 
 - **SF Churn Data from BigQuery** — In secrets, add `[bigquery_sf_churn_data]` with `project_id` and `query`. Then “Refresh from Salesforce” will load that tab from BigQuery. See `.streamlit/secrets.toml.example`.
@@ -112,6 +142,6 @@ For the app deployed at e.g. `https://ksa-kitchenp-tracker-*.streamlit.app`:
 | Still seeing “Connect to BigQuery” or GSheet only | `.streamlit/secrets.toml` has `[bigquery_master_kitchens]` with `project_id` and `query_file` (or `query`). No `#` in front of those lines. |
 | “Permission denied” / auth error | Service account has BigQuery access. If using a key file, `GOOGLE_APPLICATION_CREDENTIALS` is set in the same shell where you run Streamlit. |
 | “Table not found” | Project has access to the dataset and tables used in the query (e.g. `css-operations.sales`). |
-| Query file not found | Run the app from the **repo root** so `docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql` exists. |
+| Query file not found | Run the app from the **repo root** so `docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql` exists. **query_file** must be a local path (e.g. `docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql`), not a BigQuery Console URL. |
 
 More detail: **docs/BIGQUERY_INGEST_STEP_BY_STEP.md** and **docs/SETUP_BIGQUERY_MASTER_KITCHENS.md**.
