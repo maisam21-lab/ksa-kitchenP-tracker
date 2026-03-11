@@ -2887,10 +2887,10 @@ def main():
     }
     /* Logo: KitchenPark wordmark — larger so it’s clearly visible (was too small) */
     .header-logo-box {
-        width: 32px !important;
-        height: 32px !important;
-        min-width: 32px !important;
-        min-height: 32px !important;
+        width: 24px !important;
+        height: 24px !important;
+        min-width: 24px !important;
+        min-height: 24px !important;
         background: #00766c !important;
         border-radius: 6px !important;
         display: flex !important;
@@ -2898,19 +2898,19 @@ def main():
         justify-content: center !important;
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 0.875rem !important;
+        font-size: 0.75rem !important;
         line-height: 1 !important;
         margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
-        width: 32px !important;
-        min-width: 32px !important;
-        max-width: 32px !important;
-        height: 32px !important;
-        min-height: 32px !important;
-        max-height: 32px !important;
+        width: 24px !important;
+        min-width: 24px !important;
+        max-width: 24px !important;
+        height: 24px !important;
+        min-height: 24px !important;
+        max-height: 24px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
@@ -2921,8 +2921,8 @@ def main():
         border-radius: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 32px !important;
-        max-width: 32px !important;
+        max-height: 24px !important;
+        max-width: 24px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -3757,12 +3757,13 @@ def main():
         elif not is_other_sheet and source_id:
             total = len(rows)
             is_tracker = source_id == "main_tracker"
-            # No filter bar: single table like Excel sheet (filter via columns on the sheet)
+            # No filter bar: single table like Excel sheet (filter via column filters below)
             use_facility_tabs = False
             rows_filtered = rows
+            rows_display = rows  # used for table; updated by column filters when applied
             st.markdown("---")
             if not use_facility_tabs:
-                st.caption(f"**{len(rows_filtered)}** rows")
+                st.caption(f"**{len(rows_display)}** rows")
             if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
                 st.info("No data in this source.")
             if rows_filtered and not use_facility_tabs:
@@ -3774,10 +3775,40 @@ def main():
                 cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="master_columns_show", placeholder="All columns")
                 if not cols_to_show:
                     cols_to_show = all_cols
+                # Excel/Sheets-style column filters: one dropdown per column (like AutoFilter)
+                rows_display = rows_filtered
+                with st.expander("Filter by column (like Excel / Google Sheets)", expanded=False):
+                    st.caption("Select a value per column to filter rows. **All** = no filter for that column.")
+                    _df_temp = pd.DataFrame(rows_filtered)
+                    _filter_cols = [c for c in cols_to_show if c in _df_temp.columns]
+                    _col_filters = {}
+                    _n_per_row = 4
+                    for _i in range(0, len(_filter_cols), _n_per_row):
+                        _chunk = _filter_cols[_i : _i + _n_per_row]
+                        _cols = st.columns(len(_chunk))
+                        for _j, _col in enumerate(_chunk):
+                            with _cols[_j]:
+                                _raw = _df_temp[_col].fillna("").astype(str).str.strip()
+                                _uniq = sorted(set("(blank)" if v == "" else v for v in _raw.unique()))
+                                if len(_uniq) > 100:
+                                    _uniq = ["(too many values)"] + _uniq[:99]
+                                _opts = ["All"] + _uniq
+                                _sel = st.selectbox(_col, _opts, key=f"master_sheet_filter_{_col}", label_visibility="visible")
+                                _col_filters[_col] = _sel
+                    _active = {c: v for c, v in _col_filters.items() if v != "All"}
+                    if _active:
+                        def _row_matches(r):
+                            for c, val in _active.items():
+                                _cell = r.get(c)
+                                _str = "(blank)" if _cell is None or not str(_cell).strip() else str(_cell).strip()
+                                if _str != val:
+                                    return False
+                            return True
+                        rows_display = [r for r in rows_filtered if _row_matches(r)]
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
-                display_df = pd.DataFrame(rows_filtered)[cols_to_show] if cols_to_show else pd.DataFrame(rows_filtered)
+                display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
-                display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_filtered]
+                display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                 _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                 _ns = "#B22222"
                 status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
@@ -3798,15 +3829,16 @@ def main():
                     display_df = display_df.style.apply(_row_bg_m, axis=1)
                 st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
             elif rows_filtered and not use_facility_tabs:
-                for r in rows_filtered[:100]:
+                _show = rows_display if rows_filtered else []
+                for r in _show[:100]:
                     st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
-                if len(rows_filtered) > 100:
-                    st.caption(f"… and {len(rows_filtered) - 100} more.")
+                if len(_show) > 100:
+                    st.caption(f"… and {len(_show) - 100} more.")
             if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
                 st.markdown("---")
                 st.subheader("Pivot view")
                 st.caption("Slice your data by rows and columns.")
-                df = pd.DataFrame(rows_filtered)
+                df = pd.DataFrame(rows_display)
                 cols = [c for c in df.columns if df[c].notna().any()]
                 cols = [c for c in cols if not _is_account_country_column(c)]
                 if len(cols) < 2:
