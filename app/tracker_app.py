@@ -2485,11 +2485,13 @@ def _kitchens_column_order(cols: list[str]) -> list[str]:
 
 
 def _is_account_country_column(col_name: str) -> bool:
-    """True if this column is Account Country / facility_country (any casing/spacing). Hide in Master Kitchens."""
+    """True if this column is Account Country / facility_country (any casing/spacing/dots). Hide in Master Kitchens."""
     if not col_name:
         return False
-    n = str(col_name).strip().lower()
-    n = re.sub(r"\s+", " ", n).replace(" ", "_")
+    n = str(col_name).strip().lower().replace(".", "_")
+    n = re.sub(r"[\s_]+", "_", n).strip("_")
+    # Strip trailing __c (Salesforce convention)
+    n = re.sub(r"_+c$", "", n) if n.endswith("__c") else n
     return n in ("account_country", "facility_country") or n == "accountcountry"
 
 
@@ -3519,49 +3521,20 @@ def main():
                     bq_error = None
             if bq_rows is not None:
                 _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
-                # Check if GSheet also has data so we can offer both sources
+                # Check if GSheet also has data; default source without showing UI (refresh/source moved to Admin / Data Health)
                 sources = _master_kitchens_sources()
                 gsheet_tab_options = [s[0] for s in sources]
                 source_ids_gsheet = {s[0]: s[1] for s in sources}
                 both_sources_available = bool(gsheet_tab_options)
                 _src_key = "master_kitchens_data_source"
                 if both_sources_available:
-                    if _show_refresh_btn:
-                        r1, r2 = st.columns([2, 1])
-                        with r1:
-                            selected = st.radio(
-                                "Data source",
-                                options=["bigquery", "gsheet"],
-                                format_func=lambda x: "BigQuery (SA/BH) — fresh from css-operations.sales" if x == "bigquery" else "Google Sheet — from last refresh",
-                                key="master_kitchens_source_radio",
-                                horizontal=True,
-                            )
-                            st.session_state[_src_key] = selected
-                        with r2:
-                            if st.button("Refresh from Google Sheet", key="master_refresh_gsheet_bq_section"):
-                                ok, msg = _refresh_from_online_sheet()
-                                if ok:
-                                    set_last_refresh("gsheet")
-                                    st.session_state["data_source"] = "gsheet"
-                                    st.success("Sheets updated.")
-                                else:
-                                    st.error(msg or "Refresh failed.")
-                                _rerun()
-                    else:
-                        # Non-admin: use BigQuery when available, else sheet
+                    if _src_key not in st.session_state:
                         st.session_state[_src_key] = "bigquery" if bq_rows is not None else "gsheet"
                 else:
                     st.session_state[_src_key] = "bigquery"
                 use_bq = st.session_state.get(_src_key) == "bigquery"
                 if use_bq:
-                    cap_col, btn_col = st.columns([3, 1])
-                    with cap_col:
-                        st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
-                    with btn_col:
-                        if _show_refresh_btn and st.button("Refresh now", key="master_bq_refresh_now"):
-                            st.session_state[_bq_cache_key] = None
-                            st.session_state[_bq_ts_key] = 0
-                            _rerun()
+                    st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
                     chosen_label = "Master Kitchens (BigQuery)"
                     source_id = "bigquery"
                     rows = bq_rows
@@ -3623,44 +3596,16 @@ def main():
                             st.session_state[_export_cache_key] = bq_export_rows
                             st.session_state[_export_ts_key] = now_sec
                 if bq_export_rows:
-                    cap_col, btn_col = st.columns([3, 1])
-                    with cap_col:
-                        st.caption("**Master Kitchens (from BQ export sheet)** — Data is pushed to this sheet by your BigQuery pipeline or scheduled query. Refresh the sheet in Google to update.")
-                    with btn_col:
-                        if _show_refresh_btn and st.button("Refresh from sheet", key="master_bq_export_refresh"):
-                            st.session_state["bq_export_sheet_fetched_at"] = 0
-                            _rerun()
+                    st.caption("**Master Kitchens (from BQ export sheet)** — Data is pushed to this sheet by your BigQuery pipeline or scheduled query.")
                     chosen_label = "Master Kitchens (from BQ export sheet)"
                     source_id = "bigquery_export_sheet"
                     rows = bq_export_rows
                     source_options = []
                     is_other_sheet = False
                 else:
-                    # BigQuery configured but returned no data — show help and any error
-                    if _bq_export_sheet_id and _show_refresh_btn:
-                        if bq_export_error:
-                            st.error("**BQ export sheet could not be loaded**")
-                            st.code(bq_export_error, language=None)
-                            st.markdown("**Check:** 1) Use the **spreadsheet ID** from the URL (the long string between `/d/` and `/edit`), not the number after `#gid=`. 2) In Secrets the key must be **top-level**: `bq_export_sheet_id = \"...\"` (no section like [x] around it). 3) Share the sheet with your **service account email** (Viewer). 4) The **first tab** must have a header row and data.")
-                        else:
-                            st.warning("BQ export sheet is configured but the first worksheet has no data. Add a header row and at least one row of data, then click **Refresh from sheet** below.")
+                    pass  # No BQ/export data; config messages and refresh moved to Admin / Data Health
                 _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
                 _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
-                _from_secrets = _get_google_credentials_path() == "__FROM_SECRETS__"
-                if _has_bq_cfg and _show_refresh_btn:
-                    help_lines = [
-                        "**BigQuery is configured but no data loaded.**",
-                        "",
-                    ]
-                    if bq_error:
-                        help_lines.append(f"Error: `{bq_error}`")
-                        help_lines.append("")
-                    if _from_secrets:
-                        help_lines.append("On Streamlit Cloud: check **Settings → Secrets**. You need both `[bigquery_master_kitchens]` (project_id, query_file) and `[gsheet_service_account]` (full service account JSON from credentials.json). Redeploy after saving Secrets.")
-                    else:
-                        help_lines.append("Local: put your service account JSON in **scripts/credentials.json** and set `$env:GOOGLE_APPLICATION_CREDENTIALS = \".\\scripts\\credentials.json\"` before running Streamlit. Check the terminal for errors.")
-                    st.info("\n".join(help_lines))
-                # No "Connect to BigQuery" block for regular users; data source and refresh are developer/super_user only
                 # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
                 last_refresh = get_last_refresh("gsheet")
                 # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
@@ -3675,16 +3620,7 @@ def main():
                         st.session_state["data_source"] = "gsheet"
                         _rerun()
                     last_refresh = get_last_refresh("gsheet")
-                if _show_refresh_btn:
-                    if st.button("Refresh from Google Sheet", key="master_refresh_gsheet"):
-                        ok, msg = _refresh_from_online_sheet()
-                        if ok:
-                            set_last_refresh("gsheet")
-                            st.session_state["data_source"] = "gsheet"
-                            st.success("Sheets updated. Tabs and data are now from the current Google Sheet.")
-                        else:
-                            st.error(msg or "Refresh failed.")
-                        _rerun()
+                # Refresh from Google Sheet moved to Admin / Data Health
                 sources = _master_kitchens_sources()
                 source_options = [s[0] for s in sources]
                 source_ids = {s[0]: s[1] for s in sources}
@@ -4087,6 +4023,7 @@ def main():
                 st.caption("Slice your data by rows and columns.")
                 df = pd.DataFrame(rows_filtered)
                 cols = [c for c in df.columns if df[c].notna().any()]
+                cols = [c for c in cols if not _is_account_country_column(c)]
                 if len(cols) < 2:
                     st.caption("Need at least 2 columns to build a pivot.")
                 else:
@@ -4935,8 +4872,90 @@ def main():
         return
 
     if section == "Admin / Data Health":
-        st.caption("Data source health and allowed list (read-only). No manual refresh — scheduler runs every 15 minutes.")
+        st.caption("Data source health and allowed list. Master Kitchens source and refresh controls below.")
         st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
+        _show_refresh_btn = _is_developer() or user_role == "super_user"
+        if _show_refresh_btn:
+            st.subheader("Master Kitchens source & refresh")
+            import time
+            _bq_cache_key = "bq_master_kitchens_rows"
+            _bq_ts_key = "bq_master_kitchens_fetched_at"
+            _bq_refresh_interval_sec = 180
+            now_sec = time.time()
+            cached_rows = st.session_state.get(_bq_cache_key)
+            fetched_at = st.session_state.get(_bq_ts_key) or 0
+            if cached_rows is not None and (now_sec - fetched_at) < _bq_refresh_interval_sec:
+                bq_rows, bq_error = cached_rows, None
+            else:
+                bq_rows, bq_error = _fetch_bigquery_master_kitchens()
+                if bq_rows is not None:
+                    st.session_state[_bq_cache_key] = bq_rows
+                    st.session_state[_bq_ts_key] = now_sec
+                    bq_error = None
+            sources = _master_kitchens_sources()
+            gsheet_tab_options = [s[0] for s in sources]
+            source_ids_gsheet = {s[0]: s[1] for s in sources}
+            both_sources_available = bool(gsheet_tab_options) and bq_rows is not None
+            _src_key = "master_kitchens_data_source"
+            if _src_key not in st.session_state:
+                st.session_state[_src_key] = "bigquery" if bq_rows is not None else "gsheet"
+            if both_sources_available:
+                selected = st.radio(
+                    "Data source for Kitchen Master Data",
+                    options=["bigquery", "gsheet"],
+                    format_func=lambda x: "BigQuery (SA/BH) — fresh from css-operations.sales" if x == "bigquery" else "Google Sheet — from last refresh",
+                    key="master_kitchens_source_radio_admin",
+                    horizontal=True,
+                )
+                st.session_state[_src_key] = selected
+            if bq_rows is not None:
+                _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.caption(f"BigQuery cache: {_mins_ago:.1f} min ago.")
+                with c2:
+                    if st.button("Refresh BigQuery now", key="admin_bq_refresh_now"):
+                        st.session_state[_bq_cache_key] = None
+                        st.session_state[_bq_ts_key] = 0
+                        _rerun()
+            if st.button("Refresh from Google Sheet", key="admin_refresh_gsheet"):
+                ok, msg = _refresh_from_online_sheet()
+                if ok:
+                    set_last_refresh("gsheet")
+                    st.session_state["data_source"] = "gsheet"
+                    st.success("Sheets updated.")
+                    _rerun()
+                else:
+                    st.error(msg or "Refresh failed.")
+            _bq_export_sheet_id = (getattr(st, "secrets", None) or {}).get("bq_export_sheet_id") or ""
+            bq_export_rows = None
+            if _bq_export_sheet_id:
+                _export_ts_key = "bq_export_sheet_fetched_at"
+                if st.button("Refresh from BQ export sheet", key="admin_bq_export_refresh"):
+                    st.session_state[_export_ts_key] = 0
+                    st.session_state["bq_export_sheet_rows"] = None
+                    _rerun()
+                bq_export_rows, bq_export_error = _fetch_bq_export_sheet()
+                if bq_export_error:
+                    st.error("**BQ export sheet could not be loaded**")
+                    st.code(bq_export_error, language=None)
+                    st.markdown("**Check:** 1) Use the **spreadsheet ID** from the URL (between `/d/` and `/edit`), not the number after `#gid=`. 2) Top-level secret: `bq_export_sheet_id = \"...\"`. 3) Share the sheet with your service account (Viewer). 4) First tab has header and data.")
+                elif bq_export_rows is not None and len(bq_export_rows) == 0:
+                    st.warning("BQ export sheet is configured but the first worksheet has no data.")
+            _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
+            _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
+            if _has_bq_cfg and bq_rows is None and not (_bq_export_sheet_id and bq_export_rows):
+                _from_secrets = _get_google_credentials_path() == "__FROM_SECRETS__"
+                help_lines = ["**BigQuery is configured but no data loaded.**", ""]
+                if bq_error:
+                    help_lines.append(f"Error: `{bq_error}`")
+                    help_lines.append("")
+                if _from_secrets:
+                    help_lines.append("Streamlit Cloud: check **Settings → Secrets** — `[bigquery_master_kitchens]` (project_id, query_file) and `[gsheet_service_account]` (full JSON). Redeploy after saving.")
+                else:
+                    help_lines.append("Local: set **GOOGLE_APPLICATION_CREDENTIALS** to scripts/credentials.json and run from repo root.")
+                st.info("\n".join(help_lines))
+            st.markdown("---")
         st.subheader("Superset persisted store")
         if data_store_mod:
             name = getattr(data_store_mod, "MASTER_KITCHENS_LIVE", "master_kitchens_live")
