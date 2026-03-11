@@ -2503,8 +2503,8 @@ def _is_account_country_column(col_name: str) -> bool:
     )
 
 
-def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False):
-    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide)."""
+def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False):
+    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide). hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if not rows and tab_id == "Kitchens":
@@ -2529,8 +2529,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if is_kitchens_tab:
         rows, cols = _apply_kitchen_labels(rows, cols)
         cols = _kitchens_column_order(cols)
-    # Master Kitchens list: hide Account Country column from display (any casing/spacing)
-    if tab_id == "Master Kitchens list":
+    # Master Kitchens list (or single-facility Master Kitchens view): hide Account Country column from display
+    if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c)]
     # Cleaner filtering: one search box + optional single-column filter in expander
     search_all = st.text_input(
@@ -3682,7 +3682,7 @@ def main():
                 _labels_to_use = chosen_labels[:1]
             _show_combined = len(_labels_to_use) > 1
             if not _show_combined:
-                _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet", allow_download=False)
+                _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet", allow_download=False, hide_account_country=True)
             else:
                 # Combined view: load every selected sheet and merge into one table
                 combined_rows = []
