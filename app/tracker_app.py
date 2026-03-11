@@ -2887,10 +2887,10 @@ def main():
     }
     /* Logo: KitchenPark wordmark — larger so it’s clearly visible (was too small) */
     .header-logo-box {
-        width: 48px !important;
-        height: 48px !important;
-        min-width: 48px !important;
-        min-height: 48px !important;
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 32px !important;
+        min-height: 32px !important;
         background: #00766c !important;
         border-radius: 6px !important;
         display: flex !important;
@@ -2898,19 +2898,19 @@ def main():
         justify-content: center !important;
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 1.25rem !important;
+        font-size: 0.875rem !important;
         line-height: 1 !important;
         margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
-        width: 48px !important;
-        min-width: 48px !important;
-        max-width: 48px !important;
-        height: 48px !important;
-        min-height: 48px !important;
-        max-height: 48px !important;
+        width: 32px !important;
+        min-width: 32px !important;
+        max-width: 32px !important;
+        height: 32px !important;
+        min-height: 32px !important;
+        max-height: 32px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
@@ -2921,8 +2921,8 @@ def main():
         border-radius: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 48px !important;
-        max-width: 48px !important;
+        max-height: 32px !important;
+        max-width: 32px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -2972,7 +2972,7 @@ def main():
     .header-status-row { display: flex !important; align-items: center !important; gap: 8px !important; flex-wrap: nowrap !important; margin: 0 !important; }
     .header-brand-title {
         color: #0f172a !important;
-        font-size: 0.875rem !important;
+        font-size: 1.25rem !important;
         font-weight: 700 !important;
         margin: 0 0 4px 0 !important;
         letter-spacing: -0.025em !important;
@@ -3543,7 +3543,8 @@ def main():
                     is_other_sheet = False
                 else:
                     # User chose Google Sheet; use GSheet tabs (same as no-BQ path)
-                    first_tab = gsheet_tab_options[0]
+                    # Default to first facility that is not Aqiq (so Aqiq is not the default)
+                    first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
                     _sel_key = "master_sheets_selection"
                     if _sel_key not in st.session_state:
                         st.session_state[_sel_key] = [first_tab]
@@ -3632,7 +3633,8 @@ def main():
                     chosen_label = ""
                     is_other_sheet = False
                 else:
-                    first_tab = source_options[0]
+                    # Default to first facility that is not Aqiq (so Aqiq is not the default)
+                    first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
                     # Sheets and facilities in one filter box: Select all / Clear + multiselect for each
                     # Use a dedicated key for multiselect so we never write to the widget key after it runs (avoids StreamlitAPIException on Cloud)
                     _sel_key = "master_sheets_selection"
