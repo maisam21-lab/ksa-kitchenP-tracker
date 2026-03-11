@@ -19,6 +19,12 @@ import requests
 import streamlit as st
 
 try:
+    from st_aggrid import AgGrid, GridOptionsBuilder
+    _HAS_AGGRI = True
+except ImportError:
+    _HAS_AGGRI = False
+
+try:
     from app import auth
 except ImportError:
     try:
@@ -3775,59 +3781,37 @@ def main():
                 cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="master_columns_show", placeholder="All columns")
                 if not cols_to_show:
                     cols_to_show = all_cols
-                # Excel/Sheets-style column filters: one dropdown per column (like AutoFilter)
                 rows_display = rows_filtered
-                with st.expander("Filter by column (like Excel / Google Sheets)", expanded=False):
-                    st.caption("Select a value per column to filter rows. **All** = no filter for that column.")
-                    _df_temp = pd.DataFrame(rows_filtered)
-                    _filter_cols = [c for c in cols_to_show if c in _df_temp.columns]
-                    _col_filters = {}
-                    _n_per_row = 4
-                    for _i in range(0, len(_filter_cols), _n_per_row):
-                        _chunk = _filter_cols[_i : _i + _n_per_row]
-                        _cols = st.columns(len(_chunk))
-                        for _j, _col in enumerate(_chunk):
-                            with _cols[_j]:
-                                _raw = _df_temp[_col].fillna("").astype(str).str.strip()
-                                _uniq = sorted(set("(blank)" if v == "" else v for v in _raw.unique()))
-                                if len(_uniq) > 100:
-                                    _uniq = ["(too many values)"] + _uniq[:99]
-                                _opts = ["All"] + _uniq
-                                _sel = st.selectbox(_col, _opts, key=f"master_sheet_filter_{_col}", label_visibility="visible")
-                                _col_filters[_col] = _sel
-                    _active = {c: v for c, v in _col_filters.items() if v != "All"}
-                    if _active:
-                        def _row_matches(r):
-                            for c, val in _active.items():
-                                _cell = r.get(c)
-                                _str = "(blank)" if _cell is None or not str(_cell).strip() else str(_cell).strip()
-                                if _str != val:
-                                    return False
-                            return True
-                        rows_display = [r for r in rows_filtered if _row_matches(r)]
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
-                display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
-                _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                _ns = "#B22222"
-                status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
-                if status_col_m and not display_df.empty:
-                    def _row_bg_m(row):
-                        v = (str(row[status_col_m]) if row[status_col_m] is not None else "").strip()
-                        low = v.lower()
-                        if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                            return [f"background-color: {_ns}; color: white"] * len(row)
-                        # Vacant or "Vacant with opportunity" etc. → green; Vacant + opportunity name filled → red
-                        key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
-                        bg = _sc.get(key, "") if key else _sc.get(v, "")
-                        if key == "Vacant" and bg:
-                            has_opp = row.get("_has_opportunity", False)
-                            if has_opp:
-                                bg = _sc.get("Occupied", bg)
-                        return [f"background-color: {bg}" if bg else ""] * len(row)
-                    display_df = display_df.style.apply(_row_bg_m, axis=1)
-                st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                if _HAS_AGGRI:
+                    # Grid with in-sheet column filters like Google Sheets / Excel
+                    gb = GridOptionsBuilder.from_dataframe(display_df)
+                    gb.configure_default_column(filterable=True, sortable=True, resizable=True)
+                    gb.configure_grid_options(domLayout="normal")
+                    go = gb.build()
+                    AgGrid(display_df, gridOptions=go, use_container_width=True, height=700, theme="streamlit")
+                else:
+                    display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
+                    _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                    _ns = "#B22222"
+                    status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
+                    if status_col_m and not display_df.empty:
+                        def _row_bg_m(row):
+                            v = (str(row[status_col_m]) if row[status_col_m] is not None else "").strip()
+                            low = v.lower()
+                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
+                                return [f"background-color: {_ns}; color: white"] * len(row)
+                            key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                            bg = _sc.get(key, "") if key else _sc.get(v, "")
+                            if key == "Vacant" and bg:
+                                has_opp = row.get("_has_opportunity", False)
+                                if has_opp:
+                                    bg = _sc.get("Occupied", bg)
+                            return [f"background-color: {bg}" if bg else ""] * len(row)
+                        display_df = display_df.style.apply(_row_bg_m, axis=1)
+                    st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
             elif rows_filtered and not use_facility_tabs:
                 _show = rows_display if rows_filtered else []
                 for r in _show[:100]:
