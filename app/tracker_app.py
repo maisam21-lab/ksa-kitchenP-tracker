@@ -2493,12 +2493,13 @@ def _is_account_country_column(col_name: str) -> bool:
     # Strip trailing __c (Salesforce convention)
     if n.endswith("__c"):
         n = re.sub(r"_+c$", "", n)
-    # Match exact or any suffix like xxx_account_country / xxx_facility_country
+    # Match exact, suffix, or name containing both "account" and "country" / facility_country
     return (
         n == "accountcountry"
         or n in ("account_country", "facility_country")
         or n.endswith("account_country")
         or n.endswith("facility_country")
+        or ("account" in n and "country" in n)
     )
 
 
@@ -3901,6 +3902,7 @@ def main():
                 if rows and isinstance(rows[0], dict):
                     _df_ref = pd.DataFrame(rows)
                     cols_refine = sorted(_df_ref.columns.tolist())
+                cols_refine = [c for c in cols_refine if not _is_account_country_column(c)]
                 if cols_refine:
                     st.caption(f"**{len(cols_refine)} columns** available to filter.")
                 cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
