@@ -3786,10 +3786,15 @@ def main():
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 if _HAS_AGGRI:
-                    # Grid with in-sheet column filters like Google Sheets / Excel
+                    # Grid with in-sheet column filters like Excel: filter row under headers + sortable
                     gb = GridOptionsBuilder.from_dataframe(display_df)
-                    gb.configure_default_column(filterable=True, sortable=True, resizable=True)
-                    gb.configure_grid_options(domLayout="normal")
+                    gb.configure_default_column(
+                        filterable=True,
+                        sortable=True,
+                        resizable=True,
+                        floatingFilter=True,
+                    )
+                    gb.configure_grid_options(domLayout="normal", suppressMenuHide=False)
                     go = gb.build()
                     AgGrid(display_df, gridOptions=go, use_container_width=True, height=700, theme="streamlit")
                 else:
