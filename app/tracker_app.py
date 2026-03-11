@@ -2571,7 +2571,29 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         q = header_q.lower()
         all_keys = list(rows[0].keys()) if rows else []
         rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in all_keys)]
-    # Filter by one column: hidden for now; use column header filters in the grid instead
+    # Filter by column (Excel/Sheets-style): one dropdown or search per column
+    st.markdown("**Filter by column**")
+    n_fc = min(12, len(cols))
+    filter_cols = cols[:n_fc]
+    fcols = st.columns(n_fc)
+    filter_vals = {}
+    for i, col in enumerate(filter_cols):
+        with fcols[i]:
+            uniq_vals = sorted({str(r.get(col, "") or "").strip() for r in rows_shown if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
+            if len(uniq_vals) <= 40 and len(uniq_vals) >= 1:
+                opts = ["— All —"] + uniq_vals
+                sel = st.selectbox(col, opts, key=f"f_{key_suffix}_filter_{col}", label_visibility="collapsed", placeholder=col)
+                filter_vals[col] = None if (sel is None or sel == "— All —") else sel
+            else:
+                txt = st.text_input(col, key=f"f_{key_suffix}_filter_{col}", label_visibility="collapsed", placeholder=col)
+                filter_vals[col] = (txt or "").strip() or None
+    if any(filter_vals.get(c) for c in filter_cols):
+        for col in filter_cols:
+            v = filter_vals.get(col)
+            if v is None:
+                continue
+            rows_shown = [r for r in rows_shown if v.lower() in str(r.get(col) or "").lower()]
+    # Filter by one column: hidden for now; use column filters above instead
     if False:
         with st.expander("Filter by one column (optional)", expanded=False):
             chosen_col = st.selectbox("Column", ["— None —"] + cols, key=f"f_{key_suffix}_col")
@@ -3810,7 +3832,8 @@ def main():
                     cols_list = list(display_df.columns)
                     n_filter_cols = min(20, len(cols_list))
                     filter_cols = cols_list[:n_filter_cols]
-                    st.caption("**Filter by column** (like Excel / Google Sheets) — each box filters the column beneath it. Combine columns to narrow results.")
+                    st.subheader("Filter by column")
+                    st.caption("Each box filters the column beneath it (like Excel / Google Sheets). Combine columns to narrow results.")
                     filter_vals = {}
                     use_cols = st.columns(n_filter_cols)
                     for i, col in enumerate(filter_cols):
