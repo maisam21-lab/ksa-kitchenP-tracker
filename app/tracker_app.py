@@ -2509,6 +2509,17 @@ def _is_account_country_column(col_name: str) -> bool:
     )
 
 
+def _is_empty_record(row) -> bool:
+    """True if the row has no meaningful data (all values empty, null, or whitespace)."""
+    if not row or not isinstance(row, dict):
+        return True
+    for v in row.values():
+        s = str(v).strip() if v is not None else ""
+        if s and s.lower() not in ("nan", "none", "n/a", "na", "—", "-"):
+            return False
+    return True
+
+
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False):
     """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide). hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
@@ -2520,6 +2531,10 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         rows = (list_generic_tab("Kitchens", source=source) or list_generic_tab("SF Kitchen Data", source=source)) if source else (list_generic_tab("Kitchens") or list_generic_tab("SF Kitchen Data"))
     if not rows:
         st.info("No data yet. Data is refreshed every 15 minutes by the scheduler.")
+        return
+    rows = [r for r in rows if not _is_empty_record(r)]
+    if not rows:
+        st.info("No data yet (all rows are empty).")
         return
     is_kitchens_tab = tab_id in ("Kitchens", "Master Kitchens list")
     if tab_id == "Kitchens":
@@ -3579,7 +3594,7 @@ def main():
                                 st.session_state[_sel_key] = [first_tab]
                                 _rerun()
                     chosen_labels = st.multiselect(
-                        "Facilities (sheets)",
+                        "Facilities",
                         options=source_options,
                         key=_sel_key,
                         help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
@@ -3667,7 +3682,7 @@ def main():
                                 st.session_state[_sel_key] = [first_tab]
                                 _rerun()
                     chosen_labels = st.multiselect(
-                        "Facilities (sheets)",
+                        "Facilities",
                         options=source_options,
                         key=_sel_key,
                         help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
@@ -3694,6 +3709,7 @@ def main():
                     sheet_rows = list_generic_tab(tab_id, source="gsheet") or []
                     for r in sheet_rows:
                         combined_rows.append({"Sheet": label, **r})
+                combined_rows = [r for r in combined_rows if not _is_empty_record(r)]
                 if not combined_rows:
                     st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                 else:
@@ -3713,24 +3729,26 @@ def main():
                     if (search_combined or "").strip():
                         term = search_combined.strip().lower()
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
-                    with st.expander("Conditional filters (AND)", expanded=False):
-                        st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row. **Scroll the Column dropdown** to see all columns.")
-                        if cols_combined:
-                            st.caption(f"**{len(cols_combined)} columns** available to filter.")
-                        cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
-                        cond_rules = []
-                        for i in range(1, 6):
-                            c1, c2, c3 = st.columns([2, 2, 2])
-                            with c1:
-                                cond_col = st.selectbox("Column", ["— None —"] + cols_combined, key=f"master_combined_cond_{i}_col", label_visibility="visible" if i == 1 else "collapsed")
-                            with c2:
-                                cond_op = st.selectbox("Operator", ["— None —"] + cond_ops, key=f"master_combined_cond_{i}_op", label_visibility="visible" if i == 1 else "collapsed")
-                            with c3:
-                                cond_val = st.text_input("Value", key=f"master_combined_cond_{i}_val", placeholder="Value (not used for Is empty/Is not empty)", label_visibility="visible" if i == 1 else "collapsed")
-                            if cond_col and cond_col != "— None —" and cond_op and cond_op != "— None —":
-                                cond_rules.append({"col": cond_col, "op": cond_op.lower(), "val": (cond_val or "").strip()})
-                        if cond_rules:
-                            rows_shown = _apply_conditional_filters(rows_shown, cond_rules, cols_combined)
+                    _show_conditional_filters = _is_developer() or st.session_state.get("user_role") == "super_user"
+                    if _show_conditional_filters:
+                        with st.expander("Conditional filters (AND)", expanded=False):
+                            st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row. **Scroll the Column dropdown** to see all columns.")
+                            if cols_combined:
+                                st.caption(f"**{len(cols_combined)} columns** available to filter.")
+                            cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
+                            cond_rules = []
+                            for i in range(1, 6):
+                                c1, c2, c3 = st.columns([2, 2, 2])
+                                with c1:
+                                    cond_col = st.selectbox("Column", ["— None —"] + cols_combined, key=f"master_combined_cond_{i}_col", label_visibility="visible" if i == 1 else "collapsed")
+                                with c2:
+                                    cond_op = st.selectbox("Operator", ["— None —"] + cond_ops, key=f"master_combined_cond_{i}_op", label_visibility="visible" if i == 1 else "collapsed")
+                                with c3:
+                                    cond_val = st.text_input("Value", key=f"master_combined_cond_{i}_val", placeholder="Value (not used for Is empty/Is not empty)", label_visibility="visible" if i == 1 else "collapsed")
+                                if cond_col and cond_col != "— None —" and cond_op and cond_op != "— None —":
+                                    cond_rules.append({"col": cond_col, "op": cond_op.lower(), "val": (cond_val or "").strip()})
+                            if cond_rules:
+                                rows_shown = _apply_conditional_filters(rows_shown, cond_rules, cols_combined)
                     st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s).")
                     df_combined = pd.DataFrame(rows_shown)
                     _disp_cols = [c for c in df_combined.columns if c in cols_combined]
@@ -3767,8 +3785,8 @@ def main():
             is_tracker = source_id == "main_tracker"
             # No filter bar: single table like Excel sheet (filter via column filters below)
             use_facility_tabs = False
-            rows_filtered = rows
-            rows_display = rows  # used for table; updated by column filters when applied
+            rows_filtered = [r for r in rows if not _is_empty_record(r)]
+            rows_display = rows_filtered  # used for table; updated by column filters when applied
             st.markdown("---")
             if not use_facility_tabs:
                 st.caption(f"**{len(rows_display)}** rows")
@@ -3788,18 +3806,18 @@ def main():
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 if _HAS_AGGRI:
-                    # Column filter row (Excel-like): streamlit-aggrid often doesn't show floating filter row or Filter tab in menu, so we filter the dataframe here
-                    st.caption("**Column filters** — use the row below to filter by column. Then use the ⋮ menu for sort / pin / hide.")
+                    # Excel/Sheets-style: one filter per column, aligned under each header (streamlit-aggrid often doesn't show in-header filters, so we provide this row).
                     cols_list = list(display_df.columns)
-                    n_filter_cols = min(6, len(cols_list))
+                    n_filter_cols = min(20, len(cols_list))
                     filter_cols = cols_list[:n_filter_cols]
+                    st.caption("**Filter by column** (like Excel / Google Sheets) — each box filters the column beneath it. Combine columns to narrow results.")
                     filter_vals = {}
                     use_cols = st.columns(n_filter_cols)
                     for i, col in enumerate(filter_cols):
                         with use_cols[i]:
                             ser = display_df[col].dropna().astype(str).str.strip()
                             uniq = ser[ser != ""].unique()
-                            if len(uniq) <= 30 and len(uniq) >= 1:
+                            if len(uniq) <= 50 and len(uniq) >= 1:
                                 opts = ["— All —"] + sorted(uniq.tolist())
                                 sel = st.selectbox(col, opts, key=f"master_f_{col}", label_visibility="collapsed", placeholder=col)
                                 filter_vals[col] = None if (sel is None or sel == "— All —") else sel
@@ -3838,6 +3856,7 @@ def main():
                         domLayout="normal",
                         suppressMenuHide=False,
                         columnMenu="legacy",
+                        floatingFiltersHeight=40,
                     )
                     go = gb.build()
                     if "defaultColDef" not in go:
@@ -3846,10 +3865,21 @@ def main():
                     go["defaultColDef"]["floatingFilter"] = True
                     go["defaultColDef"]["suppressHeaderMenuButton"] = False
                     go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                    go["floatingFiltersHeight"] = 40
                     for cdef in go.get("columnDefs") or []:
-                        cdef["filter"] = cdef.get("filter", True)
+                        cdef["filter"] = True
                         cdef["floatingFilter"] = True
-                    AgGrid(display_df, gridOptions=go, use_container_width=True, height=700, theme="streamlit")
+                        if cdef.get("type") == []:
+                            cdef.pop("type", None)
+                    AgGrid(
+                        display_df,
+                        gridOptions=go,
+                        use_container_width=True,
+                        height=700,
+                        theme="streamlit",
+                        show_toolbar=True,
+                        show_search=True,
+                    )
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
