@@ -3788,7 +3788,7 @@ def main():
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 if _HAS_AGGRI:
-                    # Grid with in-sheet column filters like Excel: filter row under headers + sortable
+                    # Grid with in-sheet column filters: filter row under headers + column menu
                     st.caption("**Filter:** Use the filter row under each column header, or click the ⋮ menu on a header for Filter / Sort.")
                     gb = GridOptionsBuilder.from_dataframe(display_df)
                     gb.configure_default_column(
@@ -3797,8 +3797,16 @@ def main():
                         resizable=True,
                         floatingFilter=True,
                     )
-                    gb.configure_grid_options(domLayout="normal", suppressMenuHide=False)
+                    gb.configure_grid_options(
+                        domLayout="normal",
+                        suppressMenuHide=False,
+                    )
                     go = gb.build()
+                    # Ensure defaultColDef has filter and floatingFilter (visible on column headers)
+                    if "defaultColDef" not in go:
+                        go["defaultColDef"] = {}
+                    go["defaultColDef"]["filter"] = True
+                    go["defaultColDef"]["floatingFilter"] = True
                     AgGrid(display_df, gridOptions=go, use_container_width=True, height=700, theme="streamlit")
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
