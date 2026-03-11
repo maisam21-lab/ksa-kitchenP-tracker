@@ -2787,7 +2787,7 @@ def main():
         justify-content: space-between !important;
         height: 72px !important;
         min-height: 72px !important;
-        max-width: 1280px !important;
+        max-width: 1600px !important;
         width: 100% !important;
         margin: 0 auto !important;
         padding: clamp(12px, 2vw, 24px) clamp(16px, 3vw, 24px) !important;
@@ -3340,7 +3340,7 @@ def main():
                     _clear_session_params()
                     _rerun()
     st.markdown(
-        '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1280px;margin-left:auto;margin-right:auto;"></div>',
+        '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
     # In-page search: highlight matches (query from header_search_query)
