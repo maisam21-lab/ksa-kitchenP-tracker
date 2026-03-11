@@ -2556,21 +2556,23 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         q = header_q.lower()
         all_keys = list(rows[0].keys()) if rows else []
         rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in all_keys)]
-    with st.expander("Filter by one column (optional)", expanded=False):
-        chosen_col = st.selectbox("Column", ["— None —"] + cols, key=f"f_{key_suffix}_col")
-        col_val = None
-        if chosen_col and chosen_col != "— None —":
-            uniq_vals = sorted({str(r.get(chosen_col, "")).strip() for r in rows_shown if r.get(chosen_col) is not None and str(r.get(chosen_col, "")).strip()})
-            if len(uniq_vals) <= 50:
-                opts = ["— All —"] + uniq_vals
-                col_val = st.selectbox("Value", opts, key=f"f_{key_suffix}_col_val")
-                if col_val and col_val != "— All —":
-                    rows_shown = [r for r in rows_shown if str(r.get(chosen_col, "")) == str(col_val)]
-            else:
-                col_val = st.text_input("Contains", key=f"f_{key_suffix}_col_val", placeholder="Type to filter this column…")
-                if (col_val or "").strip():
-                    t = col_val.strip().lower()
-                    rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
+    # Filter by one column: hidden for now; use column header filters in the grid instead
+    if False:
+        with st.expander("Filter by one column (optional)", expanded=False):
+            chosen_col = st.selectbox("Column", ["— None —"] + cols, key=f"f_{key_suffix}_col")
+            col_val = None
+            if chosen_col and chosen_col != "— None —":
+                uniq_vals = sorted({str(r.get(chosen_col, "")).strip() for r in rows_shown if r.get(chosen_col) is not None and str(r.get(chosen_col, "")).strip()})
+                if len(uniq_vals) <= 50:
+                    opts = ["— All —"] + uniq_vals
+                    col_val = st.selectbox("Value", opts, key=f"f_{key_suffix}_col_val")
+                    if col_val and col_val != "— All —":
+                        rows_shown = [r for r in rows_shown if str(r.get(chosen_col, "")) == str(col_val)]
+                else:
+                    col_val = st.text_input("Contains", key=f"f_{key_suffix}_col_val", placeholder="Type to filter this column…")
+                    if (col_val or "").strip():
+                        t = col_val.strip().lower()
+                        rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
@@ -3787,6 +3789,7 @@ def main():
                 display_df = display_df.copy()
                 if _HAS_AGGRI:
                     # Grid with in-sheet column filters like Excel: filter row under headers + sortable
+                    st.caption("**Filter:** Use the filter row under each column header, or click the ⋮ menu on a header for Filter / Sort.")
                     gb = GridOptionsBuilder.from_dataframe(display_df)
                     gb.configure_default_column(
                         filterable=True,
