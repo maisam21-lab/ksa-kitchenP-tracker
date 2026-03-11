@@ -2887,10 +2887,10 @@ def main():
     }
     /* Logo: KitchenPark wordmark — larger so it’s clearly visible (was too small) */
     .header-logo-box {
-        width: 32px !important;
-        height: 32px !important;
-        min-width: 32px !important;
-        min-height: 32px !important;
+        width: 48px !important;
+        height: 48px !important;
+        min-width: 48px !important;
+        min-height: 48px !important;
         background: #00766c !important;
         border-radius: 6px !important;
         display: flex !important;
@@ -2898,19 +2898,19 @@ def main():
         justify-content: center !important;
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 0.875rem !important;
+        font-size: 1.25rem !important;
         line-height: 1 !important;
         margin: 0 !important;
     }
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="stVerticalBlock"]:first-child,
     .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child [data-testid="column"]:first-child div[data-testid="stImage"] {
-        width: 32px !important;
-        min-width: 32px !important;
-        max-width: 32px !important;
-        height: 32px !important;
-        min-height: 32px !important;
-        max-height: 32px !important;
+        width: 48px !important;
+        min-width: 48px !important;
+        max-width: 48px !important;
+        height: 48px !important;
+        min-height: 48px !important;
+        max-height: 48px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
@@ -2921,8 +2921,8 @@ def main():
         border-radius: 0 !important;
     }
     .header-top-bar + div img {
-        max-height: 32px !important;
-        max-width: 32px !important;
+        max-height: 48px !important;
+        max-width: 48px !important;
         width: auto !important;
         height: auto !important;
         object-fit: contain !important;
@@ -2960,24 +2960,24 @@ def main():
     }
     .header-title-block {
         display: flex !important;
-        flex-direction: column !important;
-        align-items: flex-start !important;
-        justify-content: center !important;
-        gap: 4px !important;
-        flex-wrap: nowrap !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: 12px !important;
+        flex-wrap: wrap !important;
         line-height: 1 !important;
         margin: 0 !important;
         padding: 0 !important;
     }
-    .header-status-row { display: flex !important; align-items: center !important; gap: 8px !important; flex-wrap: nowrap !important; margin: 0 !important; }
+    .header-status-row { display: flex !important; align-items: center !important; gap: 12px !important; flex-wrap: nowrap !important; margin: 0 !important; }
     .header-brand-title {
         color: #0f172a !important;
-        font-size: 1.25rem !important;
+        font-size: 1.375rem !important;
         font-weight: 700 !important;
-        margin: 0 0 4px 0 !important;
+        margin: 0 !important;
         letter-spacing: -0.025em !important;
         line-height: 1 !important;
-        display: block !important;
+        display: inline !important;
         background: transparent !important;
         padding: 0 !important;
         border-radius: 0 !important;
@@ -2986,9 +2986,9 @@ def main():
         display: inline-flex !important;
         align-items: center !important;
         gap: 4px !important;
-        padding: 2px 8px !important;
+        padding: 4px 10px !important;
         border-radius: 9999px !important;
-        font-size: 10px !important;
+        font-size: 0.75rem !important;
         font-weight: 700 !important;
         flex-shrink: 0 !important;
         margin: 0 !important;
@@ -3002,8 +3002,8 @@ def main():
     .header-status-pill.delayed .header-status-dot { background: #eab308 !important; }
     .header-status-pill.stale .header-status-dot { background: #ef4444 !important; }
     .header-updated-muted {
-        color: #9ca3af !important;
-        font-size: 11px !important;
+        color: #6b7280 !important;
+        font-size: 0.8125rem !important;
         font-weight: 500 !important;
         margin: 0 !important;
         line-height: 1 !important;
