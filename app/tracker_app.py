@@ -3318,20 +3318,13 @@ def main():
                     unsafe_allow_html=True,
                 )
         with right_col:
-            r1, r2, r3, r4 = st.columns([2, 1, 1, 1])
+            r1, r2, r3 = st.columns([1, 1, 1])
             with r1:
-                search_query = st.text_input(
-                    "Search",
-                    placeholder="Search in sheets…",
-                    key="header_search_query",
-                    label_visibility="collapsed",
-                )
-            with r2:
                 st.markdown(
                     '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
-            with r3:
+            with r2:
                 initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
                 st.markdown(
                     f'<div class="header-avatar-chevron" title="{current_user or ""}">'
@@ -3339,7 +3332,7 @@ def main():
                     f'<span class="header-chevron">▼</span></div>',
                     unsafe_allow_html=True,
                 )
-            with r4:
+            with r3:
                 if st.button("Sign out", key="header_sign_out", help="Sign out"):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
