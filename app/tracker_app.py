@@ -2484,6 +2484,15 @@ def _kitchens_column_order(cols: list[str]) -> list[str]:
     return cols
 
 
+def _is_account_country_column(col_name: str) -> bool:
+    """True if this column is Account Country / facility_country (any casing/spacing). Hide in Master Kitchens."""
+    if not col_name:
+        return False
+    n = str(col_name).strip().lower()
+    n = re.sub(r"\s+", " ", n).replace(" ", "_")
+    return n in ("account_country", "facility_country") or n == "accountcountry"
+
+
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False):
     """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide)."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
@@ -2510,9 +2519,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if is_kitchens_tab:
         rows, cols = _apply_kitchen_labels(rows, cols)
         cols = _kitchens_column_order(cols)
-    # Master Kitchens list: hide Account Country column from display
+    # Master Kitchens list: hide Account Country column from display (any casing/spacing)
     if tab_id == "Master Kitchens list":
-        cols = [c for c in cols if c != "Account Country"]
+        cols = [c for c in cols if not _is_account_country_column(c)]
     # Cleaner filtering: one search box + optional single-column filter in expander
     search_all = st.text_input(
         "Search in all columns",
@@ -3752,8 +3761,7 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                         _df_temp = pd.DataFrame(combined_rows)
                         cols_combined = sorted(_df_temp.columns.tolist())
                     # Master Kitchens: hide Account Country (and common variants)
-                    _hide_combined = {"account country", "account_country", "facility_country"}
-                    cols_combined = [c for c in cols_combined if str(c).strip().lower() not in _hide_combined]
+                    cols_combined = [c for c in cols_combined if not _is_account_country_column(c)]
                     search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
                     rows_shown = combined_rows
                     header_q = (st.session_state.get("header_search_query") or "").strip()
@@ -4001,8 +4009,7 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
                         if rows_f:
                             all_cols_f = list(rows_f[0].keys()) if rows_f else []
                             # Master Kitchens: hide Account Country (and common variants)
-                            _hide_master = {"account country", "account_country", "facility_country"}
-                            all_cols_f = [c for c in all_cols_f if str(c).strip().lower() not in _hide_master]
+                            all_cols_f = [c for c in all_cols_f if not _is_account_country_column(c)]
                             default_show_f = st.session_state.get(f"master_col_f_{tab_idx}") or all_cols_f
                             default_show_f = [c for c in default_show_f if c in all_cols_f] or all_cols_f
                             cols_show_f = st.multiselect("Columns", options=all_cols_f, default=default_show_f, key=f"master_col_f_{tab_idx}", placeholder="All")
@@ -4045,8 +4052,7 @@ query_file = "docs/BIGQUERY_MASTER_KITCHENS_SALES_SA_BH.sql"
             if rows_filtered and not use_facility_tabs:
                 all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
                 # Master Kitchens: hide Account Country (and common variants) from the sheet
-                _hide_in_master = {"account country", "account_country", "facility_country"}
-                all_cols = [c for c in all_cols if str(c).strip().lower() not in _hide_in_master]
+                all_cols = [c for c in all_cols if not _is_account_country_column(c)]
                 default_show = st.session_state.get("master_columns_show") or all_cols
                 default_show = [c for c in default_show if c in all_cols] or all_cols
                 cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="master_columns_show", placeholder="All columns")
