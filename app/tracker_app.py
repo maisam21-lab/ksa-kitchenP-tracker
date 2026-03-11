@@ -2485,14 +2485,21 @@ def _kitchens_column_order(cols: list[str]) -> list[str]:
 
 
 def _is_account_country_column(col_name: str) -> bool:
-    """True if this column is Account Country / facility_country (any casing/spacing/dots). Hide in Master Kitchens."""
+    """True if this column is Account Country / facility_country (any casing/spacing/dots/prefix). Hide in Master Kitchens."""
     if not col_name:
         return False
     n = str(col_name).strip().lower().replace(".", "_")
     n = re.sub(r"[\s_]+", "_", n).strip("_")
     # Strip trailing __c (Salesforce convention)
-    n = re.sub(r"_+c$", "", n) if n.endswith("__c") else n
-    return n in ("account_country", "facility_country") or n == "accountcountry"
+    if n.endswith("__c"):
+        n = re.sub(r"_+c$", "", n)
+    # Match exact or any suffix like xxx_account_country / xxx_facility_country
+    return (
+        n == "accountcountry"
+        or n in ("account_country", "facility_country")
+        or n.endswith("account_country")
+        or n.endswith("facility_country")
+    )
 
 
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False):
