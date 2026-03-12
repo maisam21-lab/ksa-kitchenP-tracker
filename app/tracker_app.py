@@ -3746,7 +3746,6 @@ def main():
                     if combined_rows and isinstance(combined_rows[0], dict):
                         _df_temp = pd.DataFrame(combined_rows)
                         cols_combined = sorted(_df_temp.columns.tolist())
-                    # Master Kitchens: hide Account Country (and common variants)
                     cols_combined = [c for c in cols_combined if not _is_account_country_column(c)]
                     search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
                     rows_shown = combined_rows
@@ -3757,6 +3756,42 @@ def main():
                     if (search_combined or "").strip():
                         term = search_combined.strip().lower()
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
+                    st.divider()
+                    # Filter by column (Excel-like: type + multi-select) — same block; works with all facilities selected
+                    st.markdown("**Filter by column**")
+                    st.caption("Type to search or select one or more values per column. Combine with search above and conditional filters below.")
+                    n_fc = min(12, len(cols_combined))
+                    filter_cols_c = cols_combined[:n_fc]
+                    fcols_c = st.columns(n_fc)
+                    filter_sel_c = {}
+                    filter_txt_c = {}
+                    # Use a sample of rows to build options when many rows (keeps UI responsive when all facilities selected)
+                    _sample_for_opts = rows_shown if len(rows_shown) <= 2000 else rows_shown[:2000]
+                    for i, col in enumerate(filter_cols_c):
+                        with fcols_c[i]:
+                            try:
+                                uniq_c = sorted({str(r.get(col, "") or "").strip() for r in _sample_for_opts if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
+                                if len(uniq_c) > 100:
+                                    uniq_c = uniq_c[:100]
+                                if len(uniq_c) <= 60 and len(uniq_c) >= 1:
+                                    sel_c = st.multiselect(col, uniq_c, default=[], key=f"master_combined_sel_{col}", label_visibility="collapsed", placeholder="All")
+                                    filter_sel_c[col] = sel_c if sel_c else None
+                                else:
+                                    filter_sel_c[col] = None
+                            except Exception:
+                                filter_sel_c[col] = None
+                            txt_c = st.text_input("Search " + col, key=f"master_combined_txt_{col}", label_visibility="collapsed", placeholder="Type…")
+                            filter_txt_c[col] = (txt_c or "").strip() or None
+                    if any(filter_sel_c.get(c) for c in filter_cols_c) or any(filter_txt_c.get(c) for c in filter_cols_c):
+                        for col in filter_cols_c:
+                            sel_list = filter_sel_c.get(col)
+                            search_t = filter_txt_c.get(col)
+                            if sel_list:
+                                allowed = {str(s).strip().lower() for s in sel_list}
+                                rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
+                            if search_t:
+                                q = search_t.lower()
+                                rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
                     _show_conditional_filters = _is_developer() or st.session_state.get("user_role") == "super_user"
                     if _show_conditional_filters:
                         with st.expander("Conditional filters (AND)", expanded=False):
@@ -3796,7 +3831,6 @@ def main():
                             low = v.lower()
                             if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
                                 return [f"background-color: {_ns}; color: white"] * len(row)
-                            # Vacant or "Vacant with opportunity" etc. → green; Vacant + opportunity name filled → red
                             key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
                             bg = _sc.get(key, "") if key else _sc.get(v, "")
                             if key == "Vacant" and bg:
