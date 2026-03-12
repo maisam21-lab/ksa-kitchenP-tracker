@@ -2571,28 +2571,34 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         q = header_q.lower()
         all_keys = list(rows[0].keys()) if rows else []
         rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in all_keys)]
-    # Filter by column (Excel/Sheets-style): one dropdown or search per column
+    # Filter by column (Excel-like): type to search + multi-select per column
     st.markdown("**Filter by column**")
+    st.caption("**Type** to filter by text, or **select one or more values**. Combine columns to narrow.")
     n_fc = min(12, len(cols))
     filter_cols = cols[:n_fc]
     fcols = st.columns(n_fc)
-    filter_vals = {}
+    filter_selected = {}
+    filter_text = {}
     for i, col in enumerate(filter_cols):
         with fcols[i]:
             uniq_vals = sorted({str(r.get(col, "") or "").strip() for r in rows_shown if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
-            if len(uniq_vals) <= 40 and len(uniq_vals) >= 1:
-                opts = ["— All —"] + uniq_vals
-                sel = st.selectbox(col, opts, key=f"f_{key_suffix}_filter_{col}", label_visibility="collapsed", placeholder=col)
-                filter_vals[col] = None if (sel is None or sel == "— All —") else sel
+            if len(uniq_vals) <= 60 and len(uniq_vals) >= 1:
+                sel = st.multiselect(col, uniq_vals, default=[], key=f"f_{key_suffix}_sel_{col}", label_visibility="collapsed", placeholder="All")
+                filter_selected[col] = sel if sel else None
             else:
-                txt = st.text_input(col, key=f"f_{key_suffix}_filter_{col}", label_visibility="collapsed", placeholder=col)
-                filter_vals[col] = (txt or "").strip() or None
-    if any(filter_vals.get(c) for c in filter_cols):
+                filter_selected[col] = None
+            txt = st.text_input("Search " + col, key=f"f_{key_suffix}_txt_{col}", label_visibility="collapsed", placeholder="Type…")
+            filter_text[col] = (txt or "").strip() or None
+    if any(filter_selected.get(c) for c in filter_cols) or any(filter_text.get(c) for c in filter_cols):
         for col in filter_cols:
-            v = filter_vals.get(col)
-            if v is None:
-                continue
-            rows_shown = [r for r in rows_shown if v.lower() in str(r.get(col) or "").lower()]
+            sel_list = filter_selected.get(col)
+            search_t = filter_text.get(col)
+            if sel_list:
+                allowed = {str(s).strip().lower() for s in sel_list}
+                rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
+            if search_t:
+                q = search_t.lower()
+                rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
     # Filter by one column: hidden for now; use column filters above instead
     if False:
         with st.expander("Filter by one column (optional)", expanded=False):
@@ -3828,36 +3834,54 @@ def main():
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 if _HAS_AGGRI:
-                    # Excel/Sheets-style: one filter per column, aligned under each header (streamlit-aggrid often doesn't show in-header filters, so we provide this row).
+                    # Excel-like filter: type to search (contains) + multi-select per column.
+                    st.markdown("**Filter by column**")
+                    st.caption("**Type** in the box to filter by text, or **select one or more values** (multi-select). Combine columns to narrow. Use ⋮ on headers for **Sort**.")
                     cols_list = list(display_df.columns)
-                    n_filter_cols = min(20, len(cols_list))
+                    n_filter_cols = min(12, len(cols_list))
                     filter_cols = cols_list[:n_filter_cols]
-                    st.subheader("Filter by column")
-                    st.caption("Each box filters the column beneath it (like Excel / Google Sheets). Combine columns to narrow results.")
-                    filter_vals = {}
+                    filter_selected = {}
+                    filter_text = {}
                     use_cols = st.columns(n_filter_cols)
                     for i, col in enumerate(filter_cols):
                         with use_cols[i]:
                             ser = display_df[col].dropna().astype(str).str.strip()
                             uniq = ser[ser != ""].unique()
-                            if len(uniq) <= 50 and len(uniq) >= 1:
-                                opts = ["— All —"] + sorted(uniq.tolist())
-                                sel = st.selectbox(col, opts, key=f"master_f_{col}", label_visibility="collapsed", placeholder=col)
-                                filter_vals[col] = None if (sel is None or sel == "— All —") else sel
+                            opts = sorted(uniq.tolist()) if len(uniq) > 0 else []
+                            if len(opts) <= 60:
+                                sel = st.multiselect(
+                                    col,
+                                    options=opts,
+                                    default=[],
+                                    key=f"master_f_sel_{col}",
+                                    label_visibility="collapsed",
+                                    placeholder="All" if len(opts) > 1 else (opts[0] if opts else col),
+                                )
+                                filter_selected[col] = sel if sel else None
                             else:
-                                txt = st.text_input(col, key=f"master_f_{col}", label_visibility="collapsed", placeholder=col)
-                                filter_vals[col] = (txt or "").strip() or None
-                    if any(filter_vals.get(c) for c in filter_cols):
+                                filter_selected[col] = None
+                            txt = st.text_input(
+                                "Search " + col,
+                                key=f"master_f_txt_{col}",
+                                label_visibility="collapsed",
+                                placeholder="Type to filter…",
+                            )
+                            filter_text[col] = (txt or "").strip() or None
+                    has_filter = any(filter_selected.get(c) for c in filter_cols) or any(filter_text.get(c) for c in filter_cols)
+                    if has_filter:
                         mask = pd.Series(True, index=display_df.index)
                         for col in filter_cols:
-                            v = filter_vals.get(col)
-                            if v is None:
-                                continue
-                            if display_df[col].dtype.kind in ("i", "u", "f") and isinstance(v, str) and v.isdigit():
-                                mask &= display_df[col].astype(str).str.contains(v, regex=False, na=False)
-                            else:
-                                mask &= display_df[col].astype(str).str.strip().str.lower().str.contains(v.lower(), regex=False, na=False)
+                            sel_list = filter_selected.get(col)
+                            search_t = filter_text.get(col)
+                            col_ser = display_df[col].astype(str).str.strip().str.lower()
+                            if sel_list:
+                                allowed = {s.strip().lower() for s in sel_list}
+                                mask &= col_ser.isin(allowed)
+                            if search_t:
+                                q = search_t.lower()
+                                mask &= col_ser.str.contains(q, regex=False, na=False)
                         display_df = display_df.loc[mask].reset_index(drop=True)
+                    # Grid options for sort + in-sheet filter if this build supports it
                     gb = GridOptionsBuilder.from_dataframe(display_df)
                     gb.configure_default_column(
                         filter=True,
@@ -3881,6 +3905,7 @@ def main():
                         columnMenu="legacy",
                         floatingFiltersHeight=40,
                     )
+                    gb.configure_side_bar(filters_panel=True, columns_panel=True, defaultToolPanel="filters")
                     go = gb.build()
                     if "defaultColDef" not in go:
                         go["defaultColDef"] = {}
@@ -3892,8 +3917,10 @@ def main():
                     for cdef in go.get("columnDefs") or []:
                         cdef["filter"] = True
                         cdef["floatingFilter"] = True
+                        cdef["suppressHeaderFilterButton"] = False
                         if cdef.get("type") == []:
                             cdef.pop("type", None)
+                    st.caption("Filter using the row above. Sort: ⋮ on a column header. Search bar above for quick text search.")
                     AgGrid(
                         display_df,
                         gridOptions=go,
