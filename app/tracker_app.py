@@ -2611,79 +2611,11 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if is_kitchens_tab:
         rows, cols = _apply_kitchen_labels(rows, cols)
         cols = _kitchens_column_order(cols)
-    # Master Kitchens list (or single-facility Master Kitchens view): hide Account Country column from display
+    # Master Kitchens list (or single-facility Master Kitchens view): hide Account Country and Sheet columns from display
     if tab_id == "Master Kitchens list" or hide_account_country:
-        cols = [c for c in cols if not _is_account_country_column(c)]
-    # Cleaner filtering: one search box + optional single-column filter in expander
-    search_all = st.text_input(
-        "Search in all columns",
-        key=f"f_{key_suffix}_search",
-        placeholder="Type to search across every column…",
-        help="Filters rows where any column contains this text.",
-    )
+        cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
-    if (search_all or "").strip():
-        term = search_all.strip().lower()
-        all_keys = list(rows[0].keys()) if rows else []
-        rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in all_keys)]
-    # Header search (global): filter sheet by text in header search box
-    header_q = (st.session_state.get("header_search_query") or "").strip()
-    if header_q:
-        q = header_q.lower()
-        all_keys = list(rows[0].keys()) if rows else []
-        rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in all_keys)]
-    # Filter by column (dropdown list) — always show; use "Select all" to clear column filters
-    st.markdown("**Filter by column**")
-    st.caption("**Type** to filter by text, or **select one or more values**. Use **Select all** to show all values in a column. Combine columns to narrow.")
-    _select_all_key = f"f_{key_suffix}_select_all"
-    if st.button("Select all", key=f"{_select_all_key}_btn", help="Clear column filters by selecting all values for each column"):
-        st.session_state[_select_all_key] = True
-        _rerun()
-    _select_all_trigger = st.session_state.pop(_select_all_key, False)
-    n_fc = min(12, len(cols))
-    filter_cols = cols[:n_fc]
-    fcols = st.columns(n_fc)
-    filter_selected = {}
-    filter_text = {}
-    for i, col in enumerate(filter_cols):
-        with fcols[i]:
-            uniq_vals = sorted({str(r.get(col, "") or "").strip() for r in rows_shown if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
-            if len(uniq_vals) <= 60 and len(uniq_vals) >= 1:
-                _default = uniq_vals if _select_all_trigger else []
-                sel = st.multiselect(col, uniq_vals, default=_default, key=f"f_{key_suffix}_sel_{col}", label_visibility="collapsed", placeholder="All")
-                filter_selected[col] = sel if sel else None
-            else:
-                filter_selected[col] = None
-            txt = st.text_input("Search " + col, key=f"f_{key_suffix}_txt_{col}", label_visibility="collapsed", placeholder="Type…")
-            filter_text[col] = (txt or "").strip() or None
-    if any(filter_selected.get(c) for c in filter_cols) or any(filter_text.get(c) for c in filter_cols):
-        for col in filter_cols:
-            sel_list = filter_selected.get(col)
-            search_t = filter_text.get(col)
-            if sel_list:
-                allowed = {str(s).strip().lower() for s in sel_list}
-                rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
-            if search_t:
-                q = search_t.lower()
-                rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
-    # Filter by one column: hidden for now; use column filters above instead
-    if False:
-        with st.expander("Filter by one column (optional)", expanded=False):
-            chosen_col = st.selectbox("Column", ["— None —"] + cols, key=f"f_{key_suffix}_col")
-            col_val = None
-            if chosen_col and chosen_col != "— None —":
-                uniq_vals = sorted({str(r.get(chosen_col, "")).strip() for r in rows_shown if r.get(chosen_col) is not None and str(r.get(chosen_col, "")).strip()})
-                if len(uniq_vals) <= 50:
-                    opts = ["— All —"] + uniq_vals
-                    col_val = st.selectbox("Value", opts, key=f"f_{key_suffix}_col_val")
-                    if col_val and col_val != "— All —":
-                        rows_shown = [r for r in rows_shown if str(r.get(chosen_col, "")) == str(col_val)]
-                else:
-                    col_val = st.text_input("Contains", key=f"f_{key_suffix}_col_val", placeholder="Type to filter this column…")
-                    if (col_val or "").strip():
-                        t = col_val.strip().lower()
-                        rows_shown = [r for r in rows_shown if t in str(r.get(chosen_col, "") or "").lower()]
-    st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s).")
+    st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s). Filter using the **⋮ menu** on each column header in the table below.")
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
@@ -2706,36 +2638,36 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             filter=True,
             sortable=True,
             resizable=True,
-            floatingFilter=True,
+            floatingFilter=False,
             suppressHeaderMenuButton=False,
             suppressHeaderFilterButton=False,
             menuTabs=["filterMenuTab", "generalMenuTab"],
         )
         for col in df_display.columns:
             if pd.api.types.is_numeric_dtype(df_display[col]):
-                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
+                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
             elif pd.api.types.is_datetime64_any_dtype(df_display[col]):
-                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
             else:
-                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
+                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
         gb.configure_grid_options(
             domLayout="normal",
             suppressMenuHide=False,
             columnMenu="legacy",
-            floatingFiltersHeight=40,
         )
         gb.configure_side_bar(filters_panel=False, columns_panel=False)
         go = gb.build()
         if "defaultColDef" not in go:
             go["defaultColDef"] = {}
         go["defaultColDef"]["filter"] = True
-        go["defaultColDef"]["floatingFilter"] = True
+        go["defaultColDef"]["floatingFilter"] = False
         go["defaultColDef"]["suppressHeaderMenuButton"] = False
         go["defaultColDef"]["suppressHeaderFilterButton"] = False
-        go["floatingFiltersHeight"] = 40
+        if "floatingFiltersHeight" in go:
+            del go["floatingFiltersHeight"]
         for cdef in go.get("columnDefs") or []:
             cdef["filter"] = True
-            cdef["floatingFilter"] = True
+            cdef["floatingFilter"] = False
             cdef["suppressHeaderFilterButton"] = False
             if cdef.get("type") == []:
                 cdef.pop("type", None)
@@ -3692,44 +3624,14 @@ def main():
                     is_other_sheet = False
                 else:
                     # User chose Google Sheet; use GSheet tabs (same as no-BQ path)
-                    # Default to first facility that is not Aqiq (so Aqiq is not the default)
                     first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
-                    _sel_key = "master_sheets_selection"
-                    if _sel_key not in st.session_state:
-                        st.session_state[_sel_key] = [first_tab]
-                    _initial_sel = st.session_state.get(_sel_key) or [first_tab]
-                    if not isinstance(_initial_sel, list):
-                        _initial_sel = [_initial_sel] if _initial_sel else [first_tab]
-                    source_id = source_ids_gsheet.get((_initial_sel or [first_tab])[0], first_tab)
+                    source_id = source_ids_gsheet.get(first_tab, first_tab)
                     rows = list_generic_tab(source_id, source="gsheet")
                     source_options = gsheet_tab_options
-                    source_ids = source_ids_gsheet  # so render block can use source_ids.get()
+                    source_ids = source_ids_gsheet
                     chosen_label = "Master Kitchens (Google Sheet)"
                     is_other_sheet = True
-                    cap_col, btn_col = st.columns([3, 1])
-                    with cap_col:
-                        st.caption("Select **one facility** or **multiple facilities** (sheets). One selected → that facility only; multiple selected → combined table with a **Sheet** column.")
-                    with btn_col:
-                        sel_col, clr_col = st.columns(2)
-                        with sel_col:
-                            if st.button("Select all", key="master_sheets_select_all"):
-                                st.session_state[_sel_key] = list(source_options)
-                                _rerun()
-                        with clr_col:
-                            if st.button("Clear", key="master_sheets_clear"):
-                                st.session_state[_sel_key] = [first_tab]
-                                _rerun()
-                    chosen_labels = st.multiselect(
-                        "Facilities",
-                        options=source_options,
-                        key=_sel_key,
-                        help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
-                    )
-                    if not chosen_labels:
-                        chosen_labels = [first_tab]
-                    chosen_labels = [t for t in (chosen_labels or []) if t in source_options] or [first_tab]
-                    source_id = source_ids_gsheet.get(chosen_labels[0], first_tab)
-                    rows = list_generic_tab(source_id, source="gsheet")
+                    chosen_labels = [first_tab]
             else:
                 # BigQuery not available — try optional "BQ export" sheet (pipeline/scheduled query → Sheet)
                 _bq_export_sheet_id = (getattr(st, "secrets", None) or {}).get("bq_export_sheet_id") or ""
@@ -3782,42 +3684,11 @@ def main():
                     chosen_label = ""
                     is_other_sheet = False
                 else:
-                    # Default to first facility that is not Aqiq (so Aqiq is not the default)
+                    # Default to first facility (no facility filter UI)
                     first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
-                    # Sheets and facilities in one filter box: Select all / Clear + multiselect for each
-                    # Use a dedicated key for multiselect so we never write to the widget key after it runs (avoids StreamlitAPIException on Cloud)
-                    _sel_key = "master_sheets_selection"
-                    if _sel_key not in st.session_state:
-                        st.session_state[_sel_key] = [first_tab]
-                    _initial_sel = st.session_state.get(_sel_key) or [first_tab]
-                    if not isinstance(_initial_sel, list):
-                        _initial_sel = [_initial_sel] if _initial_sel else [first_tab]
-                    source_id = source_ids.get((_initial_sel or [first_tab])[0], first_tab)
+                    source_id = source_ids.get(first_tab, first_tab)
                     rows = list_generic_tab(source_id, source="gsheet")
-                    cap_col, btn_col = st.columns([3, 1])
-                    with cap_col:
-                        st.caption("Select **one facility** or **multiple facilities** (sheets). One selected → that facility only; multiple selected → combined table with a **Sheet** column.")
-                    with btn_col:
-                        sel_col, clr_col = st.columns(2)
-                        with sel_col:
-                            if st.button("Select all", key="master_sheets_select_all"):
-                                st.session_state[_sel_key] = list(source_options)
-                                _rerun()
-                        with clr_col:
-                            if st.button("Clear", key="master_sheets_clear"):
-                                st.session_state[_sel_key] = [first_tab]
-                                _rerun()
-                    chosen_labels = st.multiselect(
-                        "Facilities",
-                        options=source_options,
-                        key=_sel_key,
-                        help="Select a single facility or multiple facilities. Use **Select all** to add every facility, **Clear** to reset.",
-                    )
-                    if not chosen_labels:
-                        chosen_labels = [first_tab]
-                    chosen_labels = [t for t in (chosen_labels or []) if t in source_options] or [first_tab]
-                    source_id = source_ids.get(chosen_labels[0], first_tab)
-                    rows = list_generic_tab(source_id, source="gsheet")
+                    chosen_labels = [first_tab]
                     is_other_sheet = True
         # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
         if is_other_sheet and chosen_labels:
@@ -3839,84 +3710,15 @@ def main():
                 if not combined_rows:
                     st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                 else:
-                    st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets. Column **Sheet** shows the source.")
+                    st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
                     cols_combined = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict)))) if combined_rows else []
                     if combined_rows and isinstance(combined_rows[0], dict):
                         _df_temp = pd.DataFrame(combined_rows)
                         cols_combined = sorted(_df_temp.columns.tolist())
-                    cols_combined = [c for c in cols_combined if not _is_account_country_column(c)]
-                    search_combined = st.text_input("Search in all columns", key="master_combined_search", placeholder="Type to filter rows…")
+                    cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     rows_shown = combined_rows
-                    header_q = (st.session_state.get("header_search_query") or "").strip()
-                    if header_q:
-                        q = header_q.lower()
-                        rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in cols_combined)]
-                    if (search_combined or "").strip():
-                        term = search_combined.strip().lower()
-                        rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
                     st.divider()
-                    # Filter by column (dropdown list) — always show; use "Select all" to clear column filters
-                    st.markdown("**Filter by column**")
-                    st.caption("Type to search or select one or more values per column. Use **Select all** to show all. Combine with search above and conditional filters below.")
-                    _sel_all_c = "master_combined_select_all"
-                    if st.button("Select all", key=f"{_sel_all_c}_btn", help="Select all values for each column (clear column filters)"):
-                        st.session_state[_sel_all_c] = True
-                        _rerun()
-                    _sel_all_trigger_c = st.session_state.pop(_sel_all_c, False)
-                    n_fc = min(12, len(cols_combined))
-                    filter_cols_c = cols_combined[:n_fc]
-                    fcols_c = st.columns(n_fc)
-                    filter_sel_c = {}
-                    filter_txt_c = {}
-                    # Use a sample of rows to build options when many rows (keeps UI responsive when all facilities selected)
-                    _sample_for_opts = rows_shown if len(rows_shown) <= 2000 else rows_shown[:2000]
-                    for i, col in enumerate(filter_cols_c):
-                        with fcols_c[i]:
-                            try:
-                                uniq_c = sorted({str(r.get(col, "") or "").strip() for r in _sample_for_opts if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
-                                if len(uniq_c) > 100:
-                                    uniq_c = uniq_c[:100]
-                                if len(uniq_c) <= 60 and len(uniq_c) >= 1:
-                                    _default_c = uniq_c if _sel_all_trigger_c else []
-                                    sel_c = st.multiselect(col, uniq_c, default=_default_c, key=f"master_combined_sel_{col}", label_visibility="collapsed", placeholder="All")
-                                    filter_sel_c[col] = sel_c if sel_c else None
-                                else:
-                                    filter_sel_c[col] = None
-                            except Exception:
-                                filter_sel_c[col] = None
-                            txt_c = st.text_input("Search " + col, key=f"master_combined_txt_{col}", label_visibility="collapsed", placeholder="Type…")
-                            filter_txt_c[col] = (txt_c or "").strip() or None
-                    if any(filter_sel_c.get(c) for c in filter_cols_c) or any(filter_txt_c.get(c) for c in filter_cols_c):
-                        for col in filter_cols_c:
-                            sel_list = filter_sel_c.get(col)
-                            search_t = filter_txt_c.get(col)
-                            if sel_list:
-                                allowed = {str(s).strip().lower() for s in sel_list}
-                                rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
-                            if search_t:
-                                q = search_t.lower()
-                                rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
-                    _show_conditional_filters = _is_developer() or st.session_state.get("user_role") == "super_user"
-                    if _show_conditional_filters:
-                        with st.expander("Conditional filters (AND)", expanded=False):
-                            st.caption("Add up to 5 rules. All rules must match. Leave column as '— None —' to skip a row. **Scroll the Column dropdown** to see all columns.")
-                            if cols_combined:
-                                st.caption(f"**{len(cols_combined)} columns** available to filter.")
-                            cond_ops = ["Contains", "Equals", "Not equals", "Starts with", "Ends with", "Is empty", "Is not empty"]
-                            cond_rules = []
-                            for i in range(1, 6):
-                                c1, c2, c3 = st.columns([2, 2, 2])
-                                with c1:
-                                    cond_col = st.selectbox("Column", ["— None —"] + cols_combined, key=f"master_combined_cond_{i}_col", label_visibility="visible" if i == 1 else "collapsed")
-                                with c2:
-                                    cond_op = st.selectbox("Operator", ["— None —"] + cond_ops, key=f"master_combined_cond_{i}_op", label_visibility="visible" if i == 1 else "collapsed")
-                                with c3:
-                                    cond_val = st.text_input("Value", key=f"master_combined_cond_{i}_val", placeholder="Value (not used for Is empty/Is not empty)", label_visibility="visible" if i == 1 else "collapsed")
-                                if cond_col and cond_col != "— None —" and cond_op and cond_op != "— None —":
-                                    cond_rules.append({"col": cond_col, "op": cond_op.lower(), "val": (cond_val or "").strip()})
-                            if cond_rules:
-                                rows_shown = _apply_conditional_filters(rows_shown, cond_rules, cols_combined)
-                    st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s).")
+                    st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s). Filter using the **⋮ menu** on column headers below.")
                     df_combined = pd.DataFrame(rows_shown)
                     _disp_cols = [c for c in df_combined.columns if c in cols_combined]
                     if _disp_cols:
@@ -3934,36 +3736,36 @@ def main():
                             filter=True,
                             sortable=True,
                             resizable=True,
-                            floatingFilter=True,
+                            floatingFilter=False,
                             suppressHeaderMenuButton=False,
                             suppressHeaderFilterButton=False,
                             menuTabs=["filterMenuTab", "generalMenuTab"],
                         )
                         for col in df_combined.columns:
                             if pd.api.types.is_numeric_dtype(df_combined[col]):
-                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
+                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
                             elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
-                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
                             else:
-                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
+                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
                         gb.configure_grid_options(
                             domLayout="normal",
                             suppressMenuHide=False,
                             columnMenu="legacy",
-                            floatingFiltersHeight=40,
                         )
                         gb.configure_side_bar(filters_panel=False, columns_panel=False)
                         go = gb.build()
                         if "defaultColDef" not in go:
                             go["defaultColDef"] = {}
                         go["defaultColDef"]["filter"] = True
-                        go["defaultColDef"]["floatingFilter"] = True
+                        go["defaultColDef"]["floatingFilter"] = False
                         go["defaultColDef"]["suppressHeaderMenuButton"] = False
                         go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                        go["floatingFiltersHeight"] = 40
+                        if "floatingFiltersHeight" in go:
+                            del go["floatingFiltersHeight"]
                         for cdef in go.get("columnDefs") or []:
                             cdef["filter"] = True
-                            cdef["floatingFilter"] = True
+                            cdef["floatingFilter"] = False
                             cdef["suppressHeaderFilterButton"] = False
                             if cdef.get("type") == []:
                                 cdef.pop("type", None)
@@ -3999,61 +3801,15 @@ def main():
                 st.info("No data in this source.")
             if rows_filtered and not use_facility_tabs:
                 all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
-                # Master Kitchens: hide Account Country (and common variants) from the sheet
-                all_cols = [c for c in all_cols if not _is_account_country_column(c)]
-                default_show = st.session_state.get("master_columns_show") or all_cols
-                default_show = [c for c in default_show if c in all_cols] or all_cols
-                cols_to_show = st.multiselect("Columns to show", options=all_cols, default=default_show, key="master_columns_show", placeholder="All columns")
-                if not cols_to_show:
-                    cols_to_show = all_cols
+                # Master Kitchens: hide Account Country and Sheet from the sheet
+                all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
+                cols_to_show = all_cols
                 rows_display = rows_filtered
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                 if _HAS_AGGRI:
-                    # Filter by column dropdown + Select all
-                    st.markdown("**Filter by column**")
-                    st.caption("**Type** or **select values** per column. Use **Select all** to show all. Combine with ⋮ menu on the table.")
-                    _sel_all_m = "master_sheet_select_all"
-                    if st.button("Select all", key=f"{_sel_all_m}_btn", help="Select all values for each column"):
-                        st.session_state[_sel_all_m] = True
-                        _rerun()
-                    _sel_all_m_trigger = st.session_state.pop(_sel_all_m, False)
-                    cols_list = list(display_df.columns)
-                    cols_list = [c for c in cols_list if c != "_has_opportunity"]
-                    n_fc_m = min(12, len(cols_list))
-                    filter_cols_m = cols_list[:n_fc_m]
-                    use_cols_m = st.columns(n_fc_m)
-                    filter_selected_m = {}
-                    filter_text_m = {}
-                    for i, col in enumerate(filter_cols_m):
-                        with use_cols_m[i]:
-                            ser = display_df[col].dropna().astype(str).str.strip()
-                            uniq = ser[ser != ""].unique()
-                            opts = sorted(uniq.tolist()) if len(uniq) > 0 else []
-                            if len(opts) <= 60:
-                                _def_m = opts if _sel_all_m_trigger else []
-                                sel = st.multiselect(col, options=opts, default=_def_m, key=f"master_f_sel_{col}", label_visibility="collapsed", placeholder="All" if len(opts) > 1 else (opts[0] if opts else col))
-                                filter_selected_m[col] = sel if sel else None
-                            else:
-                                filter_selected_m[col] = None
-                            txt = st.text_input("Search " + col, key=f"master_f_txt_{col}", label_visibility="collapsed", placeholder="Type to filter…")
-                            filter_text_m[col] = (txt or "").strip() or None
-                    has_filter_m = any(filter_selected_m.get(c) for c in filter_cols_m) or any(filter_text_m.get(c) for c in filter_cols_m)
-                    if has_filter_m:
-                        mask = pd.Series(True, index=display_df.index)
-                        for col in filter_cols_m:
-                            sel_list = filter_selected_m.get(col)
-                            search_t = filter_text_m.get(col)
-                            col_ser = display_df[col].astype(str).str.strip().str.lower()
-                            if sel_list:
-                                allowed = {s.strip().lower() for s in sel_list}
-                                mask &= col_ser.isin(allowed)
-                            if search_t:
-                                q = search_t.lower()
-                                mask &= col_ser.str.contains(q, regex=False, na=False)
-                        display_df = display_df.loc[mask].reset_index(drop=True)
                     # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
                     status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
                     gb = GridOptionsBuilder.from_dataframe(display_df)
@@ -4061,36 +3817,36 @@ def main():
                         filter=True,
                         sortable=True,
                         resizable=True,
-                        floatingFilter=True,
+                        floatingFilter=False,
                         suppressHeaderMenuButton=False,
                         suppressHeaderFilterButton=False,
                         menuTabs=["filterMenuTab", "generalMenuTab"],
                     )
                     for col in display_df.columns:
                         if pd.api.types.is_numeric_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
+                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
                         elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
                         else:
-                            gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
+                            gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
                     gb.configure_grid_options(
                         domLayout="normal",
                         suppressMenuHide=False,
                         columnMenu="legacy",
-                        floatingFiltersHeight=40,
                     )
                     gb.configure_side_bar(filters_panel=False, columns_panel=False)
                     go = gb.build()
                     if "defaultColDef" not in go:
                         go["defaultColDef"] = {}
                     go["defaultColDef"]["filter"] = True
-                    go["defaultColDef"]["floatingFilter"] = True
+                    go["defaultColDef"]["floatingFilter"] = False
                     go["defaultColDef"]["suppressHeaderMenuButton"] = False
                     go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                    go["floatingFiltersHeight"] = 40
+                    if "floatingFiltersHeight" in go:
+                        del go["floatingFiltersHeight"]
                     for cdef in go.get("columnDefs") or []:
                         cdef["filter"] = True
-                        cdef["floatingFilter"] = True
+                        cdef["floatingFilter"] = False
                         cdef["suppressHeaderFilterButton"] = False
                         if cdef.get("type") == []:
                             cdef.pop("type", None)
@@ -4141,7 +3897,7 @@ def main():
                 st.caption("Slice your data by rows and columns.")
                 df = pd.DataFrame(rows_display)
                 cols = [c for c in df.columns if df[c].notna().any()]
-                cols = [c for c in cols if not _is_account_country_column(c)]
+                cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                 if len(cols) < 2:
                     st.caption("Need at least 2 columns to build a pivot.")
                 else:
