@@ -2526,6 +2526,61 @@ def _is_empty_record(row) -> bool:
     return True
 
 
+def _status_row_class_rules_and_css(status_col_name: str):
+    """Return (rowClassRules dict, custom_css str) for AgGrid status color coding. status_col_name is the exact dataframe column name (e.g. 'Status' or 'status__c')."""
+    # JS-safe column key for data[] access
+    col_key = status_col_name.replace("\\", "\\\\").replace("'", "\\'")
+    # Expressions use AG Grid rowClassRules context: 'data' is the row data
+    data_ref = f"data['{col_key}']"
+    data_ref_ho = "data['_has_opportunity']"
+    row_class_rules = {
+        "status-no-status": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); return !s||s==='no status'||s==='n/a'||s==='na'||s==='—'||s==='-'||s==='blocked';}})()",
+        "status-vacant-opp": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); var v=(s==='vacant'||(s.indexOf('vacant')===0&&s.indexOf('occupied')<0&&s.indexOf('sold')<0&&s.indexOf('churning')<0)); return v&&{data_ref_ho};}})()",
+        "status-vacant": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); var v=(s==='vacant'||(s.indexOf('vacant')===0&&s.indexOf('occupied')<0&&s.indexOf('sold')<0&&s.indexOf('churning')<0)); return v&&!{data_ref_ho};}})()",
+        "status-churning": f"({data_ref}!=null?String({data_ref}).trim():'').toLowerCase()==='churning'",
+        "status-occupied": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); return s==='occupied'||s==='sold';}})()",
+    }
+    # String CSS with .ag-row selector and !important so it overrides AG Grid theme in iframe
+    custom_css = """
+    .ag-row.status-no-status { background-color: #B22222 !important; color: white !important; }
+    .ag-row.status-no-status .ag-cell { background-color: #B22222 !important; color: white !important; }
+    .ag-row.status-vacant-opp { background-color: #FEE2E2 !important; }
+    .ag-row.status-vacant-opp .ag-cell { background-color: #FEE2E2 !important; }
+    .ag-row.status-vacant { background-color: #D1FAE5 !important; }
+    .ag-row.status-vacant .ag-cell { background-color: #D1FAE5 !important; }
+    .ag-row.status-churning { background-color: #FDE68A !important; }
+    .ag-row.status-churning .ag-cell { background-color: #FDE68A !important; }
+    .ag-row.status-occupied { background-color: #FEE2E2 !important; }
+    .ag-row.status-occupied .ag-cell { background-color: #FEE2E2 !important; }
+    """
+    return row_class_rules, custom_css
+
+
+def _status_get_row_style_js(status_col_name: str):
+    """Return JsCode for getRowStyle to apply status colors as inline styles (works when custom_css does not in iframe)."""
+    if not JsCode:
+        return None
+    col_key = status_col_name.replace("\\", "\\\\").replace("'", "\\'")
+    # getRowStyle(params): params.data has the row
+    return JsCode("""
+    function(params) {
+        var d = params.data;
+        if (!d) return null;
+        var col = '%s';
+        var v = (d[col] != null ? String(d[col]).trim() : '');
+        var low = v.toLowerCase();
+        var hasOpp = d['_has_opportunity'];
+        if (!v || low === 'no status' || low === 'n/a' || low === 'na' || low === '—' || low === '-' || low === 'blocked')
+            return { backgroundColor: '#B22222', color: 'white' };
+        if (low === 'vacant' || (low.indexOf('vacant') === 0 && low.indexOf('occupied') < 0 && low.indexOf('sold') < 0 && low.indexOf('churning') < 0))
+            return { backgroundColor: hasOpp ? '#FEE2E2' : '#D1FAE5' };
+        if (low === 'churning') return { backgroundColor: '#FDE68A' };
+        if (low === 'occupied' || low === 'sold') return { backgroundColor: '#FEE2E2' };
+        return { backgroundColor: '#FEE2E2' };
+    }
+    """ % col_key)
+
+
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False):
     """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide). hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
@@ -2633,40 +2688,18 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
     df_display = pd.DataFrame(rows_shown)[display_cols] if display_cols and rows_shown else pd.DataFrame(rows_shown)
-    # Status color coding (match sheet/dashboard reference): Vacant = light green, Occupied = light red, Sold = light red, Churning = amber, no status/Blocked/NA/empty = dark red
+    # Status color coding: use AgGrid with getRowStyle when available (same approach as test_aggrid_colors.py)
     _status_colors = {"Vacant": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
-    _no_status_bg = "#B22222"  # dark red for no status, Blocked, NA, or empty
+    _no_status_bg = "#B22222"
     status_col = None
     for c in df_display.columns:
         if str(c).strip().lower() in ("status", "status__c"):
             status_col = c
             break
-    if status_col and not df_display.empty:
-        # Use styled dataframe so status color coding always works (AgGrid JS styling unreliable in streamlit-aggrid)
-        def _row_bg(row):
-            v = (str(row[status_col]) if row[status_col] is not None else "").strip()
-            low = v.lower()
-            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                return [f"background-color: {_no_status_bg}; color: white"] * len(row)
-            key = None
-            if low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low):
-                key = "Vacant"
-            elif low == "churning": key = "Churning"
-            elif low == "occupied": key = "Occupied"
-            elif low == "sold": key = "Sold"
-            bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
-            if key == "Vacant" and bg:
-                def _val_filled(c):
-                    s = (str(row.get(c, "") or "")).strip()
-                    return bool(s and s.lower() not in ("nan", "none"))
-                has_opp = any(_val_filled(c) for c in row.index if "opportunity" in str(c).lower())
-                if has_opp:
-                    bg = _status_colors.get("Occupied", bg)
-            style = f"background-color: {bg}" if bg else ""
-            return [style] * len(row)
-        styled = df_display.style.apply(_row_bg, axis=1)
-        st.dataframe(styled, use_container_width=True, hide_index=True, height=700)
-    elif _HAS_AGGRI and HAS_EXCEL and not df_display.empty:
+    if _HAS_AGGRI and HAS_EXCEL and not df_display.empty:
+        if status_col:
+            df_display = df_display.copy()
+            df_display["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
         st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
         gb = GridOptionsBuilder.from_dataframe(df_display)
         gb.configure_default_column(
@@ -2706,6 +2739,10 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             cdef["suppressHeaderFilterButton"] = False
             if cdef.get("type") == []:
                 cdef.pop("type", None)
+            if cdef.get("field") == "_has_opportunity":
+                cdef["hide"] = True
+        if status_col and JsCode:
+            go["getRowStyle"] = _status_get_row_style_js(status_col)
         AgGrid(
             df_display,
             gridOptions=go,
@@ -3890,27 +3927,8 @@ def main():
                         if str(c).strip().lower() in ("status", "status__c"):
                             status_col_combined = c
                             break
-                    if status_col_combined and not df_combined.empty:
-                        # Use styled dataframe so status color coding always works
-                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                        _ns = "#B22222"
-                        def _row_bg_combined(row):
-                            v = (str(row[status_col_combined]) if row[status_col_combined] is not None else "").strip()
-                            low = v.lower()
-                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                                return [f"background-color: {_ns}; color: white"] * len(row)
-                            key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
-                            bg = _sc.get(key, "") if key else _sc.get(v, "")
-                            if key == "Vacant" and bg:
-                                has_opp = row.get("_has_opportunity", False)
-                                if has_opp:
-                                    bg = _sc.get("Occupied", bg)
-                            return [f"background-color: {bg}" if bg else ""] * len(row)
-                        df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
-                        st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
-                    elif _HAS_AGGRI and not df_combined.empty:
+                    if _HAS_AGGRI and not df_combined.empty:
                         st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
-                        # Keep _has_opportunity in data for row styling but hide it in the grid
                         gb = GridOptionsBuilder.from_dataframe(df_combined)
                         gb.configure_default_column(
                             filter=True,
@@ -3951,6 +3969,8 @@ def main():
                                 cdef.pop("type", None)
                             if cdef.get("field") == "_has_opportunity":
                                 cdef["hide"] = True
+                        if status_col_combined and JsCode:
+                            go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
                         AgGrid(
                             df_combined,
                             gridOptions=go,
@@ -4034,79 +4054,61 @@ def main():
                                 q = search_t.lower()
                                 mask &= col_ser.str.contains(q, regex=False, na=False)
                         display_df = display_df.loc[mask].reset_index(drop=True)
-                    # Excel-style header filters on the sheet + color coding when no Status column; when Status exists use styled table so colors work
+                    # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
                     status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
-                    if status_col_ag and not display_df.empty:
-                        # Use styled dataframe so status color coding always works
-                        _sc_ag = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                        _ns_ag = "#B22222"
-                        def _row_bg_ag(row):
-                            v = (str(row[status_col_ag]) if row[status_col_ag] is not None else "").strip()
-                            low = v.lower()
-                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                                return [f"background-color: {_ns_ag}; color: white"] * len(row)
-                            key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
-                            bg = _sc_ag.get(key, "") if key else _sc_ag.get(v, "")
-                            if key == "Vacant" and bg:
-                                has_opp = row.get("_has_opportunity", False)
-                                if has_opp:
-                                    bg = _sc_ag.get("Occupied", bg)
-                            return [f"background-color: {bg}" if bg else ""] * len(row)
-                        display_df = display_df.style.apply(_row_bg_ag, axis=1)
-                        st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
-                    else:
-                        # No status column: use AgGrid with header filters
-                        gb = GridOptionsBuilder.from_dataframe(display_df)
-                        gb.configure_default_column(
-                            filter=True,
-                            sortable=True,
-                            resizable=True,
-                            floatingFilter=True,
-                            suppressHeaderMenuButton=False,
-                            suppressHeaderFilterButton=False,
-                            menuTabs=["filterMenuTab", "generalMenuTab"],
-                        )
-                        for col in display_df.columns:
-                            if pd.api.types.is_numeric_dtype(display_df[col]):
-                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
-                            elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
-                            else:
-                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
-                        gb.configure_grid_options(
-                            domLayout="normal",
-                            suppressMenuHide=False,
-                            columnMenu="legacy",
-                            floatingFiltersHeight=40,
-                        )
-                        gb.configure_side_bar(filters_panel=False, columns_panel=False)
-                        go = gb.build()
-                        if "defaultColDef" not in go:
-                            go["defaultColDef"] = {}
-                        go["defaultColDef"]["filter"] = True
-                        go["defaultColDef"]["floatingFilter"] = True
-                        go["defaultColDef"]["suppressHeaderMenuButton"] = False
-                        go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                        go["floatingFiltersHeight"] = 40
-                        for cdef in go.get("columnDefs") or []:
-                            cdef["filter"] = True
-                            cdef["floatingFilter"] = True
-                            cdef["suppressHeaderFilterButton"] = False
-                            if cdef.get("type") == []:
-                                cdef.pop("type", None)
-                            if cdef.get("field") == "_has_opportunity":
-                                cdef["hide"] = True
-                        st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
-                        AgGrid(
-                            display_df,
-                            gridOptions=go,
-                            use_container_width=True,
-                            height=700,
-                            theme="streamlit",
-                            show_toolbar=True,
-                            show_search=True,
-                            allow_unsafe_jscode=True,
-                        )
+                    gb = GridOptionsBuilder.from_dataframe(display_df)
+                    gb.configure_default_column(
+                        filter=True,
+                        sortable=True,
+                        resizable=True,
+                        floatingFilter=True,
+                        suppressHeaderMenuButton=False,
+                        suppressHeaderFilterButton=False,
+                        menuTabs=["filterMenuTab", "generalMenuTab"],
+                    )
+                    for col in display_df.columns:
+                        if pd.api.types.is_numeric_dtype(display_df[col]):
+                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
+                        elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
+                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+                        else:
+                            gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
+                    gb.configure_grid_options(
+                        domLayout="normal",
+                        suppressMenuHide=False,
+                        columnMenu="legacy",
+                        floatingFiltersHeight=40,
+                    )
+                    gb.configure_side_bar(filters_panel=False, columns_panel=False)
+                    go = gb.build()
+                    if "defaultColDef" not in go:
+                        go["defaultColDef"] = {}
+                    go["defaultColDef"]["filter"] = True
+                    go["defaultColDef"]["floatingFilter"] = True
+                    go["defaultColDef"]["suppressHeaderMenuButton"] = False
+                    go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                    go["floatingFiltersHeight"] = 40
+                    for cdef in go.get("columnDefs") or []:
+                        cdef["filter"] = True
+                        cdef["floatingFilter"] = True
+                        cdef["suppressHeaderFilterButton"] = False
+                        if cdef.get("type") == []:
+                            cdef.pop("type", None)
+                        if cdef.get("field") == "_has_opportunity":
+                            cdef["hide"] = True
+                    if status_col_ag and JsCode:
+                        go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
+                    st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
+                    AgGrid(
+                        display_df,
+                        gridOptions=go,
+                        use_container_width=True,
+                        height=700,
+                        theme="streamlit",
+                        show_toolbar=True,
+                        show_search=True,
+                        allow_unsafe_jscode=True,
+                    )
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
