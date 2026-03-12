@@ -2657,6 +2657,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         )
         gb.configure_side_bar(filters_panel=False, columns_panel=False)
         go = gb.build()
+        go["suppressCsvExport"] = True
         if "defaultColDef" not in go:
             go["defaultColDef"] = {}
         go["defaultColDef"]["filter"] = True
@@ -2805,6 +2806,12 @@ def main():
     [data-testid="stElementToolbar"] [aria-label*=" CSV"],
     [data-testid="stElementToolbar"] [title*="ownload"],
     [data-testid="stElementToolbar"] [title*=" CSV"] { display: none !important; visibility: hidden !important; }
+    /* AgGrid toolbar: hide Download as CSV (tooltip title) */
+    [title="Download as CSV"],
+    button[title="Download as CSV"],
+    .ag-toolbar [title*="Download"],
+    .ag-toolbar button[title*="CSV"],
+    [class*="ag-"] [title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
     /* Hide any standalone "Download as CSV" button next to dataframes (do not hide other buttons) */
     div[data-testid="stHorizontalBlock"] button[aria-label*="ownload"],
     div[data-testid="stHorizontalBlock"] button[title*="Download"] { display: none !important; visibility: hidden !important; }
@@ -3755,6 +3762,7 @@ def main():
                         )
                         gb.configure_side_bar(filters_panel=False, columns_panel=False)
                         go = gb.build()
+                        go["suppressCsvExport"] = True
                         if "defaultColDef" not in go:
                             go["defaultColDef"] = {}
                         go["defaultColDef"]["filter"] = True
@@ -3836,6 +3844,7 @@ def main():
                     )
                     gb.configure_side_bar(filters_panel=False, columns_panel=False)
                     go = gb.build()
+                    go["suppressCsvExport"] = True
                     if "defaultColDef" not in go:
                         go["defaultColDef"] = {}
                     go["defaultColDef"]["filter"] = True
