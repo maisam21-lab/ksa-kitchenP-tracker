@@ -19,10 +19,16 @@ import requests
 import streamlit as st
 
 try:
-    from st_aggrid import AgGrid, GridOptionsBuilder
+    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
     _HAS_AGGRI = True
 except ImportError:
-    _HAS_AGGRI = False
+    try:
+        from st_aggrid import AgGrid, GridOptionsBuilder
+        JsCode = None
+        _HAS_AGGRI = True
+    except ImportError:
+        JsCode = None
+        _HAS_AGGRI = False
 
 try:
     from app import auth
@@ -2571,35 +2577,40 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         q = header_q.lower()
         all_keys = list(rows[0].keys()) if rows else []
         rows_shown = [r for r in rows_shown if any(q in str(r.get(k) or "").lower() for k in all_keys)]
-    # Filter by column (Excel-like): only when not using in-sheet header filters (AgGrid)
-    if not _HAS_AGGRI:
-        st.markdown("**Filter by column**")
-        st.caption("**Type** to filter by text, or **select one or more values**. Combine columns to narrow.")
-        n_fc = min(12, len(cols))
-        filter_cols = cols[:n_fc]
-        fcols = st.columns(n_fc)
-        filter_selected = {}
-        filter_text = {}
-        for i, col in enumerate(filter_cols):
-            with fcols[i]:
-                uniq_vals = sorted({str(r.get(col, "") or "").strip() for r in rows_shown if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
-                if len(uniq_vals) <= 60 and len(uniq_vals) >= 1:
-                    sel = st.multiselect(col, uniq_vals, default=[], key=f"f_{key_suffix}_sel_{col}", label_visibility="collapsed", placeholder="All")
-                    filter_selected[col] = sel if sel else None
-                else:
-                    filter_selected[col] = None
-                txt = st.text_input("Search " + col, key=f"f_{key_suffix}_txt_{col}", label_visibility="collapsed", placeholder="Type…")
-                filter_text[col] = (txt or "").strip() or None
-        if any(filter_selected.get(c) for c in filter_cols) or any(filter_text.get(c) for c in filter_cols):
-            for col in filter_cols:
-                sel_list = filter_selected.get(col)
-                search_t = filter_text.get(col)
-                if sel_list:
-                    allowed = {str(s).strip().lower() for s in sel_list}
-                    rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
-                if search_t:
-                    q = search_t.lower()
-                    rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
+    # Filter by column (dropdown list) — always show; use "Select all" to clear column filters
+    st.markdown("**Filter by column**")
+    st.caption("**Type** to filter by text, or **select one or more values**. Use **Select all** to show all values in a column. Combine columns to narrow.")
+    _select_all_key = f"f_{key_suffix}_select_all"
+    if st.button("Select all", key=f"{_select_all_key}_btn", help="Clear column filters by selecting all values for each column"):
+        st.session_state[_select_all_key] = True
+        _rerun()
+    _select_all_trigger = st.session_state.pop(_select_all_key, False)
+    n_fc = min(12, len(cols))
+    filter_cols = cols[:n_fc]
+    fcols = st.columns(n_fc)
+    filter_selected = {}
+    filter_text = {}
+    for i, col in enumerate(filter_cols):
+        with fcols[i]:
+            uniq_vals = sorted({str(r.get(col, "") or "").strip() for r in rows_shown if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
+            if len(uniq_vals) <= 60 and len(uniq_vals) >= 1:
+                _default = uniq_vals if _select_all_trigger else []
+                sel = st.multiselect(col, uniq_vals, default=_default, key=f"f_{key_suffix}_sel_{col}", label_visibility="collapsed", placeholder="All")
+                filter_selected[col] = sel if sel else None
+            else:
+                filter_selected[col] = None
+            txt = st.text_input("Search " + col, key=f"f_{key_suffix}_txt_{col}", label_visibility="collapsed", placeholder="Type…")
+            filter_text[col] = (txt or "").strip() or None
+    if any(filter_selected.get(c) for c in filter_cols) or any(filter_text.get(c) for c in filter_cols):
+        for col in filter_cols:
+            sel_list = filter_selected.get(col)
+            search_t = filter_text.get(col)
+            if sel_list:
+                allowed = {str(s).strip().lower() for s in sel_list}
+                rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
+            if search_t:
+                q = search_t.lower()
+                rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
     # Filter by one column: hidden for now; use column filters above instead
     if False:
         with st.expander("Filter by one column (optional)", expanded=False):
@@ -2630,7 +2641,32 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         if str(c).strip().lower() in ("status", "status__c"):
             status_col = c
             break
-    if _HAS_AGGRI and HAS_EXCEL and not df_display.empty:
+    if status_col and not df_display.empty:
+        # Use styled dataframe so status color coding always works (AgGrid JS styling unreliable in streamlit-aggrid)
+        def _row_bg(row):
+            v = (str(row[status_col]) if row[status_col] is not None else "").strip()
+            low = v.lower()
+            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
+                return [f"background-color: {_no_status_bg}; color: white"] * len(row)
+            key = None
+            if low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low):
+                key = "Vacant"
+            elif low == "churning": key = "Churning"
+            elif low == "occupied": key = "Occupied"
+            elif low == "sold": key = "Sold"
+            bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
+            if key == "Vacant" and bg:
+                def _val_filled(c):
+                    s = (str(row.get(c, "") or "")).strip()
+                    return bool(s and s.lower() not in ("nan", "none"))
+                has_opp = any(_val_filled(c) for c in row.index if "opportunity" in str(c).lower())
+                if has_opp:
+                    bg = _status_colors.get("Occupied", bg)
+            style = f"background-color: {bg}" if bg else ""
+            return [style] * len(row)
+        styled = df_display.style.apply(_row_bg, axis=1)
+        st.dataframe(styled, use_container_width=True, hide_index=True, height=700)
+    elif _HAS_AGGRI and HAS_EXCEL and not df_display.empty:
         st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
         gb = GridOptionsBuilder.from_dataframe(df_display)
         gb.configure_default_column(
@@ -2678,31 +2714,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             theme="streamlit",
             show_toolbar=True,
             show_search=True,
+            allow_unsafe_jscode=True,
         )
-    elif status_col and not df_display.empty:
-        def _row_bg(row):
-            v = (str(row[status_col]) if row[status_col] is not None else "").strip()
-            low = v.lower()
-            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                return [f"background-color: {_no_status_bg}; color: white"] * len(row)
-            key = None
-            if low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low):
-                key = "Vacant"
-            elif low == "churning": key = "Churning"
-            elif low == "occupied": key = "Occupied"
-            elif low == "sold": key = "Sold"
-            bg = _status_colors.get(key, "") if key else _status_colors.get(v, "")
-            if key == "Vacant" and bg:
-                def _val_filled(c):
-                    s = (str(row.get(c, "") or "")).strip()
-                    return bool(s and s.lower() not in ("nan", "none"))
-                has_opp = any(_val_filled(c) for c in row.index if "opportunity" in str(c).lower())
-                if has_opp:
-                    bg = _status_colors.get("Occupied", bg)
-            style = f"background-color: {bg}" if bg else ""
-            return [style] * len(row)
-        styled = df_display.style.apply(_row_bg, axis=1)
-        st.dataframe(styled, use_container_width=True, hide_index=True, height=700)
     else:
         st.dataframe(df_display, use_container_width=True, hide_index=True, height=700)
     # CSV download disabled app-wide (no Download CSV button)
@@ -3805,42 +3818,47 @@ def main():
                         term = search_combined.strip().lower()
                         rows_shown = [r for r in rows_shown if any(term in str(r.get(k) or "").lower() for k in cols_combined)]
                     st.divider()
-                    # Filter by column (app UI) only when not using in-sheet header filters (AgGrid)
-                    if not _HAS_AGGRI:
-                        st.markdown("**Filter by column**")
-                        st.caption("Type to search or select one or more values per column. Combine with search above and conditional filters below.")
-                        n_fc = min(12, len(cols_combined))
-                        filter_cols_c = cols_combined[:n_fc]
-                        fcols_c = st.columns(n_fc)
-                        filter_sel_c = {}
-                        filter_txt_c = {}
-                        # Use a sample of rows to build options when many rows (keeps UI responsive when all facilities selected)
-                        _sample_for_opts = rows_shown if len(rows_shown) <= 2000 else rows_shown[:2000]
-                        for i, col in enumerate(filter_cols_c):
-                            with fcols_c[i]:
-                                try:
-                                    uniq_c = sorted({str(r.get(col, "") or "").strip() for r in _sample_for_opts if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
-                                    if len(uniq_c) > 100:
-                                        uniq_c = uniq_c[:100]
-                                    if len(uniq_c) <= 60 and len(uniq_c) >= 1:
-                                        sel_c = st.multiselect(col, uniq_c, default=[], key=f"master_combined_sel_{col}", label_visibility="collapsed", placeholder="All")
-                                        filter_sel_c[col] = sel_c if sel_c else None
-                                    else:
-                                        filter_sel_c[col] = None
-                                except Exception:
+                    # Filter by column (dropdown list) — always show; use "Select all" to clear column filters
+                    st.markdown("**Filter by column**")
+                    st.caption("Type to search or select one or more values per column. Use **Select all** to show all. Combine with search above and conditional filters below.")
+                    _sel_all_c = "master_combined_select_all"
+                    if st.button("Select all", key=f"{_sel_all_c}_btn", help="Select all values for each column (clear column filters)"):
+                        st.session_state[_sel_all_c] = True
+                        _rerun()
+                    _sel_all_trigger_c = st.session_state.pop(_sel_all_c, False)
+                    n_fc = min(12, len(cols_combined))
+                    filter_cols_c = cols_combined[:n_fc]
+                    fcols_c = st.columns(n_fc)
+                    filter_sel_c = {}
+                    filter_txt_c = {}
+                    # Use a sample of rows to build options when many rows (keeps UI responsive when all facilities selected)
+                    _sample_for_opts = rows_shown if len(rows_shown) <= 2000 else rows_shown[:2000]
+                    for i, col in enumerate(filter_cols_c):
+                        with fcols_c[i]:
+                            try:
+                                uniq_c = sorted({str(r.get(col, "") or "").strip() for r in _sample_for_opts if (r.get(col) or "") not in (None, "") and str(r.get(col, "")).strip()})
+                                if len(uniq_c) > 100:
+                                    uniq_c = uniq_c[:100]
+                                if len(uniq_c) <= 60 and len(uniq_c) >= 1:
+                                    _default_c = uniq_c if _sel_all_trigger_c else []
+                                    sel_c = st.multiselect(col, uniq_c, default=_default_c, key=f"master_combined_sel_{col}", label_visibility="collapsed", placeholder="All")
+                                    filter_sel_c[col] = sel_c if sel_c else None
+                                else:
                                     filter_sel_c[col] = None
-                                txt_c = st.text_input("Search " + col, key=f"master_combined_txt_{col}", label_visibility="collapsed", placeholder="Type…")
-                                filter_txt_c[col] = (txt_c or "").strip() or None
-                        if any(filter_sel_c.get(c) for c in filter_cols_c) or any(filter_txt_c.get(c) for c in filter_cols_c):
-                            for col in filter_cols_c:
-                                sel_list = filter_sel_c.get(col)
-                                search_t = filter_txt_c.get(col)
-                                if sel_list:
-                                    allowed = {str(s).strip().lower() for s in sel_list}
-                                    rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
-                                if search_t:
-                                    q = search_t.lower()
-                                    rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
+                            except Exception:
+                                filter_sel_c[col] = None
+                            txt_c = st.text_input("Search " + col, key=f"master_combined_txt_{col}", label_visibility="collapsed", placeholder="Type…")
+                            filter_txt_c[col] = (txt_c or "").strip() or None
+                    if any(filter_sel_c.get(c) for c in filter_cols_c) or any(filter_txt_c.get(c) for c in filter_cols_c):
+                        for col in filter_cols_c:
+                            sel_list = filter_sel_c.get(col)
+                            search_t = filter_txt_c.get(col)
+                            if sel_list:
+                                allowed = {str(s).strip().lower() for s in sel_list}
+                                rows_shown = [r for r in rows_shown if str(r.get(col) or "").strip().lower() in allowed]
+                            if search_t:
+                                q = search_t.lower()
+                                rows_shown = [r for r in rows_shown if q in str(r.get(col) or "").lower()]
                     _show_conditional_filters = _is_developer() or st.session_state.get("user_role") == "super_user"
                     if _show_conditional_filters:
                         with st.expander("Conditional filters (AND)", expanded=False):
@@ -3872,11 +3890,28 @@ def main():
                         if str(c).strip().lower() in ("status", "status__c"):
                             status_col_combined = c
                             break
-                    if _HAS_AGGRI and not df_combined.empty:
+                    if status_col_combined and not df_combined.empty:
+                        # Use styled dataframe so status color coding always works
+                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                        _ns = "#B22222"
+                        def _row_bg_combined(row):
+                            v = (str(row[status_col_combined]) if row[status_col_combined] is not None else "").strip()
+                            low = v.lower()
+                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
+                                return [f"background-color: {_ns}; color: white"] * len(row)
+                            key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                            bg = _sc.get(key, "") if key else _sc.get(v, "")
+                            if key == "Vacant" and bg:
+                                has_opp = row.get("_has_opportunity", False)
+                                if has_opp:
+                                    bg = _sc.get("Occupied", bg)
+                            return [f"background-color: {bg}" if bg else ""] * len(row)
+                        df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
+                        st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                    elif _HAS_AGGRI and not df_combined.empty:
                         st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
-                        _ag_cols = [c for c in df_combined.columns if c != "_has_opportunity"]
-                        _df_ag = df_combined[_ag_cols].copy()
-                        gb = GridOptionsBuilder.from_dataframe(_df_ag)
+                        # Keep _has_opportunity in data for row styling but hide it in the grid
+                        gb = GridOptionsBuilder.from_dataframe(df_combined)
                         gb.configure_default_column(
                             filter=True,
                             sortable=True,
@@ -3886,10 +3921,10 @@ def main():
                             suppressHeaderFilterButton=False,
                             menuTabs=["filterMenuTab", "generalMenuTab"],
                         )
-                        for col in _df_ag.columns:
-                            if pd.api.types.is_numeric_dtype(_df_ag[col]):
+                        for col in df_combined.columns:
+                            if pd.api.types.is_numeric_dtype(df_combined[col]):
                                 gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
-                            elif pd.api.types.is_datetime64_any_dtype(_df_ag[col]):
+                            elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
                                 gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
                             else:
                                 gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
@@ -3914,32 +3949,18 @@ def main():
                             cdef["suppressHeaderFilterButton"] = False
                             if cdef.get("type") == []:
                                 cdef.pop("type", None)
+                            if cdef.get("field") == "_has_opportunity":
+                                cdef["hide"] = True
                         AgGrid(
-                            _df_ag,
+                            df_combined,
                             gridOptions=go,
                             use_container_width=True,
                             height=700,
                             theme="streamlit",
                             show_toolbar=True,
                             show_search=True,
+                            allow_unsafe_jscode=True,
                         )
-                    elif status_col_combined and not df_combined.empty:
-                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                        _ns = "#B22222"
-                        def _row_bg_combined(row):
-                            v = (str(row[status_col_combined]) if row[status_col_combined] is not None else "").strip()
-                            low = v.lower()
-                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                                return [f"background-color: {_ns}; color: white"] * len(row)
-                            key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
-                            bg = _sc.get(key, "") if key else _sc.get(v, "")
-                            if key == "Vacant" and bg:
-                                has_opp = row.get("_has_opportunity", False)
-                                if has_opp:
-                                    bg = _sc.get("Occupied", bg)
-                            return [f"background-color: {bg}" if bg else ""] * len(row)
-                        df_combined = df_combined.style.apply(_row_bg_combined, axis=1)
-                        st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
                     else:
                         st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
         if not rows and not is_other_sheet and chosen_label:
@@ -3969,56 +3990,123 @@ def main():
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
+                display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                 if _HAS_AGGRI:
-                    # Excel-style header filters on the sheet only (no separate app filter UI)
-                    gb = GridOptionsBuilder.from_dataframe(display_df)
-                    gb.configure_default_column(
-                        filter=True,
-                        sortable=True,
-                        resizable=True,
-                        floatingFilter=True,
-                        suppressHeaderMenuButton=False,
-                        suppressHeaderFilterButton=False,
-                        menuTabs=["filterMenuTab", "generalMenuTab"],
-                    )
-                    for col in display_df.columns:
-                        if pd.api.types.is_numeric_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
-                        elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
-                        else:
-                            gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
-                    gb.configure_grid_options(
-                        domLayout="normal",
-                        suppressMenuHide=False,
-                        columnMenu="legacy",
-                        floatingFiltersHeight=40,
-                    )
-                    gb.configure_side_bar(filters_panel=False, columns_panel=False)
-                    go = gb.build()
-                    if "defaultColDef" not in go:
-                        go["defaultColDef"] = {}
-                    go["defaultColDef"]["filter"] = True
-                    go["defaultColDef"]["floatingFilter"] = True
-                    go["defaultColDef"]["suppressHeaderMenuButton"] = False
-                    go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                    go["floatingFiltersHeight"] = 40
-                    for cdef in go.get("columnDefs") or []:
-                        cdef["filter"] = True
-                        cdef["floatingFilter"] = True
-                        cdef["suppressHeaderFilterButton"] = False
-                        if cdef.get("type") == []:
-                            cdef.pop("type", None)
-                    st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
-                    AgGrid(
-                        display_df,
-                        gridOptions=go,
-                        use_container_width=True,
-                        height=700,
-                        theme="streamlit",
-                        show_toolbar=True,
-                        show_search=True,
-                    )
+                    # Filter by column dropdown + Select all
+                    st.markdown("**Filter by column**")
+                    st.caption("**Type** or **select values** per column. Use **Select all** to show all. Combine with ⋮ menu on the table.")
+                    _sel_all_m = "master_sheet_select_all"
+                    if st.button("Select all", key=f"{_sel_all_m}_btn", help="Select all values for each column"):
+                        st.session_state[_sel_all_m] = True
+                        _rerun()
+                    _sel_all_m_trigger = st.session_state.pop(_sel_all_m, False)
+                    cols_list = list(display_df.columns)
+                    cols_list = [c for c in cols_list if c != "_has_opportunity"]
+                    n_fc_m = min(12, len(cols_list))
+                    filter_cols_m = cols_list[:n_fc_m]
+                    use_cols_m = st.columns(n_fc_m)
+                    filter_selected_m = {}
+                    filter_text_m = {}
+                    for i, col in enumerate(filter_cols_m):
+                        with use_cols_m[i]:
+                            ser = display_df[col].dropna().astype(str).str.strip()
+                            uniq = ser[ser != ""].unique()
+                            opts = sorted(uniq.tolist()) if len(uniq) > 0 else []
+                            if len(opts) <= 60:
+                                _def_m = opts if _sel_all_m_trigger else []
+                                sel = st.multiselect(col, options=opts, default=_def_m, key=f"master_f_sel_{col}", label_visibility="collapsed", placeholder="All" if len(opts) > 1 else (opts[0] if opts else col))
+                                filter_selected_m[col] = sel if sel else None
+                            else:
+                                filter_selected_m[col] = None
+                            txt = st.text_input("Search " + col, key=f"master_f_txt_{col}", label_visibility="collapsed", placeholder="Type to filter…")
+                            filter_text_m[col] = (txt or "").strip() or None
+                    has_filter_m = any(filter_selected_m.get(c) for c in filter_cols_m) or any(filter_text_m.get(c) for c in filter_cols_m)
+                    if has_filter_m:
+                        mask = pd.Series(True, index=display_df.index)
+                        for col in filter_cols_m:
+                            sel_list = filter_selected_m.get(col)
+                            search_t = filter_text_m.get(col)
+                            col_ser = display_df[col].astype(str).str.strip().str.lower()
+                            if sel_list:
+                                allowed = {s.strip().lower() for s in sel_list}
+                                mask &= col_ser.isin(allowed)
+                            if search_t:
+                                q = search_t.lower()
+                                mask &= col_ser.str.contains(q, regex=False, na=False)
+                        display_df = display_df.loc[mask].reset_index(drop=True)
+                    # Excel-style header filters on the sheet + color coding when no Status column; when Status exists use styled table so colors work
+                    status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
+                    if status_col_ag and not display_df.empty:
+                        # Use styled dataframe so status color coding always works
+                        _sc_ag = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                        _ns_ag = "#B22222"
+                        def _row_bg_ag(row):
+                            v = (str(row[status_col_ag]) if row[status_col_ag] is not None else "").strip()
+                            low = v.lower()
+                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
+                                return [f"background-color: {_ns_ag}; color: white"] * len(row)
+                            key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                            bg = _sc_ag.get(key, "") if key else _sc_ag.get(v, "")
+                            if key == "Vacant" and bg:
+                                has_opp = row.get("_has_opportunity", False)
+                                if has_opp:
+                                    bg = _sc_ag.get("Occupied", bg)
+                            return [f"background-color: {bg}" if bg else ""] * len(row)
+                        display_df = display_df.style.apply(_row_bg_ag, axis=1)
+                        st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                    else:
+                        # No status column: use AgGrid with header filters
+                        gb = GridOptionsBuilder.from_dataframe(display_df)
+                        gb.configure_default_column(
+                            filter=True,
+                            sortable=True,
+                            resizable=True,
+                            floatingFilter=True,
+                            suppressHeaderMenuButton=False,
+                            suppressHeaderFilterButton=False,
+                            menuTabs=["filterMenuTab", "generalMenuTab"],
+                        )
+                        for col in display_df.columns:
+                            if pd.api.types.is_numeric_dtype(display_df[col]):
+                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
+                            elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
+                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+                            else:
+                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
+                        gb.configure_grid_options(
+                            domLayout="normal",
+                            suppressMenuHide=False,
+                            columnMenu="legacy",
+                            floatingFiltersHeight=40,
+                        )
+                        gb.configure_side_bar(filters_panel=False, columns_panel=False)
+                        go = gb.build()
+                        if "defaultColDef" not in go:
+                            go["defaultColDef"] = {}
+                        go["defaultColDef"]["filter"] = True
+                        go["defaultColDef"]["floatingFilter"] = True
+                        go["defaultColDef"]["suppressHeaderMenuButton"] = False
+                        go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                        go["floatingFiltersHeight"] = 40
+                        for cdef in go.get("columnDefs") or []:
+                            cdef["filter"] = True
+                            cdef["floatingFilter"] = True
+                            cdef["suppressHeaderFilterButton"] = False
+                            if cdef.get("type") == []:
+                                cdef.pop("type", None)
+                            if cdef.get("field") == "_has_opportunity":
+                                cdef["hide"] = True
+                        st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
+                        AgGrid(
+                            display_df,
+                            gridOptions=go,
+                            use_container_width=True,
+                            height=700,
+                            theme="streamlit",
+                            show_toolbar=True,
+                            show_search=True,
+                            allow_unsafe_jscode=True,
+                        )
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
