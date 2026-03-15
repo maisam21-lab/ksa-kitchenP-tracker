@@ -2651,15 +2651,6 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
-    # Facility filter above the sheet (multi-select)
-    _fac_col = _get_facility_column(list(rows[0].keys()) if rows else [])
-    if _fac_col and rows_shown:
-        _fac_vals = sorted({str(r.get(_fac_col) or "").strip() for r in rows_shown if str(r.get(_fac_col) or "").strip()})
-        if _fac_vals:
-            _fac_key = f"facility_filter_{key_suffix}"
-            _selected_fac = st.multiselect("**Facility** — filter table by facility (multi-select)", options=_fac_vals, default=_fac_vals, key=_fac_key, placeholder="All facilities")
-            if _selected_fac and 0 < len(_selected_fac) < len(_fac_vals):
-                rows_shown = [r for r in rows_shown if str(r.get(_fac_col) or "").strip() in _selected_fac]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s). Filter using the **⋮ menu** on each column header in the table below.")
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
@@ -3797,13 +3788,6 @@ def main():
                         cols_combined = sorted(_df_temp.columns.tolist())
                     cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     rows_shown = combined_rows
-                    _fac_col_c = _get_facility_column(cols_combined)
-                    if _fac_col_c and rows_shown:
-                        _fac_vals_c = sorted({str(r.get(_fac_col_c) or "").strip() for r in rows_shown if str(r.get(_fac_col_c) or "").strip()})
-                        if _fac_vals_c:
-                            _selected_fac_c = st.multiselect("**Facility** — filter table by facility (multi-select)", options=_fac_vals_c, default=_fac_vals_c, key="facility_filter_combined", placeholder="All facilities")
-                            if _selected_fac_c and 0 < len(_selected_fac_c) < len(_fac_vals_c):
-                                rows_shown = [r for r in rows_shown if str(r.get(_fac_col_c) or "").strip() in _selected_fac_c]
                     st.divider()
                     st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s). Filter using the **⋮ menu** on column headers below.")
                     df_combined = pd.DataFrame(rows_shown)
@@ -3900,14 +3884,6 @@ def main():
                 all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                 cols_to_show = all_cols
                 rows_display = rows_filtered
-                # Facility filter above the sheet (multi-select)
-                _fac_col_m = _get_facility_column(all_cols)
-                if _fac_col_m and rows_display:
-                    _fac_vals_m = sorted({str(r.get(_fac_col_m) or "").strip() for r in rows_display if str(r.get(_fac_col_m) or "").strip()})
-                    if _fac_vals_m:
-                        _selected_fac_m = st.multiselect("**Facility** — filter table by facility (multi-select)", options=_fac_vals_m, default=_fac_vals_m, key="facility_filter_master", placeholder="All facilities")
-                        if _selected_fac_m and 0 < len(_selected_fac_m) < len(_fac_vals_m):
-                            rows_display = [r for r in rows_display if str(r.get(_fac_col_m) or "").strip() in _selected_fac_m]
             if not use_facility_tabs and rows_display is not None:
                 st.caption(f"**{len(rows_display)}** rows")
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
