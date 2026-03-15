@@ -2497,13 +2497,28 @@ def _kitchens_column_order(cols: list[str]) -> list[str]:
 
 
 def _get_facility_column(keys: list) -> str | None:
-    """Return the column name used for facility/account name, or None. Prefer Account Name, then Facility."""
+    """Return the column name used for facility/account name, or None. Prefer Account Name, then Facility. Case-insensitive and flexible."""
     if not keys:
         return None
-    for name in ("Account Name", "Account__r.Name", "Facility", "facility", "Account Name__c"):
+    preferred = ("Account Name", "Account__r.Name", "Facility", "Account Name__c", "Account_Name__c", "Facility__c", "facility_name", "account_name", "Facility Name")
+    for name in preferred:
         for k in keys:
-            if str(k).strip() == name:
+            if str(k).strip().lower() == name.lower():
                 return k
+    def _norm(s):
+        return re.sub(r"[\s_\.]+", "", str(s).lower()).replace("__c", "")
+    for k in keys:
+        n = _norm(k)
+        if n in ("accountname", "facility", "facilityname", "accountnamec"):
+            return k
+        if "account" in n and "name" in n and "country" not in n:
+            return k
+        if "facility" in n and "country" not in n and "go" not in n and "live" not in n:
+            return k
+    # Fallback: first column with "Name" in the name (and not Country)
+    for k in keys:
+        if "name" in str(k).lower() and "country" not in str(k).lower():
+            return k
     return None
 
 
@@ -2626,13 +2641,13 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
-    # Facility filter (multi-select)
+    # Facility filter above the sheet (multi-select)
     _fac_col = _get_facility_column(list(rows[0].keys()) if rows else [])
     if _fac_col and rows_shown:
         _fac_vals = sorted({str(r.get(_fac_col) or "").strip() for r in rows_shown if str(r.get(_fac_col) or "").strip()})
         if _fac_vals:
             _fac_key = f"facility_filter_{key_suffix}"
-            _selected_fac = st.multiselect("Facility", options=_fac_vals, default=_fac_vals, key=_fac_key, placeholder="All facilities")
+            _selected_fac = st.multiselect("**Facility** — filter table by facility (multi-select)", options=_fac_vals, default=_fac_vals, key=_fac_key, placeholder="All facilities")
             if _selected_fac and 0 < len(_selected_fac) < len(_fac_vals):
                 rows_shown = [r for r in rows_shown if str(r.get(_fac_col) or "").strip() in _selected_fac]
     st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s). Filter using the **⋮ menu** on each column header in the table below.")
@@ -3758,7 +3773,7 @@ def main():
                     if _fac_col_c and rows_shown:
                         _fac_vals_c = sorted({str(r.get(_fac_col_c) or "").strip() for r in rows_shown if str(r.get(_fac_col_c) or "").strip()})
                         if _fac_vals_c:
-                            _selected_fac_c = st.multiselect("Facility", options=_fac_vals_c, default=_fac_vals_c, key="facility_filter_combined", placeholder="All facilities")
+                            _selected_fac_c = st.multiselect("**Facility** — filter table by facility (multi-select)", options=_fac_vals_c, default=_fac_vals_c, key="facility_filter_combined", placeholder="All facilities")
                             if _selected_fac_c and 0 < len(_selected_fac_c) < len(_fac_vals_c):
                                 rows_shown = [r for r in rows_shown if str(r.get(_fac_col_c) or "").strip() in _selected_fac_c]
                     st.divider()
@@ -3849,8 +3864,6 @@ def main():
             rows_filtered = [r for r in rows if not _is_empty_record(r)]
             rows_display = rows_filtered  # used for table; updated by column filters when applied
             st.markdown("---")
-            if not use_facility_tabs:
-                st.caption(f"**{len(rows_display)}** rows")
             if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
                 st.info("No data in this source.")
             if rows_filtered and not use_facility_tabs:
@@ -3859,13 +3872,16 @@ def main():
                 all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                 cols_to_show = all_cols
                 rows_display = rows_filtered
+                # Facility filter above the sheet (multi-select)
                 _fac_col_m = _get_facility_column(all_cols)
                 if _fac_col_m and rows_display:
                     _fac_vals_m = sorted({str(r.get(_fac_col_m) or "").strip() for r in rows_display if str(r.get(_fac_col_m) or "").strip()})
                     if _fac_vals_m:
-                        _selected_fac_m = st.multiselect("Facility", options=_fac_vals_m, default=_fac_vals_m, key="facility_filter_master", placeholder="All facilities")
+                        _selected_fac_m = st.multiselect("**Facility** — filter table by facility (multi-select)", options=_fac_vals_m, default=_fac_vals_m, key="facility_filter_master", placeholder="All facilities")
                         if _selected_fac_m and 0 < len(_selected_fac_m) < len(_fac_vals_m):
                             rows_display = [r for r in rows_display if str(r.get(_fac_col_m) or "").strip() in _selected_fac_m]
+            if not use_facility_tabs and rows_display is not None:
+                st.caption(f"**{len(rows_display)}** rows")
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
