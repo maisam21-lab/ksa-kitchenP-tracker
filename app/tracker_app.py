@@ -2655,7 +2655,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                 uniq = ser[ser != ""].unique()
                 if len(uniq) <= _max_set_filter_values:
                     vals = sorted(uniq.tolist(), key=str)
-                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals}, floatingFilter=False)
+                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
                 else:
                     gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
         gb.configure_grid_options(
@@ -3768,7 +3768,7 @@ def main():
                                 uniq = ser[ser != ""].unique()
                                 if len(uniq) <= _max_set_combined:
                                     vals = sorted(uniq.tolist(), key=str)
-                                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals}, floatingFilter=False)
+                                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
                                 else:
                                     gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
                         gb.configure_grid_options(
@@ -3858,7 +3858,7 @@ def main():
                             uniq = ser[ser != ""].unique()
                             if len(uniq) <= _max_set_master:
                                 vals = sorted(uniq.tolist(), key=str)
-                                gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals}, floatingFilter=False)
+                                gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
                             else:
                                 gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
                     gb.configure_grid_options(
