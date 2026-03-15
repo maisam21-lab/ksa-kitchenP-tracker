@@ -2615,7 +2615,39 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
-    st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s). Filter using the **⋮ menu** on each column header in the table below.")
+    # Filter dropdowns: one per column with few unique values (dropdown list with all options, multi-select)
+    _max_dropdown_cols = 8
+    _max_dropdown_values = 80
+    _filter_cols = []
+    if rows_shown and cols:
+        for c in cols:
+            if c in (rows_shown[0].keys() if rows_shown else []):
+                uniq_vals = sorted({str(r.get(c) or "").strip() for r in rows_shown if str(r.get(c) or "").strip()})
+                if 1 <= len(uniq_vals) <= _max_dropdown_values and len(_filter_cols) < _max_dropdown_cols:
+                    _filter_cols.append((c, uniq_vals))
+    if _filter_cols:
+        st.caption("**Filter by column** — type in the search box or choose one or more values from the dropdown; table shows matching rows.")
+        _n = len(_filter_cols)
+        _fcols = st.columns(min(_n, 4))
+        _selections = {}
+        _text_filters = {}
+        for i, (col_name, options) in enumerate(_filter_cols):
+            with _fcols[i % len(_fcols)]:
+                _key = f"f_drop_{key_suffix}_{col_name}"
+                _txt_key = f"f_txt_{key_suffix}_{col_name}"
+                txt = st.text_input(f"Type to filter {col_name}", key=_txt_key, placeholder="Type…", label_visibility="collapsed")
+                _text_filters[col_name] = (txt or "").strip()
+                selected = st.multiselect(col_name, options=options, default=options, key=_key, placeholder="Or choose values")
+                _selections[col_name] = selected if selected is not None else options
+        for col_name, selected in _selections.items():
+            options = next(opt for c, opt in _filter_cols if c == col_name)
+            if 0 < len(selected) < len(options):
+                rows_shown = [r for r in rows_shown if str(r.get(col_name) or "").strip() in selected]
+        for col_name, q in _text_filters.items():
+            if q:
+                q_lower = q.lower()
+                rows_shown = [r for r in rows_shown if q_lower in str(r.get(col_name) or "").lower()]
+    st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s). Use **⋮ menu** on column headers to sort or filter further.")
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
@@ -2693,6 +2725,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             show_toolbar=True,
             show_search=True,
             show_download_button=False,
+            enable_enterprise_modules=True,
             allow_unsafe_jscode=True,
         )
     else:
@@ -3733,8 +3766,28 @@ def main():
                         cols_combined = sorted(_df_temp.columns.tolist())
                     cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     rows_shown = combined_rows
+                    # Dropdown filters with all options (multi-select)
+                    _max_dd_cols, _max_dd_vals = 8, 80
+                    _fc = [(c, sorted({str(r.get(c) or "").strip() for r in rows_shown if str(r.get(c) or "").strip()})) for c in cols_combined if 1 <= len({str(r.get(c) or "").strip() for r in rows_shown if str(r.get(c) or "").strip()}) <= _max_dd_vals][:_max_dd_cols]
+                    if _fc:
+                        st.caption("**Filter by column** — type in the search box or choose values from the dropdown.")
+                        _fcols = st.columns(min(len(_fc), 4))
+                        _sel = {}
+                        _txt_f = {}
+                        for i, (cn, opts) in enumerate(_fc):
+                            with _fcols[i % len(_fcols)]:
+                                txt = st.text_input(f"Type to filter {cn}", key=f"f_combined_txt_{cn}", placeholder="Type…", label_visibility="collapsed")
+                                _txt_f[cn] = (txt or "").strip()
+                                _sel[cn] = st.multiselect(cn, options=opts, default=opts, key=f"f_combined_{cn}", placeholder="Or choose values")
+                        for cn, selected in _sel.items():
+                            opts = next(o for c, o in _fc if c == cn)
+                            if 0 < len(selected) < len(opts):
+                                rows_shown = [r for r in rows_shown if str(r.get(cn) or "").strip() in selected]
+                        for cn, q in _txt_f.items():
+                            if q:
+                                rows_shown = [r for r in rows_shown if q.lower() in str(r.get(cn) or "").lower()]
                     st.divider()
-                    st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s). Filter using the **⋮ menu** on column headers below.")
+                    st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s). Use **⋮ menu** on column headers to sort or filter further.")
                     df_combined = pd.DataFrame(rows_shown)
                     _disp_cols = [c for c in df_combined.columns if c in cols_combined]
                     if _disp_cols:
@@ -3806,6 +3859,7 @@ def main():
                             show_toolbar=True,
                             show_search=True,
                             show_download_button=False,
+                            enable_enterprise_modules=True,
                             allow_unsafe_jscode=True,
                         )
                     else:
@@ -3830,6 +3884,26 @@ def main():
                 all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                 cols_to_show = all_cols
                 rows_display = rows_filtered
+                # Dropdown filters with all options (multi-select)
+                _max_dd_cols_m, _max_dd_vals_m = 8, 80
+                _fc_m = [(c, sorted({str(r.get(c) or "").strip() for r in rows_display if str(r.get(c) or "").strip()})) for c in all_cols if 1 <= len({str(r.get(c) or "").strip() for r in rows_display if str(r.get(c) or "").strip()}) <= _max_dd_vals_m][:_max_dd_cols_m]
+                if _fc_m:
+                    st.caption("**Filter by column** — type in the search box or choose values from the dropdown.")
+                    _fcols_m = st.columns(min(len(_fc_m), 4))
+                    _sel_m = {}
+                    _txt_m = {}
+                    for i, (cn, opts) in enumerate(_fc_m):
+                        with _fcols_m[i % len(_fcols_m)]:
+                            txt = st.text_input(f"Type to filter {cn}", key=f"f_master_txt_{cn}", placeholder="Type…", label_visibility="collapsed")
+                            _txt_m[cn] = (txt or "").strip()
+                            _sel_m[cn] = st.multiselect(cn, options=opts, default=opts, key=f"f_master_{cn}", placeholder="Or choose values")
+                    for cn, selected in _sel_m.items():
+                        opts = next(o for c, o in _fc_m if c == cn)
+                        if 0 < len(selected) < len(opts):
+                            rows_display = [r for r in rows_display if str(r.get(cn) or "").strip() in selected]
+                    for cn, q in _txt_m.items():
+                        if q:
+                            rows_display = [r for r in rows_display if q.lower() in str(r.get(cn) or "").lower()]
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
@@ -3897,6 +3971,7 @@ def main():
                         show_toolbar=True,
                         show_search=True,
                         show_download_button=False,
+                        enable_enterprise_modules=True,
                         allow_unsafe_jscode=True,
                     )
                 else:
