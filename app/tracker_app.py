@@ -1485,13 +1485,23 @@ MASTER_KITCHENS_TAB_SHEETS = [
 ]
 
 
-# Tab IDs hidden from Kitchen Master Data (users don't see these in the sheet dropdown)
-MASTER_KITCHENS_HIDDEN_TABS = {"KSA Facility details", "SF Churn Data"}
+# Tab IDs hidden from Kitchen Master Data facility/sheet filter (these sheets are excluded from the dropdown)
+# Per user: exclude Auto Refresh Execution Log, SF Kitchen Data, SF Churn Data, KSA Facility details, Pivot Table 11
+MASTER_KITCHENS_HIDDEN_TABS = {
+    "Auto Refresh Execution Log",
+    "KSA Facility details",
+    "SF Churn Data",
+    "SF Kitchen Data",
+    "Kitchens",
+    "Master Kitchens list",
+    "Pivot Table 11",
+}
 
 
 def _master_kitchens_other_sheet_ids() -> list[str]:
-    """Sheet tab IDs shown in Kitchen Master Data Tab dropdown. Only tabs loaded from GSheet; KSA Facility / SF Churn Data hidden."""
-    return [t for t in list_tab_ids_for_source("gsheet") if t not in MASTER_KITCHENS_HIDDEN_TABS]
+    """Sheet tab IDs shown as facilities in Kitchen Master Data. Excludes execution log, SF data, KSA facility details, pivot table 11."""
+    _hidden_lower = {s.strip().lower() for s in MASTER_KITCHENS_HIDDEN_TABS}
+    return [t for t in list_tab_ids_for_source("gsheet") if (t or "").strip().lower() not in _hidden_lower]
 
 
 def _master_kitchens_sources() -> list[tuple[str, str]]:
@@ -3675,15 +3685,24 @@ def main():
                     source_options = []
                     is_other_sheet = False
                 else:
-                    # User chose Google Sheet; use GSheet tabs (same as no-BQ path)
+                    # User chose Google Sheet; show sheet selector (multi-select: one or multiple facilities/sheets)
                     first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
-                    source_id = source_ids_gsheet.get(first_tab, first_tab)
+                    _sel_key = "master_sheets_selection"
+                    if _sel_key not in st.session_state:
+                        st.session_state[_sel_key] = list(gsheet_tab_options)
+                    _initial = st.session_state.get(_sel_key) or [first_tab]
+                    if not isinstance(_initial, list):
+                        _initial = [_initial] if _initial else [first_tab]
+                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=gsheet_tab_options, default=_initial if set(_initial) <= set(gsheet_tab_options) else [first_tab], key=_sel_key, placeholder="Select facilities")
+                    if not chosen_labels:
+                        chosen_labels = [first_tab]
+                    chosen_labels = [t for t in chosen_labels if t in gsheet_tab_options] or [first_tab]
+                    source_id = source_ids_gsheet.get(chosen_labels[0], first_tab)
                     rows = list_generic_tab(source_id, source="gsheet")
                     source_options = gsheet_tab_options
                     source_ids = source_ids_gsheet
                     chosen_label = "Master Kitchens (Google Sheet)"
                     is_other_sheet = True
-                    chosen_labels = [first_tab]
             else:
                 # BigQuery not available — try optional "BQ export" sheet (pipeline/scheduled query → Sheet)
                 _bq_export_sheet_id = (getattr(st, "secrets", None) or {}).get("bq_export_sheet_id") or ""
@@ -3736,11 +3755,20 @@ def main():
                     chosen_label = ""
                     is_other_sheet = False
                 else:
-                    # Default to first facility (no facility filter UI)
+                    # Sheet selector: multi-select so user can view one or multiple sheets
                     first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
-                    source_id = source_ids.get(first_tab, first_tab)
+                    _sel_key = "master_sheets_selection"
+                    if _sel_key not in st.session_state:
+                        st.session_state[_sel_key] = list(source_options)
+                    _initial = st.session_state.get(_sel_key) or [first_tab]
+                    if not isinstance(_initial, list):
+                        _initial = [_initial] if _initial else [first_tab]
+                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=source_options, default=_initial if set(_initial) <= set(source_options) else [first_tab], key=_sel_key, placeholder="Select facilities")
+                    if not chosen_labels:
+                        chosen_labels = [first_tab]
+                    chosen_labels = [t for t in chosen_labels if t in source_options] or [first_tab]
+                    source_id = source_ids.get(chosen_labels[0], first_tab)
                     rows = list_generic_tab(source_id, source="gsheet")
-                    chosen_labels = [first_tab]
                     is_other_sheet = True
         # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
         if is_other_sheet and chosen_labels:
