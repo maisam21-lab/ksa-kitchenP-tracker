@@ -2690,18 +2690,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
-    # Status filter + row count (e.g. "Churning (2)")
-    status_col_for_filter = next((c for c in (cols or []) if str(c).strip().lower() in ("status", "status__c")), None)
-    if status_col_for_filter and rows_shown:
-        status_labels = sorted({_normalize_status_label(r.get(status_col_for_filter)) for r in rows_shown if _normalize_status_label(r.get(status_col_for_filter))})
-        if status_labels:
-            status_filter_val = st.selectbox("Status", options=["All"] + status_labels, key=f"status_filter_{key_suffix}")
-            if status_filter_val and status_filter_val != "All":
-                rows_shown = [r for r in rows_shown if _normalize_status_label(r.get(status_col_for_filter)) == status_filter_val]
-            if status_filter_val and status_filter_val != "All":
-                st.caption(f"**{status_filter_val}** ({len(rows_shown)})")
-            else:
-                st.caption(f"**{len(rows_shown)}** rows")
+    if rows_shown:
+        st.caption(f"**{len(rows_shown)}** rows")
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
@@ -3838,17 +3828,8 @@ def main():
                         cols_combined = sorted(_df_temp.columns.tolist())
                     cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     rows_shown = combined_rows
-                    status_col_comb = next((c for c in cols_combined if str(c).strip().lower() in ("status", "status__c")), None)
-                    if status_col_comb and rows_shown:
-                        status_lbls = sorted({_normalize_status_label(r.get(status_col_comb)) for r in rows_shown if _normalize_status_label(r.get(status_col_comb))})
-                        if status_lbls:
-                            status_sel = st.selectbox("Status", options=["All"] + status_lbls, key="status_filter_combined")
-                            if status_sel and status_sel != "All":
-                                rows_shown = [r for r in rows_shown if _normalize_status_label(r.get(status_col_comb)) == status_sel]
-                            if status_sel and status_sel != "All":
-                                st.caption(f"**{status_sel}** ({len(rows_shown)})")
-                            else:
-                                st.caption(f"**{len(rows_shown)}** rows")
+                    if rows_shown:
+                        st.caption(f"**{len(rows_shown)}** rows")
                     st.divider()
                     df_combined = pd.DataFrame(rows_shown)
                     _disp_cols = [c for c in df_combined.columns if c in cols_combined]
@@ -3944,20 +3925,7 @@ def main():
                 all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                 cols_to_show = all_cols
                 rows_display = rows_filtered
-                status_col_m = next((c for c in all_cols if str(c).strip().lower() in ("status", "status__c")), None)
-                if status_col_m and rows_display:
-                    status_lbls_m = sorted({_normalize_status_label(r.get(status_col_m)) for r in rows_display if _normalize_status_label(r.get(status_col_m))})
-                    if status_lbls_m:
-                        status_sel_m = st.selectbox("Status", options=["All"] + status_lbls_m, key="status_filter_master")
-                        if status_sel_m and status_sel_m != "All":
-                            rows_display = [r for r in rows_display if _normalize_status_label(r.get(status_col_m)) == status_sel_m]
-                        if status_sel_m and status_sel_m != "All":
-                            st.caption(f"**{status_sel_m}** ({len(rows_display)})")
-                        else:
-                            st.caption(f"**{len(rows_display)}** rows")
-                    else:
-                        st.caption(f"**{len(rows_display)}** rows")
-                elif not use_facility_tabs and rows_display is not None:
+                if not use_facility_tabs and rows_display is not None:
                     st.caption(f"**{len(rows_display)}** rows")
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
