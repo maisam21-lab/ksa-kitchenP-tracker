@@ -19,16 +19,25 @@ import requests
 import streamlit as st
 
 try:
-    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode, DataReturnMode
     _HAS_AGGRI = True
 except ImportError:
     try:
-        from st_aggrid import AgGrid, GridOptionsBuilder
+        from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
         JsCode = None
         _HAS_AGGRI = True
     except ImportError:
-        JsCode = None
-        _HAS_AGGRI = False
+        try:
+            from st_aggrid import AgGrid, GridOptionsBuilder
+            JsCode = None
+            GridUpdateMode = None
+            DataReturnMode = None
+            _HAS_AGGRI = True
+        except ImportError:
+            JsCode = None
+            GridUpdateMode = None
+            DataReturnMode = None
+            _HAS_AGGRI = False
 
 try:
     from app import auth
@@ -2690,8 +2699,6 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
-    if rows_shown:
-        st.caption(f"**{len(rows_shown)}** rows")
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
@@ -2760,7 +2767,10 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                 cdef["hide"] = True
         if status_col and JsCode:
             go["getRowStyle"] = _status_get_row_style_js(status_col)
-        AgGrid(
+        _update_mode = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
+        _data_mode = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
+        _grid_kw = dict(update_mode=_update_mode, data_return_mode=_data_mode) if (_update_mode and _data_mode) else {}
+        grid_response = AgGrid(
             df_display,
             gridOptions=go,
             use_container_width=True,
@@ -2771,9 +2781,18 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             show_download_button=False,
             enable_enterprise_modules=True,
             allow_unsafe_jscode=True,
+            key=f"master_kitchens_grid_{key_suffix}",
+            **_grid_kw,
         )
+        _displayed_count = len(rows_shown)
+        if grid_response and grid_response.get("data") is not None:
+            _displayed_count = len(grid_response["data"])
+        if rows_shown:
+            st.caption(f"**{_displayed_count}** rows")
     else:
         st.dataframe(df_display, use_container_width=True, hide_index=True, height=700)
+        if rows_shown:
+            st.caption(f"**{len(rows_shown)}** rows")
     # CSV download disabled app-wide (no Download CSV button)
 
 
@@ -3828,8 +3847,6 @@ def main():
                         cols_combined = sorted(_df_temp.columns.tolist())
                     cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     rows_shown = combined_rows
-                    if rows_shown:
-                        st.caption(f"**{len(rows_shown)}** rows")
                     st.divider()
                     df_combined = pd.DataFrame(rows_shown)
                     _disp_cols = [c for c in df_combined.columns if c in cols_combined]
@@ -3893,7 +3910,10 @@ def main():
                                 cdef["hide"] = True
                         if status_col_combined and JsCode:
                             go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
-                        AgGrid(
+                        _um = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
+                        _dm = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
+                        _kw = dict(update_mode=_um, data_return_mode=_dm) if (_um and _dm) else {}
+                        grid_res = AgGrid(
                             df_combined,
                             gridOptions=go,
                             use_container_width=True,
@@ -3904,9 +3924,18 @@ def main():
                             show_download_button=False,
                             enable_enterprise_modules=True,
                             allow_unsafe_jscode=True,
+                            key="master_kitchens_grid_combined",
+                            **_kw,
                         )
+                        _cnt = len(rows_shown)
+                        if grid_res and grid_res.get("data") is not None:
+                            _cnt = len(grid_res["data"])
+                        if rows_shown:
+                            st.caption(f"**{_cnt}** rows")
                     else:
                         st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                        if rows_shown:
+                            st.caption(f"**{len(rows_shown)}** rows")
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -3925,8 +3954,6 @@ def main():
                 all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                 cols_to_show = all_cols
                 rows_display = rows_filtered
-                if not use_facility_tabs and rows_display is not None:
-                    st.caption(f"**{len(rows_display)}** rows")
             if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
@@ -3985,7 +4012,10 @@ def main():
                             cdef["hide"] = True
                     if status_col_ag and JsCode:
                         go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
-                    AgGrid(
+                    _um_m = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
+                    _dm_m = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
+                    _kw_m = dict(update_mode=_um_m, data_return_mode=_dm_m) if (_um_m and _dm_m) else {}
+                    grid_res_m = AgGrid(
                         display_df,
                         gridOptions=go,
                         use_container_width=True,
@@ -3996,7 +4026,14 @@ def main():
                         show_download_button=False,
                         enable_enterprise_modules=True,
                         allow_unsafe_jscode=True,
+                        key="master_kitchens_grid_single",
+                        **_kw_m,
                     )
+                    _cnt_m = len(rows_display) if rows_display else 0
+                    if grid_res_m and grid_res_m.get("data") is not None:
+                        _cnt_m = len(grid_res_m["data"])
+                    if rows_display is not None:
+                        st.caption(f"**{_cnt_m}** rows")
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
@@ -4017,6 +4054,8 @@ def main():
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         display_df = display_df.style.apply(_row_bg_m, axis=1)
                     st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                    if rows_display is not None:
+                        st.caption(f"**{len(rows_display)}** rows")
             elif rows_filtered and not use_facility_tabs:
                 _show = rows_display if rows_filtered else []
                 for r in _show[:100]:
