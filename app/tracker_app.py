@@ -2532,6 +2532,26 @@ def _get_facility_column(keys: list) -> str | None:
     return None
 
 
+def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert columns that look numeric (e.g. string '14.78') to numeric type so AgGrid sorts by value, not text."""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    skip = {"_has_opportunity"}
+    for col in df.columns:
+        if col in skip:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            continue
+        ser = pd.to_numeric(df[col], errors="coerce")
+        non_null = ser.notna().sum()
+        if non_null >= max(1, len(df) * 0.5):
+            df[col] = ser
+    return df
+
+
 def _is_account_country_column(col_name: str) -> bool:
     """True if this column is Account Country / facility_country (any casing/spacing/dots/prefix). Hide in Master Kitchens."""
     if not col_name:
@@ -2651,7 +2671,6 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
-    st.caption(f"Showing **{len(rows_shown)}** of **{len(rows)}** row(s). Filter using the **⋮ menu** on each column header in the table below.")
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
@@ -2668,7 +2687,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         if status_col:
             df_display = df_display.copy()
             df_display["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-        st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
+        df_display = _coerce_numeric_columns(df_display)
         gb = GridOptionsBuilder.from_dataframe(df_display)
         gb.configure_default_column(
             filter=True,
@@ -3680,7 +3699,7 @@ def main():
                     first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
                     _sel_key = "master_sheets_selection"
                     if _sel_key not in st.session_state:
-                        st.session_state[_sel_key] = list(gsheet_tab_options)
+                        st.session_state[_sel_key] = [first_tab]
                     _initial = st.session_state.get(_sel_key) or [first_tab]
                     if not isinstance(_initial, list):
                         _initial = [_initial] if _initial else [first_tab]
@@ -3750,7 +3769,7 @@ def main():
                     first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
                     _sel_key = "master_sheets_selection"
                     if _sel_key not in st.session_state:
-                        st.session_state[_sel_key] = list(source_options)
+                        st.session_state[_sel_key] = [first_tab]
                     _initial = st.session_state.get(_sel_key) or [first_tab]
                     if not isinstance(_initial, list):
                         _initial = [_initial] if _initial else [first_tab]
@@ -3789,19 +3808,18 @@ def main():
                     cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     rows_shown = combined_rows
                     st.divider()
-                    st.caption(f"Showing **{len(rows_shown):,}** of **{len(combined_rows):,}** row(s). Filter using the **⋮ menu** on column headers below.")
                     df_combined = pd.DataFrame(rows_shown)
                     _disp_cols = [c for c in df_combined.columns if c in cols_combined]
                     if _disp_cols:
                         df_combined = df_combined[_disp_cols]
                     df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
+                    df_combined = _coerce_numeric_columns(df_combined)
                     status_col_combined = None
                     for c in df_combined.columns:
                         if str(c).strip().lower() in ("status", "status__c"):
                             status_col_combined = c
                             break
                     if _HAS_AGGRI and not df_combined.empty:
-                        st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
                         gb = GridOptionsBuilder.from_dataframe(df_combined)
                         gb.configure_default_column(
                             filter=True,
@@ -3890,6 +3908,7 @@ def main():
                 display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                 display_df = display_df.copy()
                 display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
+                display_df = _coerce_numeric_columns(display_df)
                 if _HAS_AGGRI:
                     # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
                     status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
@@ -3943,7 +3962,6 @@ def main():
                             cdef["hide"] = True
                     if status_col_ag and JsCode:
                         go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
-                    st.caption("Use the **⋮ menu on each column header** to sort, filter, pin, or hide columns (like Excel).")
                     AgGrid(
                         display_df,
                         gridOptions=go,
