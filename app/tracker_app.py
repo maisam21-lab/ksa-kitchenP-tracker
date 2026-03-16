@@ -2699,6 +2699,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
+    _row_count_placeholder = st.empty()
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
@@ -2788,11 +2789,11 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         if grid_response and grid_response.get("data") is not None:
             _displayed_count = len(grid_response["data"])
         if rows_shown:
-            st.caption(f"**{_displayed_count}** rows")
+            _row_count_placeholder.caption(f"**{_displayed_count}** rows")
     else:
         st.dataframe(df_display, use_container_width=True, hide_index=True, height=700)
         if rows_shown:
-            st.caption(f"**{len(rows_shown)}** rows")
+            _row_count_placeholder.caption(f"**{len(rows_shown)}** rows")
     # CSV download disabled app-wide (no Download CSV button)
 
 
@@ -3847,6 +3848,7 @@ def main():
                         cols_combined = sorted(_df_temp.columns.tolist())
                     cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     rows_shown = combined_rows
+                    _row_count_placeholder_combined = st.empty()
                     st.divider()
                     df_combined = pd.DataFrame(rows_shown)
                     _disp_cols = [c for c in df_combined.columns if c in cols_combined]
@@ -3931,11 +3933,11 @@ def main():
                         if grid_res and grid_res.get("data") is not None:
                             _cnt = len(grid_res["data"])
                         if rows_shown:
-                            st.caption(f"**{_cnt}** rows")
+                            _row_count_placeholder_combined.caption(f"**{_cnt}** rows")
                     else:
                         st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
                         if rows_shown:
-                            st.caption(f"**{len(rows_shown)}** rows")
+                            _row_count_placeholder_combined.caption(f"**{len(rows_shown)}** rows")
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -3959,6 +3961,7 @@ def main():
                 display_df = display_df.copy()
                 display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                 display_df = _coerce_numeric_columns(display_df)
+                _row_count_placeholder_single = st.empty()
                 if _HAS_AGGRI:
                     # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
                     status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
@@ -4033,7 +4036,7 @@ def main():
                     if grid_res_m and grid_res_m.get("data") is not None:
                         _cnt_m = len(grid_res_m["data"])
                     if rows_display is not None:
-                        st.caption(f"**{_cnt_m}** rows")
+                        _row_count_placeholder_single.caption(f"**{_cnt_m}** rows")
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
@@ -4054,6 +4057,8 @@ def main():
                             return [f"background-color: {bg}" if bg else ""] * len(row)
                         display_df = display_df.style.apply(_row_bg_m, axis=1)
                     st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                    if rows_display is not None:
+                        _row_count_placeholder_single.caption(f"**{len(rows_display)}** rows")
                     if rows_display is not None:
                         st.caption(f"**{len(rows_display)}** rows")
             elif rows_filtered and not use_facility_tabs:
