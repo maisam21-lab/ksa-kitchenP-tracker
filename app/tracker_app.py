@@ -668,6 +668,7 @@ def init_db():
     _ensure_updated_at()
     _ensure_discussions_parent_id()
     _ensure_allowed_users_role()
+    _sync_allowlist_from_config()
 
 
 def _get_allowlist_ids_from_config() -> list[str]:
@@ -676,6 +677,8 @@ def _get_allowlist_ids_from_config() -> list[str]:
         ids = st.secrets.get("ALLOWLIST_IDS") or os.environ.get("ALLOWLIST_IDS", "")
     except Exception:
         ids = os.environ.get("ALLOWLIST_IDS", "")
+    if isinstance(ids, list):
+        return [str(s).strip() for s in ids if s and str(s).strip()]
     return [s.strip() for s in str(ids).split(",") if s.strip()]
 
 
@@ -693,10 +696,9 @@ def _sync_allowlist_from_config():
         c.execute("DELETE FROM allowed_users")
         for identifier in ids:
             c.execute(
-                "INSERT INTO allowed_users (identifier, added_at) VALUES (?, ?)",
-                (identifier, now),
+                "INSERT INTO allowed_users (identifier, added_at, role) VALUES (?, ?, ?)",
+                (identifier, now, "associate_viewer"),
             )
-    _sync_allowlist_from_config()
 
 
 def _allowlist_enabled() -> bool:
@@ -3651,14 +3653,20 @@ def main():
         if user_role is None:
             user_role = "associate_viewer"
     else:
-        user_role = "super_user"
+        # Auth module missing (e.g. import failed): do not give everyone super_user
+        user_role = "associate_viewer"
     st.session_state["user_role"] = user_role
 
-    # Product shape: section navigation (no Search tab)
+    # Product shape: section navigation by role
+    # Normal users (associate_viewer): Master Kitchens + Discussions only
+    # Super users: all sections including Admin / Data Health. Developer access unchanged (gets super_user).
     if _is_developer() or user_role == "super_user":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Admin / Data Health"]
-    else:
+    elif user_role == "manager_viewer":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
+    else:
+        # associate_viewer (normal): only Master Kitchens and Discussions
+        section_options = ["Kitchen Master Data", "Discussions"]
     # Website-style layout: section navigation as tabs
     if "section_radio" not in st.session_state:
         st.session_state["section_radio"] = section_options[0]
@@ -4119,8 +4127,13 @@ def main():
                         except Exception:
                             pass
 
-    # Dashboard: management view — percentages, insights, breakdowns; no day-to-day focus
+    # Dashboard: management view — only for manager_viewer and super_user (not associate_viewer)
     elif section == "Dashboard":
+        _role = st.session_state.get("user_role") or "associate_viewer"
+        if _role not in ("manager_viewer", "super_user") and not _is_developer():
+            section = "Kitchen Master Data"
+            st.session_state["section_radio"] = section
+            _rerun()
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             if _superset_stale_warning(superset_meta or {}):
@@ -4922,6 +4935,11 @@ def main():
         return
 
     if section == "Admin / Data Health":
+        _role = st.session_state.get("user_role") or "associate_viewer"
+        if _role != "super_user" and not _is_developer():
+            section = "Kitchen Master Data"
+            st.session_state["section_radio"] = section
+            _rerun()
         st.caption("Data source health and allowed list. Master Kitchens source and refresh controls below.")
         st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
         _show_refresh_btn = _is_developer() or user_role == "super_user"
@@ -5042,13 +5060,31 @@ def main():
                             st.error("Failed to persist.")
                 except Exception as e:
                     st.error(str(e))
-        st.subheader("Allowed list (read-only)")
+        st.subheader("Add user")
+        st.caption("Add an allowed user by email and set their role. Normal = Master Kitchens + Discussions only; Super user = all tabs including Admin.")
+        add_email = st.text_input("Email (or name)", key="admin_add_identifier", placeholder="user@company.com")
+        add_role = st.selectbox("Role", ["associate_viewer", "manager_viewer", "super_user"], index=0, key="admin_add_role", format_func=lambda x: {"associate_viewer": "Normal (Master Kitchens + Discussions)", "manager_viewer": "Manager (+ Dashboard)", "super_user": "Super user (all tabs)"}.get(x, x))
+        if st.button("Add user", key="admin_add_btn") and (add_email or "").strip():
+            if add_allowed_user((add_email or "").strip(), add_role):
+                st.success(f"Added **{(add_email or '').strip()}** as **{add_role}**.")
+                _rerun()
+            else:
+                st.warning("User already on the list or invalid. To change role, remove and add again.")
+        st.subheader("Allowed list")
         allowed = list_allowed_users()
         if not allowed:
             st.caption("No entries (or allowlist from secrets only).")
         else:
             for u in allowed:
-                st.markdown(f"- **{u.get('identifier')}** — {u.get('role') or 'associate_viewer'}")
+                ident = u.get("identifier") or ""
+                role = u.get("role") or "associate_viewer"
+                st.markdown(f"- **{ident}** — {role}")
+                if st.button("Remove", key=f"admin_remove_{ident}", type="secondary"):
+                    if remove_allowed_user(ident):
+                        st.success(f"Removed **{ident}**.")
+                        _rerun()
+                    else:
+                        st.warning("Could not remove (may be in secrets allowlist).")
         return
 
 if __name__ == "__main__":

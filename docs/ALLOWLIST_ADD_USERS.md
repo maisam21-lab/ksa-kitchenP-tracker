@@ -51,3 +51,47 @@ If they have the developer key, they can unlock without being on the allowlist (
 ## After adding
 
 Ask Jad and Tala to **reload the app** and enter the **same** email or name you added (e.g. the work email they use). They should then get in.
+
+---
+
+## What to do now (you have a set of user emails)
+
+You can add users and assign roles in two ways.
+
+### Option 1 — In the app (easiest if you don’t use ALLOWLIST_IDS in secrets)
+
+1. **Sign in as developer** (sidebar → Developer access → enter your developer key).
+2. Open **Admin / Data Health**.
+3. Under **Add user**:
+   - Enter each email in **Email (or name)**.
+   - Choose **Role**:
+     - **Normal (Master Kitchens + Discussions)** — they only see Kitchen Master Data and Discussions.
+     - **Manager (+ Dashboard)** — also see Dashboard.
+     - **Super user (all tabs)** — see everything including Admin.
+   - Click **Add user**.
+4. Repeat for every email. You can **Remove** anyone from the list in the same page.
+
+**Note:** If you have **ALLOWLIST_IDS** set in Streamlit secrets, the app overwrites this list on each restart from secrets. In that case use Option 2.
+
+### Option 2 — Streamlit Cloud secrets (good for production)
+
+1. In **Streamlit Cloud** → your app → **Settings** → **Secrets**.
+2. Enable the allowlist and list everyone who may access the app:
+   ```toml
+   ALLOWLIST_ENABLED = true
+   ALLOWLIST_IDS = ["user1@company.com", "user2@company.com", "user3@company.com"]
+   ```
+   (Use the exact emails users sign in with.)
+3. Give **super user** only to people who should see all tabs (including Admin). **They must also be in `ALLOWLIST_IDS`** or they cannot sign in. Add:
+   ```toml
+   [allowed_user_roles]
+   "admin@company.com" = "super_user"
+   "manager@company.com" = "super_user"
+   ```
+   Anyone in `ALLOWLIST_IDS` but not in `allowed_user_roles` gets **Normal** (Master Kitchens + Discussions only). To give someone Dashboard but not Admin, set:
+   ```toml
+   "someone@company.com" = "manager_viewer"
+   ```
+4. Save and **redeploy** the app.
+
+**Developer access** stays separate: only people with the developer key (or listed in developer IDs in secrets) get full access; you keep that for yourself.

@@ -1,6 +1,10 @@
 """
 RBAC for KSA Kitchens Tracker.
-Roles: associate_viewer (Master Kitchens only), manager_viewer (+ Live Dashboard), super_user (all + tools).
+Roles:
+  associate_viewer: Master Kitchens + Discussions tabs only.
+  manager_viewer: + Dashboard (no Admin).
+  super_user: all tabs including Admin / Data Health.
+  Developer (key): same as super_user; access is separate (developer key only).
 """
 from __future__ import annotations
 
@@ -68,10 +72,8 @@ def get_user_role(
     if id_ not in allowed_ids:
         return None
 
-    # Resolve role: secrets_roles (e.g. from [allowed_user_roles] in TOML) override; then DB; then default
+    # Resolve role: secrets_roles (e.g. [allowed_user_roles] in TOML) override DB; then DB; then default
     role = ROLE_ASSOCIATE
-    if secrets_roles and id_ in secrets_roles:
-        role = secrets_roles[id_] or ROLE_ASSOCIATE
     if list_allowed_with_roles:
         for row in list_allowed_with_roles():
             if (row.get("identifier") or "").strip().lower() == id_:
@@ -79,4 +81,7 @@ def get_user_role(
                 if r in ROLE_ORDER:
                     role = r
                 break
+    # Secrets override DB so [allowed_user_roles] always wins (e.g. super_user)
+    if secrets_roles and id_ in secrets_roles:
+        role = secrets_roles[id_] or ROLE_ASSOCIATE
     return role if role in ROLE_ORDER else ROLE_ASSOCIATE
