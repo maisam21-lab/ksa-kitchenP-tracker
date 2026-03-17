@@ -3720,11 +3720,13 @@ def main():
     st.session_state["user_role"] = user_role
 
     # Product shape: section navigation by role (Admin tab removed)
-    # — Developer and super users: Master Kitchens + Dashboard + Discussions
-    # — Normal users: Master Kitchens + Discussions only
     if _is_developer() or user_role == "super_user" or user_role == "manager_viewer":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
     else:
+        section_options = ["Kitchen Master Data", "Discussions"]
+    # Ensure Admin never appears (defensive)
+    section_options = [s for s in section_options if s != "Admin / Data Health"]
+    if not section_options:
         section_options = ["Kitchen Master Data", "Discussions"]
     # Website-style layout: section navigation as tabs
     if "section_radio" not in st.session_state:
