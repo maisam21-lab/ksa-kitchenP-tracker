@@ -897,14 +897,25 @@ def _get_secrets_roles() -> dict:
 def _get_super_user_emails() -> set[str]:
     """Return set of emails (lower) that should get super_user. From SUPER_USER_EMAILS or SUPER_USER_IDS in secrets/env."""
     out = set()
+    raw = None
     try:
-        raw = st.secrets.get("SUPER_USER_EMAILS") or st.secrets.get("SUPER_USER_IDS") or os.environ.get("SUPER_USER_EMAILS") or os.environ.get("SUPER_USER_IDS", "")
+        raw = (
+            st.secrets.get("SUPER_USER_EMAILS") or st.secrets.get("super_user_emails")
+            or st.secrets.get("SUPER_USER_IDS") or st.secrets.get("super_user_ids")
+            or os.environ.get("SUPER_USER_EMAILS") or os.environ.get("SUPER_USER_IDS", "")
+        )
     except Exception:
         raw = os.environ.get("SUPER_USER_EMAILS") or os.environ.get("SUPER_USER_IDS", "")
-    for part in str(raw).split(","):
-        s = (part or "").strip().lower()
-        if s and "@" in s:
-            out.add(s)
+    if isinstance(raw, list):
+        for item in raw:
+            s = (str(item).strip() or "").lower()
+            if s and "@" in s:
+                out.add(s)
+    else:
+        for part in str(raw or "").split(","):
+            s = (part or "").strip().lower()
+            if s and "@" in s:
+                out.add(s)
     return out
 
 
@@ -3669,9 +3680,14 @@ def main():
         user_role = "super_user"
     else:
         id_lower = (current_user or "").strip().lower() if current_user else ""
-        # 1) SUPER_USER_EMAILS in secrets = reliable way to grant Dashboard/Admin (works on Streamlit Cloud)
+        # 1) SUPER_USER_EMAILS in secrets = reliable way to grant Dashboard/Admin
         super_emails = _get_super_user_emails()
-        if id_lower and id_lower in super_emails:
+        # 2) DEVELOPER_IDS in secrets = same list can grant super_user (Dashboard) when signed in (no key needed)
+        try:
+            dev_ids_set = set(_get_developer_ids_list())
+        except Exception:
+            dev_ids_set = set()
+        if id_lower and (id_lower in super_emails or id_lower in dev_ids_set):
             user_role = "super_user"
         else:
             secrets_roles = _get_secrets_roles()
@@ -3735,6 +3751,8 @@ def main():
             ):
                 st.session_state["section_radio"] = opt
                 _rerun()
+    # Show resolved role so you can confirm super_user sees Dashboard (remove later if desired)
+    st.caption(f"Role: **{user_role}**")
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":

@@ -84,13 +84,19 @@ You can add users and assign roles in two ways.
    (Use the exact emails users sign in with.)
 3. Give **super user** to people who should see all tabs (including Dashboard and Admin). **They must also be in `ALLOWLIST_IDS`** or they cannot sign in.
 
-   **Option A — `SUPER_USER_EMAILS` (recommended on Streamlit Cloud):**  
-   Add a comma-separated list; these users always get Dashboard and Admin:
+   **Option A — `DEVELOPER_IDS` (reliable):**  
+   Add super user emails to **DEVELOPER_IDS** (same secret as developer access). Anyone in this list gets Dashboard and Admin when they sign in (no developer key needed):
    ```toml
-   SUPER_USER_EMAILS = "admin@company.com,manager@company.com,jad.hajjar@cloudkitchens.com,tala.zeineddine@cloudkitchens.com"
+   DEVELOPER_IDS = "maysam.abukashabeh@cloudkitchens.com,jad.hajjar@cloudkitchens.com,tala.zeineddine@cloudkitchens.com,yazan.saeed@cloudkitchens.com,tarek.trad@cloudkitchens.com"
    ```
 
-   **Option B — `[allowed_user_roles]` dict:**  
+   **Option B — `SUPER_USER_EMAILS`:**  
+   Same idea, separate list (comma-separated):
+   ```toml
+   SUPER_USER_EMAILS = "admin@company.com,jad.hajjar@cloudkitchens.com,tala.zeineddine@cloudkitchens.com"
+   ```
+
+   **Option C — `[allowed_user_roles]` dict:**  
    ```toml
    [allowed_user_roles]
    "admin@company.com" = "super_user"
