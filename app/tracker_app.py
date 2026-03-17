@@ -3650,34 +3650,38 @@ def main():
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added.")
             st.stop()
 
-    # RBAC: resolve role and build sidebar sections (Prompt 1 & 2)
+    # RBAC: resolve role and build sidebar sections. Secrets [allowed_user_roles] always wins for super/manager.
     if not _allowlist_enabled() or _is_developer():
         user_role = "super_user"
-    elif auth:
-        user_role = auth.get_user_role(
-            current_user,
-            is_developer=_is_developer(),
-            list_allowed_with_roles=list_allowed_users,
-            allowlist_ids_from_secrets=_allowlist_ids_from_secrets,
-            secrets_roles=_get_secrets_roles(),
-        )
-        if user_role is None:
-            user_role = "associate_viewer"
     else:
-        # Auth module missing (e.g. import failed): still resolve super_user from secrets so they see Dashboard
-        user_role = "associate_viewer"
         secrets_roles = _get_secrets_roles()
-        if current_user and secrets_roles:
-            id_lower = (current_user or "").strip().lower()
-            if id_lower in secrets_roles and secrets_roles[id_lower] in ("manager_viewer", "super_user"):
-                user_role = secrets_roles[id_lower]
-    # Fallback: if we got associate_viewer but user is in secrets as super/manager, use that (e.g. auth or DB glitch)
-    if user_role == "associate_viewer" and current_user:
-        secrets_roles = _get_secrets_roles()
-        if secrets_roles:
-            id_lower = (current_user or "").strip().lower()
-            if id_lower in secrets_roles and secrets_roles[id_lower] in ("manager_viewer", "super_user"):
-                user_role = secrets_roles[id_lower]
+        id_lower = (current_user or "").strip().lower() if current_user else ""
+        # Check secrets first so super_user/manager_viewer always see Dashboard (avoids auth/DB glitches)
+        if id_lower and secrets_roles and id_lower in secrets_roles:
+            r = (secrets_roles.get(id_lower) or "").strip().lower()
+            if r in ("manager_viewer", "super_user"):
+                user_role = r
+            else:
+                user_role = auth.get_user_role(
+                    current_user,
+                    is_developer=False,
+                    list_allowed_with_roles=list_allowed_users,
+                    allowlist_ids_from_secrets=_allowlist_ids_from_secrets,
+                    secrets_roles=secrets_roles,
+                ) if auth else "associate_viewer"
+                user_role = user_role if user_role else "associate_viewer"
+        elif auth:
+            user_role = auth.get_user_role(
+                current_user,
+                is_developer=False,
+                list_allowed_with_roles=list_allowed_users,
+                allowlist_ids_from_secrets=_allowlist_ids_from_secrets,
+                secrets_roles=secrets_roles,
+            )
+            if user_role is None:
+                user_role = "associate_viewer"
+        else:
+            user_role = "associate_viewer"
     st.session_state["user_role"] = user_role
 
     # Product shape: section navigation by role
@@ -4150,13 +4154,8 @@ def main():
                         except Exception:
                             pass
 
-    # Dashboard: management view — only for manager_viewer and super_user (not associate_viewer)
+    # Dashboard: management view (section_options already restricts who sees the button)
     elif section == "Dashboard":
-        _role = st.session_state.get("user_role") or "associate_viewer"
-        if _role not in ("manager_viewer", "super_user") and not _is_developer():
-            section = "Kitchen Master Data"
-            st.session_state["section_radio"] = section
-            _rerun()
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             if _superset_stale_warning(superset_meta or {}):
@@ -4958,11 +4957,6 @@ def main():
         return
 
     if section == "Admin / Data Health":
-        _role = st.session_state.get("user_role") or "associate_viewer"
-        if _role != "super_user" and not _is_developer():
-            section = "Kitchen Master Data"
-            st.session_state["section_radio"] = section
-            _rerun()
         st.caption("Data source health and allowed list. Master Kitchens source and refresh controls below.")
         st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
         _show_refresh_btn = _is_developer() or user_role == "super_user"
