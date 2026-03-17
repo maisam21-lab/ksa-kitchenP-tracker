@@ -3751,8 +3751,8 @@ def main():
             ):
                 st.session_state["section_radio"] = opt
                 _rerun()
-    # Show resolved role so you can confirm super_user sees Dashboard (remove later if desired)
-    st.caption(f"Role: **{user_role}**")
+    # Show resolved role and user so you can confirm super_user — add this email to DEVELOPER_IDS or SUPER_USER_EMAILS in secrets to get Dashboard
+    st.caption(f"**User:** {current_user or '—'} · **Role:** {user_role}")
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
