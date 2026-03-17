@@ -687,14 +687,25 @@ def _sync_allowlist_from_config():
 
     This lets admins manage the allowlist from the backend (secrets/env)
     instead of through the UI inside the tracker.
+    Deduplicates identifiers so duplicate entries in ALLOWLIST_IDS do not cause IntegrityError.
     """
     ids = _get_allowlist_ids_from_config()
     if not ids:
         return
+    # Deduplicate (preserve order) to avoid PRIMARY KEY IntegrityError
+    seen = set()
+    unique_ids = []
+    for i in ids:
+        key = (i or "").strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            unique_ids.append((i or "").strip())
+    if not unique_ids:
+        return
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_conn() as c:
         c.execute("DELETE FROM allowed_users")
-        for identifier in ids:
+        for identifier in unique_ids:
             c.execute(
                 "INSERT INTO allowed_users (identifier, added_at, role) VALUES (?, ?, ?)",
                 (identifier, now, "associate_viewer"),
