@@ -4,8 +4,8 @@
 
 | Who | What they see |
 |-----|----------------|
-| **Developer (Maysam)** | Full access. Sign in with **developer key** only — keep the key secret. |
-| **Super users** | Master Kitchen Data + **Dashboard** + Discussions + Admin / Data Health. Add their emails to `DEVELOPER_IDS` or `SUPER_USER_EMAILS` in secrets. |
+| **Developer (Maysam)** | Full access including **Admin / Data Health**. Sign in with **developer key** only — keep the key secret. |
+| **Super users** | Master Kitchen Data + **Dashboard** + Discussions (no Admin). Add their emails to `DEVELOPER_IDS` or `SUPER_USER_EMAILS` in secrets. |
 | **Normal users** | Master Kitchen Data + Discussions only. Add their emails to `ALLOWLIST_IDS` only (do not add to DEVELOPER_IDS/SUPER_USER_EMAILS). |
 
 ---

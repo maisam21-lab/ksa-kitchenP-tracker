@@ -3720,15 +3720,14 @@ def main():
     st.session_state["user_role"] = user_role
 
     # Product shape: section navigation by role
-    # — Developer (you, Maysam): developer key only → full access (all tabs).
-    # — Super users: Master Kitchens + Dashboard + Discussions + Admin (list their emails in DEVELOPER_IDS or SUPER_USER_EMAILS in secrets).
+    # — Developer (you, Maysam): developer key only → full access including Admin.
+    # — Super users: Master Kitchens + Dashboard + Discussions (no Admin; Admin is developer-only).
     # — Normal users: Master Kitchens + Discussions only.
-    if _is_developer() or user_role == "super_user":
+    if _is_developer():
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Admin / Data Health"]
-    elif user_role == "manager_viewer":
+    elif user_role == "super_user" or user_role == "manager_viewer":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
     else:
-        # associate_viewer (normal): only Master Kitchens and Discussions
         section_options = ["Kitchen Master Data", "Discussions"]
     # Website-style layout: section navigation as tabs
     if "section_radio" not in st.session_state:
@@ -4995,9 +4994,12 @@ def main():
         return
 
     if section == "Admin / Data Health":
+        if not _is_developer():
+            st.session_state["section_radio"] = "Kitchen Master Data"
+            _rerun()
         st.caption("Data source health and allowed list. Master Kitchens source and refresh controls below.")
         st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
-        _show_refresh_btn = _is_developer() or user_role == "super_user"
+        _show_refresh_btn = True
         if _show_refresh_btn:
             st.subheader("Master Kitchens source & refresh")
             import time
