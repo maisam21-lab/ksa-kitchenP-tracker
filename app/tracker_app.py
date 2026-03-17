@@ -3720,8 +3720,9 @@ def main():
     st.session_state["user_role"] = user_role
 
     # Product shape: section navigation by role
-    # Normal users (associate_viewer): Master Kitchens + Discussions only
-    # Super users: all sections including Admin / Data Health. Developer access unchanged (gets super_user).
+    # — Developer (you, Maysam): developer key only → full access (all tabs).
+    # — Super users: Master Kitchens + Dashboard + Discussions + Admin (list their emails in DEVELOPER_IDS or SUPER_USER_EMAILS in secrets).
+    # — Normal users: Master Kitchens + Discussions only.
     if _is_developer() or user_role == "super_user":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Admin / Data Health"]
     elif user_role == "manager_viewer":

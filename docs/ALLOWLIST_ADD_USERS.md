@@ -1,5 +1,15 @@
 # Why someone can't login (e.g. Jad, Tala) and how to add them
 
+## Access tiers (who sees what)
+
+| Who | What they see |
+|-----|----------------|
+| **Developer (Maysam)** | Full access. Sign in with **developer key** only — keep the key secret. |
+| **Super users** | Master Kitchen Data + **Dashboard** + Discussions + Admin / Data Health. Add their emails to `DEVELOPER_IDS` or `SUPER_USER_EMAILS` in secrets. |
+| **Normal users** | Master Kitchen Data + Discussions only. Add their emails to `ALLOWLIST_IDS` only (do not add to DEVELOPER_IDS/SUPER_USER_EMAILS). |
+
+---
+
 ## Why Jad and Tala (or anyone) can't login
 
 The app uses an **allowlist**: only users whose **email or name** is in the list can access the tracker when allowlist is enabled.
