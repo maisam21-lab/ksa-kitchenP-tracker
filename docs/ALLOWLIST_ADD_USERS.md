@@ -82,16 +82,23 @@ You can add users and assign roles in two ways.
    ALLOWLIST_IDS = ["user1@company.com", "user2@company.com", "user3@company.com"]
    ```
    (Use the exact emails users sign in with.)
-3. Give **super user** only to people who should see all tabs (including Admin). **They must also be in `ALLOWLIST_IDS`** or they cannot sign in. Add:
+3. Give **super user** to people who should see all tabs (including Dashboard and Admin). **They must also be in `ALLOWLIST_IDS`** or they cannot sign in.
+
+   **Option A — `SUPER_USER_EMAILS` (recommended on Streamlit Cloud):**  
+   Add a comma-separated list; these users always get Dashboard and Admin:
+   ```toml
+   SUPER_USER_EMAILS = "admin@company.com,manager@company.com,jad.hajjar@cloudkitchens.com,tala.zeineddine@cloudkitchens.com"
+   ```
+
+   **Option B — `[allowed_user_roles]` dict:**  
    ```toml
    [allowed_user_roles]
    "admin@company.com" = "super_user"
    "manager@company.com" = "super_user"
    ```
-   Anyone in `ALLOWLIST_IDS` but not in `allowed_user_roles` gets **Normal** (Master Kitchens + Discussions only). To give someone Dashboard but not Admin, set:
-   ```toml
-   "someone@company.com" = "manager_viewer"
-   ```
+   To give someone Dashboard but not Admin: `"someone@company.com" = "manager_viewer"`
+
+   Anyone in `ALLOWLIST_IDS` but not listed as super/manager gets **Normal** (Master Kitchens + Discussions only).
 4. Save and **redeploy** the app.
 
 **Developer access** stays separate: only people with the developer key (or listed in developer IDs in secrets) get full access; you keep that for yourself.

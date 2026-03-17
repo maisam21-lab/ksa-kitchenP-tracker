@@ -880,7 +880,7 @@ def _get_secrets_roles() -> dict:
         for k, v in raw.items():
             key = (str(k).strip() or "").lower()
             if key and v:
-                out[key] = str(v).strip()
+                out[key] = str(v).strip().lower()
     elif isinstance(raw, str) and raw.strip():
         try:
             data = json.loads(raw)
@@ -888,9 +888,23 @@ def _get_secrets_roles() -> dict:
                 for k, v in data.items():
                     key = (str(k).strip() or "").lower()
                     if key and v:
-                        out[key] = str(v).strip()
+                        out[key] = str(v).strip().lower()
         except json.JSONDecodeError:
             pass
+    return out
+
+
+def _get_super_user_emails() -> set[str]:
+    """Return set of emails (lower) that should get super_user. From SUPER_USER_EMAILS or SUPER_USER_IDS in secrets/env."""
+    out = set()
+    try:
+        raw = st.secrets.get("SUPER_USER_EMAILS") or st.secrets.get("SUPER_USER_IDS") or os.environ.get("SUPER_USER_EMAILS") or os.environ.get("SUPER_USER_IDS", "")
+    except Exception:
+        raw = os.environ.get("SUPER_USER_EMAILS") or os.environ.get("SUPER_USER_IDS", "")
+    for part in str(raw).split(","):
+        s = (part or "").strip().lower()
+        if s and "@" in s:
+            out.add(s)
     return out
 
 
@@ -3650,38 +3664,43 @@ def main():
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added.")
             st.stop()
 
-    # RBAC: resolve role and build sidebar sections. Secrets [allowed_user_roles] always wins for super/manager.
+    # RBAC: resolve role and build sidebar sections.
     if not _allowlist_enabled() or _is_developer():
         user_role = "super_user"
     else:
-        secrets_roles = _get_secrets_roles()
         id_lower = (current_user or "").strip().lower() if current_user else ""
-        # Check secrets first so super_user/manager_viewer always see Dashboard (avoids auth/DB glitches)
-        if id_lower and secrets_roles and id_lower in secrets_roles:
-            r = (secrets_roles.get(id_lower) or "").strip().lower()
-            if r in ("manager_viewer", "super_user"):
-                user_role = r
-            else:
+        # 1) SUPER_USER_EMAILS in secrets = reliable way to grant Dashboard/Admin (works on Streamlit Cloud)
+        super_emails = _get_super_user_emails()
+        if id_lower and id_lower in super_emails:
+            user_role = "super_user"
+        else:
+            secrets_roles = _get_secrets_roles()
+            # 2) [allowed_user_roles] dict in secrets
+            if id_lower and secrets_roles and id_lower in secrets_roles:
+                r = (secrets_roles.get(id_lower) or "").strip().lower()
+                if r in ("manager_viewer", "super_user"):
+                    user_role = r
+                else:
+                    user_role = auth.get_user_role(
+                        current_user,
+                        is_developer=False,
+                        list_allowed_with_roles=list_allowed_users,
+                        allowlist_ids_from_secrets=_allowlist_ids_from_secrets,
+                        secrets_roles=secrets_roles,
+                    ) if auth else "associate_viewer"
+                    user_role = user_role if user_role else "associate_viewer"
+            elif auth:
                 user_role = auth.get_user_role(
                     current_user,
                     is_developer=False,
                     list_allowed_with_roles=list_allowed_users,
                     allowlist_ids_from_secrets=_allowlist_ids_from_secrets,
                     secrets_roles=secrets_roles,
-                ) if auth else "associate_viewer"
-                user_role = user_role if user_role else "associate_viewer"
-        elif auth:
-            user_role = auth.get_user_role(
-                current_user,
-                is_developer=False,
-                list_allowed_with_roles=list_allowed_users,
-                allowlist_ids_from_secrets=_allowlist_ids_from_secrets,
-                secrets_roles=secrets_roles,
-            )
-            if user_role is None:
+                )
+                if user_role is None:
+                    user_role = "associate_viewer"
+            else:
                 user_role = "associate_viewer"
-        else:
-            user_role = "associate_viewer"
     st.session_state["user_role"] = user_role
 
     # Product shape: section navigation by role
