@@ -3758,12 +3758,12 @@ def main():
                     # User chose Google Sheet; show sheet selector (multi-select: one or multiple facilities/sheets)
                     first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
                     _sel_key = "master_sheets_selection"
-                    if _sel_key not in st.session_state:
-                        st.session_state[_sel_key] = [first_tab]
-                    _initial = st.session_state.get(_sel_key) or [first_tab]
+                    # Use default only when key not yet set (let widget own session state to avoid Streamlit warning)
+                    _initial = st.session_state.get(_sel_key) if _sel_key in st.session_state else [first_tab]
                     if not isinstance(_initial, list):
                         _initial = [_initial] if _initial else [first_tab]
-                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=gsheet_tab_options, default=_initial if set(_initial) <= set(gsheet_tab_options) else [first_tab], key=_sel_key, placeholder="Select facilities")
+                    _default = _initial if set(_initial) <= set(gsheet_tab_options) else [first_tab]
+                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=gsheet_tab_options, default=_default, key=_sel_key, placeholder="Select facilities")
                     if not chosen_labels:
                         chosen_labels = [first_tab]
                     chosen_labels = [t for t in chosen_labels if t in gsheet_tab_options] or [first_tab]
@@ -3828,12 +3828,12 @@ def main():
                     # Sheet selector: multi-select so user can view one or multiple sheets
                     first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
                     _sel_key = "master_sheets_selection"
-                    if _sel_key not in st.session_state:
-                        st.session_state[_sel_key] = [first_tab]
-                    _initial = st.session_state.get(_sel_key) or [first_tab]
+                    # Use default only when key not yet set (let widget own session state to avoid Streamlit warning)
+                    _initial = st.session_state.get(_sel_key) if _sel_key in st.session_state else [first_tab]
                     if not isinstance(_initial, list):
                         _initial = [_initial] if _initial else [first_tab]
-                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=source_options, default=_initial if set(_initial) <= set(source_options) else [first_tab], key=_sel_key, placeholder="Select facilities")
+                    _default = _initial if set(_initial) <= set(source_options) else [first_tab]
+                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=source_options, default=_default, key=_sel_key, placeholder="Select facilities")
                     if not chosen_labels:
                         chosen_labels = [first_tab]
                     chosen_labels = [t for t in chosen_labels if t in source_options] or [first_tab]
