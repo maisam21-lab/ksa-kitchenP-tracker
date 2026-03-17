@@ -3664,8 +3664,20 @@ def main():
         if user_role is None:
             user_role = "associate_viewer"
     else:
-        # Auth module missing (e.g. import failed): do not give everyone super_user
+        # Auth module missing (e.g. import failed): still resolve super_user from secrets so they see Dashboard
         user_role = "associate_viewer"
+        secrets_roles = _get_secrets_roles()
+        if current_user and secrets_roles:
+            id_lower = (current_user or "").strip().lower()
+            if id_lower in secrets_roles and secrets_roles[id_lower] in ("manager_viewer", "super_user"):
+                user_role = secrets_roles[id_lower]
+    # Fallback: if we got associate_viewer but user is in secrets as super/manager, use that (e.g. auth or DB glitch)
+    if user_role == "associate_viewer" and current_user:
+        secrets_roles = _get_secrets_roles()
+        if secrets_roles:
+            id_lower = (current_user or "").strip().lower()
+            if id_lower in secrets_roles and secrets_roles[id_lower] in ("manager_viewer", "super_user"):
+                user_role = secrets_roles[id_lower]
     st.session_state["user_role"] = user_role
 
     # Product shape: section navigation by role
