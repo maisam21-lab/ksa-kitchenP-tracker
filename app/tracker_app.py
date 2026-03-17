@@ -3680,7 +3680,7 @@ def main():
         user_role = "super_user"
     else:
         id_lower = (current_user or "").strip().lower() if current_user else ""
-        # 1) SUPER_USER_EMAILS in secrets = reliable way to grant Dashboard/Admin
+        # 1) SUPER_USER_EMAILS in secrets = reliable way to grant Dashboard
         super_emails = _get_super_user_emails()
         # 2) DEVELOPER_IDS in secrets = same list can grant super_user (Dashboard) when signed in (no key needed)
         try:
@@ -3719,13 +3719,10 @@ def main():
                 user_role = "associate_viewer"
     st.session_state["user_role"] = user_role
 
-    # Product shape: section navigation by role
-    # — Developer (you, Maysam): developer key only → full access including Admin.
-    # — Super users: Master Kitchens + Dashboard + Discussions (no Admin; Admin is developer-only).
-    # — Normal users: Master Kitchens + Discussions only.
-    if _is_developer():
-        section_options = ["Kitchen Master Data", "Dashboard", "Discussions", "Admin / Data Health"]
-    elif user_role == "super_user" or user_role == "manager_viewer":
+    # Product shape: section navigation by role (Admin tab removed)
+    # — Developer and super users: Master Kitchens + Dashboard + Discussions
+    # — Normal users: Master Kitchens + Discussions only
+    if _is_developer() or user_role == "super_user" or user_role == "manager_viewer":
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
     else:
         section_options = ["Kitchen Master Data", "Discussions"]
@@ -3751,8 +3748,6 @@ def main():
             ):
                 st.session_state["section_radio"] = opt
                 _rerun()
-    # Show resolved role and user so you can confirm super_user — add this email to DEVELOPER_IDS or SUPER_USER_EMAILS in secrets to get Dashboard
-    st.caption(f"**User:** {current_user or '—'} · **Role:** {user_role}")
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
@@ -4991,157 +4986,6 @@ def main():
                 # st.download_button("Export CSV", data=buf.getvalue(), file_name="facility_multipliers.csv", mime="text/csv", key="pm_export")
         else:
             st.info("Multipliers module not loaded (app/multipliers.py).")
-        return
-
-    if section == "Admin / Data Health":
-        if not _is_developer():
-            st.session_state["section_radio"] = "Kitchen Master Data"
-            _rerun()
-        st.caption("Data source health and allowed list. Master Kitchens source and refresh controls below.")
-        st.markdown(f"**User:** {current_user or '—'} · **Role:** {user_role}")
-        _show_refresh_btn = True
-        if _show_refresh_btn:
-            st.subheader("Master Kitchens source & refresh")
-            import time
-            _bq_cache_key = "bq_master_kitchens_rows"
-            _bq_ts_key = "bq_master_kitchens_fetched_at"
-            _bq_refresh_interval_sec = 180
-            now_sec = time.time()
-            cached_rows = st.session_state.get(_bq_cache_key)
-            fetched_at = st.session_state.get(_bq_ts_key) or 0
-            if cached_rows is not None and (now_sec - fetched_at) < _bq_refresh_interval_sec:
-                bq_rows, bq_error = cached_rows, None
-            else:
-                bq_rows, bq_error = _fetch_bigquery_master_kitchens()
-                if bq_rows is not None:
-                    st.session_state[_bq_cache_key] = bq_rows
-                    st.session_state[_bq_ts_key] = now_sec
-                    bq_error = None
-            sources = _master_kitchens_sources()
-            gsheet_tab_options = [s[0] for s in sources]
-            source_ids_gsheet = {s[0]: s[1] for s in sources}
-            both_sources_available = bool(gsheet_tab_options) and bq_rows is not None
-            _src_key = "master_kitchens_data_source"
-            if _src_key not in st.session_state:
-                st.session_state[_src_key] = "bigquery" if bq_rows is not None else "gsheet"
-            if both_sources_available:
-                selected = st.radio(
-                    "Data source for Kitchen Master Data",
-                    options=["bigquery", "gsheet"],
-                    format_func=lambda x: "BigQuery (SA/BH) — fresh from css-operations.sales" if x == "bigquery" else "Google Sheet — from last refresh",
-                    key="master_kitchens_source_radio_admin",
-                    horizontal=True,
-                )
-                st.session_state[_src_key] = selected
-            if bq_rows is not None:
-                _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    st.caption(f"BigQuery cache: {_mins_ago:.1f} min ago.")
-                with c2:
-                    if st.button("Refresh BigQuery now", key="admin_bq_refresh_now"):
-                        st.session_state[_bq_cache_key] = None
-                        st.session_state[_bq_ts_key] = 0
-                        _rerun()
-            if st.button("Refresh from Google Sheet", key="admin_refresh_gsheet"):
-                ok, msg = _refresh_from_online_sheet()
-                if ok:
-                    set_last_refresh("gsheet")
-                    st.session_state["data_source"] = "gsheet"
-                    st.success("Sheets updated.")
-                    _rerun()
-                else:
-                    st.error(msg or "Refresh failed.")
-            _bq_export_sheet_id = (getattr(st, "secrets", None) or {}).get("bq_export_sheet_id") or ""
-            bq_export_rows = None
-            if _bq_export_sheet_id:
-                _export_ts_key = "bq_export_sheet_fetched_at"
-                if st.button("Refresh from BQ export sheet", key="admin_bq_export_refresh"):
-                    st.session_state[_export_ts_key] = 0
-                    st.session_state["bq_export_sheet_rows"] = None
-                    _rerun()
-                bq_export_rows, bq_export_error = _fetch_bq_export_sheet()
-                if bq_export_error:
-                    st.error("**BQ export sheet could not be loaded**")
-                    st.code(bq_export_error, language=None)
-                    st.markdown("**Check:** 1) Use the **spreadsheet ID** from the URL (between `/d/` and `/edit`), not the number after `#gid=`. 2) Top-level secret: `bq_export_sheet_id = \"...\"`. 3) Share the sheet with your service account (Viewer). 4) First tab has header and data.")
-                elif bq_export_rows is not None and len(bq_export_rows) == 0:
-                    st.warning("BQ export sheet is configured but the first worksheet has no data.")
-            _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
-            _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
-            if _has_bq_cfg and bq_rows is None and not (_bq_export_sheet_id and bq_export_rows):
-                _from_secrets = _get_google_credentials_path() == "__FROM_SECRETS__"
-                help_lines = ["**BigQuery is configured but no data loaded.**", ""]
-                if bq_error:
-                    help_lines.append(f"Error: `{bq_error}`")
-                    help_lines.append("")
-                if _from_secrets:
-                    help_lines.append("Streamlit Cloud: check **Settings → Secrets** — `[bigquery_master_kitchens]` (project_id, query_file) and `[gsheet_service_account]` (full JSON). Redeploy after saving.")
-                else:
-                    help_lines.append("Local: set **GOOGLE_APPLICATION_CREDENTIALS** to scripts/credentials.json and run from repo root.")
-                st.info("\n".join(help_lines))
-            st.markdown("---")
-        st.subheader("Superset persisted store")
-        if data_store_mod:
-            name = getattr(data_store_mod, "MASTER_KITCHENS_LIVE", "master_kitchens_live")
-            meta = data_store_mod.read_metadata(name)
-            if meta:
-                st.markdown(f"- Last refresh: **{meta.get('last_refresh_ts_utc') or 'Never'}**")
-                st.markdown(f"- Status: **{meta.get('status') or '—'}**")
-                st.markdown(f"- Row count: **{meta.get('row_count', '—')}**")
-                if meta.get("error_message"):
-                    st.markdown(f"- Error: *{meta.get('error_message')}*")
-                if meta.get("uploaded_by"):
-                    st.markdown(f"- Last CSV upload by: **{meta.get('uploaded_by')}** at {meta.get('uploaded_at_utc') or '—'}")
-            else:
-                st.caption("No metadata yet (refresh job may not have run).")
-        else:
-            st.caption("data_store module not loaded.")
-        if user_role == "super_user" and data_store_mod:
-            st.subheader("Upload CSV Backup")
-            st.caption("Replace Master Kitchens (Live) with an uploaded CSV. Tracked in metadata.")
-            up = st.file_uploader("CSV file", type=["csv"], key="admin_csv_backup")
-            if up is not None:
-                try:
-                    df_up = pd.read_csv(up)
-                    if not df_up.empty and st.button("Replace dataset with this CSV", key="admin_csv_confirm"):
-                        if data_store_mod.write_dataset_and_metadata(
-                            getattr(data_store_mod, "MASTER_KITCHENS_LIVE", "master_kitchens_live"),
-                            df_up,
-                            status="success",
-                            uploaded_by=current_user or "unknown",
-                        ):
-                            st.success("Dataset replaced. Last refresh and uploaded_by updated.")
-                            _rerun()
-                        else:
-                            st.error("Failed to persist.")
-                except Exception as e:
-                    st.error(str(e))
-        st.subheader("Add user")
-        st.caption("Add an allowed user by email and set their role. Normal = Master Kitchens + Discussions only; Super user = all tabs including Admin.")
-        add_email = st.text_input("Email (or name)", key="admin_add_identifier", placeholder="user@company.com")
-        add_role = st.selectbox("Role", ["associate_viewer", "manager_viewer", "super_user"], index=0, key="admin_add_role", format_func=lambda x: {"associate_viewer": "Normal (Master Kitchens + Discussions)", "manager_viewer": "Manager (+ Dashboard)", "super_user": "Super user (all tabs)"}.get(x, x))
-        if st.button("Add user", key="admin_add_btn") and (add_email or "").strip():
-            if add_allowed_user((add_email or "").strip(), add_role):
-                st.success(f"Added **{(add_email or '').strip()}** as **{add_role}**.")
-                _rerun()
-            else:
-                st.warning("User already on the list or invalid. To change role, remove and add again.")
-        st.subheader("Allowed list")
-        allowed = list_allowed_users()
-        if not allowed:
-            st.caption("No entries (or allowlist from secrets only).")
-        else:
-            for u in allowed:
-                ident = u.get("identifier") or ""
-                role = u.get("role") or "associate_viewer"
-                st.markdown(f"- **{ident}** — {role}")
-                if st.button("Remove", key=f"admin_remove_{ident}", type="secondary"):
-                    if remove_allowed_user(ident):
-                        st.success(f"Removed **{ident}**.")
-                        _rerun()
-                    else:
-                        st.warning("Could not remove (may be in secrets allowlist).")
         return
 
 if __name__ == "__main__":
