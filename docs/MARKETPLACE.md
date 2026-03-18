@@ -10,11 +10,13 @@ streamlit run marketplace_app.py
 
 ## Deploy on Streamlit Cloud
 
-1. In Streamlit Cloud, click **New app**.
-2. Choose the same repo as your KSA tracker (`ksa-kitchenP-tracker`).
-3. **Main file path:** `marketplace_app.py`
-4. **Branch:** `main`
-5. Deploy. Share the new app URL (e.g. `https://your-org-marketplace.streamlit.app/`) as the "marketplace" link.
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in. Click **"New app"**.
+2. **Repository:** pick your GitHub repo (e.g. `maisam21-lab/ksa-kitchenP-tracker`). Same repo as the KSA tracker.
+3. **Main file path:** This tells Streamlit which file to run for *this* app. You already have one app running from this repo (the KSA tracker, usually `app/tracker_app.py`). For the marketplace you’re adding a *second* app from the same repo. In the **"Main file path"** box, enter:  
+   **`marketplace_app.py`**  
+   So: one deployment runs `app/tracker_app.py` (KSA tracker), this new deployment runs `marketplace_app.py` (marketplace). The file `marketplace_app.py` sits at the root of the repo (same level as the `app` folder).
+4. **Branch:** leave as `main` (or the branch you use).
+5. Click **Deploy**. When it’s ready, you’ll get a URL like `https://something.streamlit.app/` — that’s your marketplace link. Share that one link; people open it and click through to the KSA tracker and any other apps you add.
 
 ## Add or edit apps
 
