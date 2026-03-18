@@ -2823,15 +2823,21 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             key=f"master_kitchens_grid_{key_suffix}",
             **_grid_kw,
         )
-        _displayed_count = len(rows_shown)
+        _total_count = len(rows_shown) if rows_shown else 0
+        _displayed_count = _total_count
         if grid_response and grid_response.get("data") is not None:
             _displayed_count = len(grid_response["data"])
         if rows_shown:
-            _row_count_placeholder.caption(f"**{_displayed_count}** rows")
+            _row_count_placeholder.caption(
+                f"**{_displayed_count}** rows shown (out of **{_total_count}** total)"
+            )
     else:
         st.dataframe(df_display, use_container_width=True, hide_index=True, height=700)
         if rows_shown:
-            _row_count_placeholder.caption(f"**{len(rows_shown)}** rows")
+            _total_count = len(rows_shown)
+            _row_count_placeholder.caption(
+                f"**{_total_count}** rows shown (out of **{_total_count}** total)"
+            )
     # CSV download disabled app-wide (no Download CSV button)
 
 
@@ -3998,15 +4004,21 @@ def main():
                             key="master_kitchens_grid_combined",
                             **_kw,
                         )
-                        _cnt = len(rows_shown)
+                        _total_combined = len(rows_shown) if rows_shown else 0
+                        _cnt = _total_combined
                         if grid_res and grid_res.get("data") is not None:
                             _cnt = len(grid_res["data"])
                         if rows_shown:
-                            _row_count_placeholder_combined.caption(f"**{_cnt}** rows")
+                            _row_count_placeholder_combined.caption(
+                                f"**{_cnt}** rows shown (out of **{_total_combined}** total)"
+                            )
                     else:
                         st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
                         if rows_shown:
-                            _row_count_placeholder_combined.caption(f"**{len(rows_shown)}** rows")
+                            _total_combined = len(rows_shown)
+                            _row_count_placeholder_combined.caption(
+                                f"**{_total_combined}** rows shown (out of **{_total_combined}** total)"
+                            )
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -4101,11 +4113,14 @@ def main():
                         key="master_kitchens_grid_single",
                         **_kw_m,
                     )
-                    _cnt_m = len(rows_display) if rows_display else 0
+                    _total_single = len(rows_display) if rows_display else 0
+                    _cnt_m = _total_single
                     if grid_res_m and grid_res_m.get("data") is not None:
                         _cnt_m = len(grid_res_m["data"])
                     if rows_display is not None:
-                        _row_count_placeholder_single.caption(f"**{_cnt_m}** rows")
+                        _row_count_placeholder_single.caption(
+                            f"**{_cnt_m}** rows shown (out of **{_total_single}** total)"
+                        )
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
@@ -4127,9 +4142,10 @@ def main():
                         display_df = display_df.style.apply(_row_bg_m, axis=1)
                     st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
                     if rows_display is not None:
-                        _row_count_placeholder_single.caption(f"**{len(rows_display)}** rows")
-                    if rows_display is not None:
-                        st.caption(f"**{len(rows_display)}** rows")
+                        _total_single = len(rows_display)
+                        _row_count_placeholder_single.caption(
+                            f"**{_total_single}** rows shown (out of **{_total_single}** total)"
+                        )
             elif rows_filtered and not use_facility_tabs:
                 _show = rows_display if rows_filtered else []
                 for r in _show[:100]:
