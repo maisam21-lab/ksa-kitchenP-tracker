@@ -20,21 +20,27 @@ streamlit run marketplace_app.py
 
 ## Add or edit apps
 
-Edit **`marketplace_config.yaml`** in the repo:
+Edit **`marketplace_config.yaml`** in the repo. The layout is **sidebar + preview** (like Streamlit’s “Deploy from a template”): pick an app in the sidebar, see description and **View demo** in the main area.
+
+Use **categories** to group apps (e.g. Data apps, Tools):
 
 ```yaml
 title: "Our apps"
-subtitle: "Internal tools and dashboards."
+subtitle: "Internal tools and dashboards. Select an app to open it."
 
-apps:
-  - name: "KSA Kitchen Tracker"
-    description: "Master Kitchens, Dashboard, and Discussions."
-    url: "https://ksa-kitchenp-tracker-xxx.streamlit.app/"
-    owner: "Operations"
-  - name: "Another app"
-    description: "What it does."
-    url: "https://another-app.streamlit.app/"
-    owner: "Team name"
+categories:
+  - name: "Data apps"
+    apps:
+      - name: "KSA Kitchen Tracker"
+        description: "Master Kitchens, Dashboard, and Discussions."
+        url: "https://ksa-kitchenp-tracker-xxx.streamlit.app/"
+        owner: "Operations"
+  - name: "Tools"
+    apps:
+      - name: "Another app"
+        description: "What it does."
+        url: "https://another-app.streamlit.app/"
+        owner: "Team name"
 ```
 
 Push to the repo and **reboot the marketplace app** on Streamlit Cloud to refresh.

@@ -1,17 +1,21 @@
-# Internal App Marketplace — list your org's apps here.
-# Add or edit entries; the marketplace app will show them as cards.
-# Deploy the marketplace: streamlit run marketplace_app.py
+# Internal App Marketplace — like "Deploy from a template": sidebar + preview.
+# Edit categories and apps; redeploy to refresh.
 
 title: "Our apps"
-subtitle: "Internal tools and dashboards. Click to open."
+subtitle: "Internal tools and dashboards. Select an app to open it."
 
-apps:
-  - name: "KSA Kitchen Tracker"
-    description: "Master Kitchens, Dashboard, and Discussions for KSA operations."
-    url: "https://ksa-kitchenp-tracker-dcl4vvscpgpgeamjbmpnyj.streamlit.app/"
-    owner: "Operations"
-  # Add more apps below, e.g.:
-  # - name: "Sales Report"
-  #   description: "Weekly sales and pipeline."
-  #   url: "https://your-sales-app.streamlit.app/"
-  #   owner: "Sales"
+# Optional: group apps by category (sidebar shows categories like the template gallery)
+categories:
+  - name: "Data apps"
+    apps:
+      - name: "KSA Kitchen Tracker"
+        description: "Master Kitchens, Dashboard, and Discussions for KSA operations. View and filter kitchen data, track metrics, and use Discussions."
+        url: "https://ksa-kitchenp-tracker-dcl4vvscpgpgeamjbmpnyj.streamlit.app/"
+        owner: "Operations"
+  # Add more categories and apps, e.g.:
+  # - name: "Tools"
+  #   apps:
+  #     - name: "Support tickets"
+  #       description: "Track and triage support tickets."
+  #       url: "https://your-app.streamlit.app/"
+  #       owner: "Support"

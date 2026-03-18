@@ -1,9 +1,7 @@
 """
-Internal App Marketplace — one place to find and open your org's Streamlit apps.
+Internal App Marketplace — sidebar catalog + preview pane (like Streamlit's template gallery).
 Run: streamlit run marketplace_app.py
-Deploy on Streamlit Cloud with this file as the main script.
 """
-import os
 from pathlib import Path
 
 import streamlit as st
@@ -17,56 +15,81 @@ def load_config():
         return {
             "title": "Our apps",
             "subtitle": "Add marketplace_config.yaml to list your apps.",
-            "apps": [
+            "categories": [
                 {
-                    "name": "KSA Kitchen Tracker",
-                    "description": "Master Kitchens, Dashboard, and Discussions.",
-                    "url": "https://ksa-kitchenp-tracker-dcl4vvscpgpgeamjbmpnyj.streamlit.app/",
-                    "owner": "Operations",
+                    "name": "Data apps",
+                    "apps": [
+                        {
+                            "name": "KSA Kitchen Tracker",
+                            "description": "Master Kitchens, Dashboard, and Discussions.",
+                            "url": "https://ksa-kitchenp-tracker-dcl4vvscpgpgeamjbmpnyj.streamlit.app/",
+                            "owner": "Operations",
+                        }
+                    ],
                 }
             ],
         }
     with open(CONFIG_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        data = yaml.safe_load(f) or {}
+    # Support legacy flat "apps" list as a single category
+    if data.get("apps") and not data.get("categories"):
+        data["categories"] = [{"name": "Apps", "apps": data["apps"]}]
+    return data
 
 
 def main():
-    st.set_page_config(page_title="App marketplace", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="App marketplace", layout="wide", initial_sidebar_state="expanded")
     config = load_config()
     title = config.get("title") or "Our apps"
     subtitle = config.get("subtitle") or "Internal tools and dashboards."
-    apps = config.get("apps") or []
+    categories = config.get("categories") or []
 
-    st.markdown(f"## {title}")
-    st.caption(subtitle)
-    st.divider()
+    # Build flat list of all apps with (category_name, app)
+    all_apps = []
+    for cat in categories:
+        cat_name = cat.get("name") or "Apps"
+        for app in cat.get("apps") or []:
+            all_apps.append((cat_name, app))
 
-    if not apps:
+    if not all_apps:
         st.info("No apps in config yet. Edit **marketplace_config.yaml** to add entries.")
         return
 
-    # Cards in a responsive grid (3 per row)
-    n_cols = 3
-    for row_start in range(0, len(apps), n_cols):
-        row_apps = apps[row_start : row_start + n_cols]
-        cols = st.columns(n_cols)
-        for j, app in enumerate(row_apps):
-            with cols[j]:
-                name = app.get("name") or "App"
-                description = app.get("description") or ""
-                url = (app.get("url") or "").strip()
-                owner = app.get("owner") or ""
-                st.markdown(f"### {name}")
-                if owner:
-                    st.caption(owner)
-                st.markdown(description)
-                if url:
-                    st.link_button("Open app →", url=url, type="primary", use_container_width=True)
-                else:
-                    st.caption("(URL not set)")
-                st.divider()
+    # Sidebar: categories and app names (like the template gallery)
+    st.sidebar.markdown(f"**{title}**")
+    st.sidebar.caption(subtitle)
+    st.sidebar.divider()
 
-    st.caption("Edit **marketplace_config.yaml** in the repo to add or change apps. Redeploy to refresh.")
+    # Which app is selected (stored when user clicks a sidebar button)
+    selected_app = st.session_state.get("marketplace_selected_app_data")
+    if selected_app is None and all_apps:
+        selected_app = all_apps[0][1]
+        st.session_state["marketplace_selected_app_data"] = selected_app
+
+    for cat_name, apps_in_cat in [(c.get("name"), c.get("apps") or []) for c in categories]:
+        if not apps_in_cat:
+            continue
+        st.sidebar.markdown(f"**{cat_name}**")
+        for app in apps_in_cat:
+            name = app.get("name") or "App"
+            app_key = f"mp_{cat_name}_{name}_{app.get('url', '')}".replace(" ", "_").replace("/", "_").replace(":", "_")[:80]
+            if st.sidebar.button(name, key=app_key, use_container_width=True):
+                st.session_state["marketplace_selected_app_data"] = app
+                st.rerun()
+        st.sidebar.markdown("")
+
+    # Main area: preview pane (like "My new app" + description + View demo)
+    st.markdown(f"## {selected_app.get('name') or 'App'}")
+    if selected_app.get("owner"):
+        st.caption(selected_app.get("owner"))
+    st.markdown(selected_app.get("description") or "No description.")
+    url = (selected_app.get("url") or "").strip()
+    if url:
+        st.link_button("View demo →", url=url, type="primary")
+    else:
+        st.caption("(URL not set in config)")
+    st.divider()
+    st.caption("Edit **marketplace_config.yaml** to add or change apps. Redeploy to refresh.")
 
 
 if __name__ == "__main__":
