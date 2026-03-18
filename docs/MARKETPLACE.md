@@ -1,6 +1,6 @@
 # Internal App Marketplace
 
-A single page that lists your org's apps so people use **one link** instead of many.
+**Goal:** All apps in one place, accessible for your team. Share a single link; team members open the marketplace and can find and launch any app (no more sharing individual app links).
 
 ## Run locally
 

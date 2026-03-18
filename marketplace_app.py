@@ -41,7 +41,7 @@ def main():
     st.set_page_config(page_title="App marketplace", layout="wide", initial_sidebar_state="expanded")
     config = load_config()
     title = config.get("title") or "Our apps"
-    subtitle = config.get("subtitle") or "Internal tools and dashboards."
+    subtitle = config.get("subtitle") or "All apps in one place — for your team."
     categories = config.get("categories") or []
 
     # Build flat list of all apps with (category_name, app)
@@ -55,9 +55,10 @@ def main():
         st.info("No apps in config yet. Edit **marketplace_config.yaml** to add entries.")
         return
 
-    # Sidebar: categories and app names (like the template gallery)
+    # Sidebar: categories and app names
     st.sidebar.markdown(f"**{title}**")
     st.sidebar.caption(subtitle)
+    st.sidebar.info("Share this page link with your team — they can open any app from here.")
     st.sidebar.divider()
 
     # Which app is selected (stored when user clicks a sidebar button)
@@ -78,7 +79,8 @@ def main():
                 st.rerun()
         st.sidebar.markdown("")
 
-    # Main area: preview pane (like "My new app" + description + View demo)
+    # Main area: preview pane
+    st.caption("All apps listed in one place — share this link so your team can find and open any app.")
     st.markdown(f"## {selected_app.get('name') or 'App'}")
     if selected_app.get("owner"):
         st.caption(selected_app.get("owner"))

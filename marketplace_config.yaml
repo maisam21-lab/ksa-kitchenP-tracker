@@ -1,8 +1,9 @@
-# Internal App Marketplace — like "Deploy from a template": sidebar + preview.
+# Internal App Marketplace — all apps in one place, accessible for your team.
+# Share this single link; team members find and open any app from here.
 # Edit categories and apps; redeploy to refresh.
 
 title: "Our apps"
-subtitle: "Internal tools and dashboards. Select an app to open it."
+subtitle: "All apps in one place. Pick one to open it."
 
 # Optional: group apps by category (sidebar shows categories like the template gallery)
 categories:
