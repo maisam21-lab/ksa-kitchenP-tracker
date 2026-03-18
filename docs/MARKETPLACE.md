@@ -10,6 +10,9 @@ streamlit run marketplace_app.py
 
 ## Deploy on Streamlit Cloud
 
+**→ Step-by-step guide: [HOW_TO_DEPLOY_MARKETPLACE.md](HOW_TO_DEPLOY_MARKETPLACE.md)** — use this if you're not sure how to deploy.
+
+Short version:
 1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in. Click **"New app"**.
 2. **Repository:** pick your GitHub repo (e.g. `maisam21-lab/ksa-kitchenP-tracker`). Same repo as the KSA tracker.
 3. **Main file path:** This tells Streamlit which file to run for *this* app. You already have one app running from this repo (the KSA tracker, usually `app/tracker_app.py`). For the marketplace you’re adding a *second* app from the same repo. In the **"Main file path"** box, enter:  
