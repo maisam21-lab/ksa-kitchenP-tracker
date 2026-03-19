@@ -2796,14 +2796,14 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         go["defaultColDef"]["suppressHeaderFilterButton"] = False
         if "floatingFiltersHeight" in go:
             del go["floatingFiltersHeight"]
-        for cdef in go.get("columnDefs") or []:
+        _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+        go["columnDefs"] = _column_defs
+        for cdef in _column_defs:
             cdef["filter"] = True
             cdef["floatingFilter"] = False
             cdef["suppressHeaderFilterButton"] = False
             if cdef.get("type") == []:
                 cdef.pop("type", None)
-            if cdef.get("field") == "_has_opportunity":
-                cdef["hide"] = True
         if status_col and JsCode:
             go["getRowStyle"] = _status_get_row_style_js(status_col)
         _update_mode = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
@@ -3977,14 +3977,14 @@ def main():
                         go["defaultColDef"]["suppressHeaderFilterButton"] = False
                         if "floatingFiltersHeight" in go:
                             del go["floatingFiltersHeight"]
-                        for cdef in go.get("columnDefs") or []:
+                        _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+                        go["columnDefs"] = _col_defs
+                        for cdef in _col_defs:
                             cdef["filter"] = True
                             cdef["floatingFilter"] = False
                             cdef["suppressHeaderFilterButton"] = False
                             if cdef.get("type") == []:
                                 cdef.pop("type", None)
-                            if cdef.get("field") == "_has_opportunity":
-                                cdef["hide"] = True
                         if status_col_combined and JsCode:
                             go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
                         _um = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
@@ -4086,14 +4086,14 @@ def main():
                     go["defaultColDef"]["suppressHeaderFilterButton"] = False
                     if "floatingFiltersHeight" in go:
                         del go["floatingFiltersHeight"]
-                    for cdef in go.get("columnDefs") or []:
+                    _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+                    go["columnDefs"] = _col_defs_m
+                    for cdef in _col_defs_m:
                         cdef["filter"] = True
                         cdef["floatingFilter"] = False
                         cdef["suppressHeaderFilterButton"] = False
                         if cdef.get("type") == []:
                             cdef.pop("type", None)
-                        if cdef.get("field") == "_has_opportunity":
-                            cdef["hide"] = True
                     if status_col_ag and JsCode:
                         go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
                     _um_m = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
