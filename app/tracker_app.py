@@ -3198,7 +3198,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
         else:
             tooltip = {
-                "html": "<b>{facility}</b><br/>Address: {address}<br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
+                "html": "<b>{facility}</b><br/>Status: <b>{status}</b>",
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
             _map_records = map_df.to_dict("records")
@@ -3535,7 +3535,7 @@ def main():
         """, unsafe_allow_html=True)
 
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
-    # NOTE: download hiding is now conditional (only when user cannot export).
+    # NOTE: we inject download-hide CSS later (after can_export is computed).
     st.markdown(
         """
     <style>
@@ -3990,22 +3990,7 @@ def main():
     .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
-    """
-        + (
-            """
-    <style>
-    /* Hide the built-in Download control for non-export users */
-    [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
-    [data-testid="stElementToolbar"] button:nth-of-type(2) { display: none !important; visibility: hidden !important; }
-    [data-testid="stElementToolbar"] [aria-label*="ownload"],
-    [data-testid="stElementToolbar"] [aria-label*=" CSV"],
-    [data-testid="stElementToolbar"] [title*="ownload"],
-    [data-testid="stElementToolbar"] [title*=" CSV"] { display: none !important; visibility: hidden !important; }
-    </style>
-            """
-            if not st.session_state.get("can_export")
-            else ""
-        ),
+    """,
         unsafe_allow_html=True,
     )
 
@@ -4325,6 +4310,22 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user, is_developer=_is_developer())
     st.session_state["can_export"] = can_export
+
+    # Hide the built-in dataframe Download control for non-export users (must run AFTER can_export is computed).
+    if not can_export:
+        st.markdown(
+            """
+        <style>
+        [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
+        [data-testid="stElementToolbar"] button:nth-of-type(2) { display: none !important; visibility: hidden !important; }
+        [data-testid="stElementToolbar"] [aria-label*="ownload"],
+        [data-testid="stElementToolbar"] [aria-label*=" CSV"],
+        [data-testid="stElementToolbar"] [title*="ownload"],
+        [data-testid="stElementToolbar"] [title*=" CSV"] { display: none !important; visibility: hidden !important; }
+        </style>
+            """,
+            unsafe_allow_html=True,
+        )
     # Developer-only diagnostics (collapsed) to confirm export gating without exposing to normal users.
     if _is_developer():
         with st.sidebar.expander("Diagnostics (developer)", expanded=False):
