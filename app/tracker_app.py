@@ -3023,6 +3023,8 @@ def _cluster_map_points(records: list[dict], cell_deg: float = 0.012) -> list[di
             g = dict(group[0])
             g["cluster_size"] = 1
             g["is_cluster"] = False
+            if "pin_text" not in g:
+                g["pin_text"] = ""
             out.append(g)
             continue
         lat = sum(float(g.get("lat", 0)) for g in group) / len(group)
@@ -3196,7 +3198,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     "occupied": b["occupied"],
                     "sold": b["sold"],
                     "status": status,
-                    "pin_text": "📍",
+                    "pin_text": "",
                     "pin_color": _MAP_PIN_RGBA.get(status, _MAP_PIN_RGBA["Unknown"]),
                 }
             )
@@ -3215,6 +3217,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             _map_records = map_df.to_dict("records")
             _clustered = _cluster_map_points(_map_records, cell_deg=0.012)
             _map_records = _declutter_map_points(_clustered)
+            _cluster_records = [r for r in _map_records if r.get("is_cluster")]
             try:
                 st.pydeck_chart(
                     pdk.Deck(
@@ -3236,14 +3239,14 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                             ),
                             pdk.Layer(
                                 "TextLayer",
-                                data=_map_records,
+                                data=_cluster_records,
                                 get_position="[plot_lon, plot_lat]",
                                 get_text="pin_text",
-                                get_color=[15, 23, 42, 255],
-                                get_size=16,
-                                size_min_pixels=10,
+                                get_color=[255, 255, 255, 255],
+                                get_size=14,
+                                size_min_pixels=11,
                                 size_max_pixels=16,
-                                get_alignment_baseline="'bottom'",
+                                get_alignment_baseline="'center'",
                                 get_text_anchor="'middle'",
                                 pickable=True,
                             )
@@ -3256,7 +3259,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                         ),
                         tooltip=tooltip,
                         map_provider="carto",
-                        map_style="light",
+                        map_style="positron",
                     ),
                     use_container_width=True,
                 )
