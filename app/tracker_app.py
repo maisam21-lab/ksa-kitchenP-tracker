@@ -2944,22 +2944,24 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     continue
                 fill = _MAP_PIN_HEX.get(str(status), _MAP_PIN_HEX["Unknown"])
                 icon_atlas = _svg_pin_data_url(fill)
+                _sub_records = sub.to_dict("records")
+                for _r in _sub_records:
+                    _r["icon"] = "pin"
                 layers.append(
                     pdk.Layer(
                         "IconLayer",
-                        data=sub.to_dict("records"),
+                        data=_sub_records,
                         get_position="[lon, lat]",
                         pickable=True,
                         icon_atlas=icon_atlas,
                         icon_mapping={
                             "pin": {"x": 0, "y": 0, "width": 64, "height": 64, "anchorY": 64, "anchorX": 32}
                         },
-                        # Constant icon id. (If set to "pin", deck.gl may treat it as a column name.)
-                        get_icon="'pin'",
+                        get_icon="icon",
                         size_scale=1,
-                        get_size=34,
-                        size_min_pixels=26,
-                        size_max_pixels=44,
+                        get_size=24,
+                        size_min_pixels=18,
+                        size_max_pixels=30,
                     )
                 )
             if not layers:
