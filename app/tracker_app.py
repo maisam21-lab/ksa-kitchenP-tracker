@@ -9,6 +9,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import os
 import re
 import urllib.parse
@@ -1503,11 +1504,32 @@ def _export_allowed_ids_from_secrets() -> set[str]:
         raw = (
             st.secrets.get("EXPORT_ALLOWED_IDS")
             or st.secrets.get("export_allowed_ids")
+            or st.secrets.get("EXPORT_ALLOWED_USERS")
+            or st.secrets.get("export_allowed_users")
+            or st.secrets.get("ALLOWED_EXPORT_IDS")
+            or st.secrets.get("allowed_export_ids")
             or os.environ.get("EXPORT_ALLOWED_IDS", "")
+            or os.environ.get("EXPORT_ALLOWED_USERS", "")
+            or os.environ.get("ALLOWED_EXPORT_IDS", "")
         )
     except Exception:
-        raw = os.environ.get("EXPORT_ALLOWED_IDS", "")
+        raw = (
+            os.environ.get("EXPORT_ALLOWED_IDS", "")
+            or os.environ.get("EXPORT_ALLOWED_USERS", "")
+            or os.environ.get("ALLOWED_EXPORT_IDS", "")
+        )
     out: set[str] = set()
+    if isinstance(raw, dict):
+        # Accept {"email@x.com": true, ...}
+        for k, v in raw.items():
+            try:
+                allowed = bool(v) if not isinstance(v, str) else v.strip().lower() in ("1", "true", "yes", "y")
+            except Exception:
+                allowed = False
+            s = (str(k).strip() or "").lower()
+            if s and allowed:
+                out.add(s)
+        return out
     if isinstance(raw, list):
         for item in raw:
             s = (str(item).strip() or "").lower()
@@ -1528,7 +1550,13 @@ def _can_user_export(current_user: str, is_developer: bool = False) -> bool:
     u = (current_user or "").strip().lower()
     if not u:
         return False
-    return u in _export_allowed_ids_from_secrets()
+    allowed = _export_allowed_ids_from_secrets()
+    # Also allow bare local-part entries like "john.doe" to match "john.doe@company.com".
+    if "@" in u:
+        local = u.split("@", 1)[0]
+    else:
+        local = u
+    return u in allowed or local in allowed
 
 
 def _render_export_button(rows: list[dict], file_stem: str, key: str):
@@ -2872,6 +2900,36 @@ def _all_gsheet_facility_rows_for_map(source_ids: dict | None, source_options: l
     return combined
 
 
+def _declutter_map_points(records: list[dict]) -> list[dict]:
+    """Spread overlapping map points in small rings so pins don't stack on top of each other."""
+    if not records:
+        return records
+    buckets: dict[tuple[int, int], list[dict]] = {}
+    for rec in records:
+        try:
+            key = (int(round(float(rec.get("lat", 0)) * 1000)), int(round(float(rec.get("lon", 0)) * 1000)))
+        except Exception:
+            key = (0, 0)
+        buckets.setdefault(key, []).append(rec)
+    for _, group in buckets.items():
+        n = len(group)
+        if n <= 1:
+            r0 = group[0]
+            r0["plot_lat"] = float(r0.get("lat", 0))
+            r0["plot_lon"] = float(r0.get("lon", 0))
+            continue
+        base_lat = sum(float(g.get("lat", 0)) for g in group) / n
+        base_lon = sum(float(g.get("lon", 0)) for g in group) / n
+        for i, rec in enumerate(group):
+            ring = 1 + (i // 8)
+            angle = (2 * math.pi / max(1, min(8, n))) * (i % 8)
+            # ~180m first ring; grows per ring
+            radius_deg = 0.0016 * ring
+            rec["plot_lat"] = base_lat + radius_deg * math.sin(angle)
+            rec["plot_lon"] = base_lon + radius_deg * math.cos(angle)
+    return records
+
+
 def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
     if not row or not isinstance(row, dict):
         return ""
@@ -2975,6 +3033,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
             _map_records = map_df.to_dict("records")
+            _map_records = _declutter_map_points(_map_records)
             try:
                 st.pydeck_chart(
                     pdk.Deck(
@@ -2983,26 +3042,26 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                             pdk.Layer(
                                 "ScatterplotLayer",
                                 data=_map_records,
-                                get_position="[lon, lat]",
+                                get_position="[plot_lon, plot_lat]",
                                 get_fill_color="pin_color",
                                 get_radius=1,
                                 radius_scale=2200,
-                                radius_min_pixels=8,
-                                radius_max_pixels=16,
+                                radius_min_pixels=6,
+                                radius_max_pixels=12,
                                 pickable=True,
                                 stroked=True,
-                                line_width_min_pixels=1.5,
+                                line_width_min_pixels=1,
                                 get_line_color=[15, 23, 42, 180],
                             ),
                             pdk.Layer(
                                 "TextLayer",
                                 data=_map_records,
-                                get_position="[lon, lat]",
+                                get_position="[plot_lon, plot_lat]",
                                 get_text="pin_text",
                                 get_color="pin_color",
-                                get_size=28,
-                                size_min_pixels=16,
-                                size_max_pixels=28,
+                                get_size=20,
+                                size_min_pixels=12,
+                                size_max_pixels=20,
                                 get_alignment_baseline="'bottom'",
                                 get_text_anchor="'middle'",
                                 pickable=True,
