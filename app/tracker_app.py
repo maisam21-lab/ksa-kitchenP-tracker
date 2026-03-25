@@ -3514,19 +3514,13 @@ def main():
         """, unsafe_allow_html=True)
 
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
-    st.markdown("""
+    # NOTE: download hiding is now conditional (only when user cannot export).
+    st.markdown(
+        """
     <style>
-    /* Disable download on all sheets but keep Search and Maximize/Fullscreen in dataframe toolbar */
+    /* Keep dataframe toolbar visible (Search + Fullscreen) */
     [data-testid="stElementToolbar"] { display: flex !important; visibility: visible !important; }
-    /* Hide only the 2nd toolbar control (Download CSV) — keep 1st=Search, 3rd=Fullscreen */
-    [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
-    [data-testid="stElementToolbar"] button:nth-of-type(2) { display: none !important; visibility: hidden !important; }
-    /* Hide by aria-label/title so download is disabled even if DOM order differs */
-    [data-testid="stElementToolbar"] [aria-label*="ownload"],
-    [data-testid="stElementToolbar"] [aria-label*=" CSV"],
-    [data-testid="stElementToolbar"] [title*="ownload"],
-    [data-testid="stElementToolbar"] [title*=" CSV"] { display: none !important; visibility: hidden !important; }
-    /* AgGrid toolbar: hide Download as CSV (tooltip title) */
+    /* AgGrid toolbar: hide Download as CSV (we use our own export gating) */
     [title="Download as CSV"],
     button[title="Download as CSV"],
     .ag-toolbar [title*="Download"],
@@ -3975,7 +3969,24 @@ def main():
     .header-user-avatar:hover { transform: scale(1.05) !important; box-shadow: 0 2px 8px rgba(15,118,110,0.35) !important; }
     @media (max-width: 600px) { .header-email-mobile { display: none !important; } }
     </style>
-    """, unsafe_allow_html=True)
+    """
+        + (
+            """
+    <style>
+    /* Hide the built-in Download control for non-export users */
+    [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
+    [data-testid="stElementToolbar"] button:nth-of-type(2) { display: none !important; visibility: hidden !important; }
+    [data-testid="stElementToolbar"] [aria-label*="ownload"],
+    [data-testid="stElementToolbar"] [aria-label*=" CSV"],
+    [data-testid="stElementToolbar"] [title*="ownload"],
+    [data-testid="stElementToolbar"] [title*=" CSV"] { display: none !important; visibility: hidden !important; }
+    </style>
+            """
+            if not st.session_state.get("can_export")
+            else ""
+        ),
+        unsafe_allow_html=True,
+    )
 
     # Top bar (replaces sidebar): compact two-row layout
     last_gsheet = get_last_refresh("gsheet")
