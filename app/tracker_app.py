@@ -3015,7 +3015,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                             pitch=0,
                         ),
                         tooltip=tooltip,
-                        map_style=None,
+                        map_provider="carto",
+                        map_style="light",
                     ),
                     use_container_width=True,
                 )
@@ -3046,7 +3047,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                                 pitch=0,
                             ),
                             tooltip=tooltip,
-                            map_style=None,
+                            map_provider="carto",
+                            map_style="light",
                         ),
                         use_container_width=True,
                     )
