@@ -2802,30 +2802,12 @@ _FACILITY_COORDS_APPROX = {
 
 
 # Map pin colors (hex) for inline SVG teardrop pins.
-_MAP_PIN_HEX = {
-    "Vacant": "#22c55e",
-    "Churning": "#eab308",
-    "Occupied/Sold": "#ef4444",
-    "Unknown": "#64748b",
+_MAP_PIN_RGBA = {
+    "Vacant": [34, 197, 94, 255],
+    "Churning": [234, 179, 8, 255],
+    "Occupied/Sold": [239, 68, 68, 255],
+    "Unknown": [100, 116, 139, 255],
 }
-
-
-def _svg_pin_data_url(fill_hex: str) -> str:
-    """Return a data URL for a teardrop map pin SVG (no external assets/CORS)."""
-    fill = (fill_hex or "#64748b").strip()
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <defs>
-    <radialGradient id="g" cx="28%" cy="22%" r="55%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.65"/>
-      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.12"/>
-    </radialGradient>
-  </defs>
-  <path d="M32 2C20.4 2 11 11.4 11 23c0 15.6 21 39 21 39s21-23.4 21-39C53 11.4 43.6 2 32 2z"
-        fill="{fill}" stroke="#0f172a" stroke-opacity="0.55" stroke-width="2" />
-  <circle cx="32" cy="23" r="10" fill="url(#g)"/>
-</svg>"""
-    return "data:image/svg+xml;charset=utf-8," + urllib.parse.quote(svg)
 
 
 def _facility_jitter_lat_lon(facility_key: str) -> tuple[float, float]:
@@ -2899,7 +2881,7 @@ def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
 
 
 def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities map (preview)"):
-    """Landing map: one marker per facility, status-colored teardrop pins (inline SVG icons)."""
+    """Landing map: one pin per facility using TextLayer (robust on Streamlit Cloud)."""
     if not rows:
         return
     try:
@@ -2966,6 +2948,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     "occupied": b["occupied"],
                     "sold": b["sold"],
                     "status": status,
+                    "pin_text": "📍",
+                    "pin_color": _MAP_PIN_RGBA.get(status, _MAP_PIN_RGBA["Unknown"]),
                 }
             )
         map_df = pd.DataFrame(map_rows)
@@ -2983,39 +2967,24 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
             _map_records = map_df.to_dict("records")
-            # Build one IconLayer per status so each can use its own inline SVG icon atlas.
-            layers = []
-            for status, sub in map_df.groupby("status", sort=False):
-                if sub.empty:
-                    continue
-                fill = _MAP_PIN_HEX.get(str(status), _MAP_PIN_HEX["Unknown"])
-                icon_atlas = _svg_pin_data_url(fill)
-                _sub_records = sub.to_dict("records")
-                for _r in _sub_records:
-                    _r["icon"] = "pin"
-                layers.append(
-                    pdk.Layer(
-                        "IconLayer",
-                        data=_sub_records,
-                        get_position="[lon, lat]",
-                        pickable=True,
-                        icon_atlas=icon_atlas,
-                        icon_mapping={
-                            "pin": {"x": 0, "y": 0, "width": 64, "height": 64, "anchorY": 64, "anchorX": 32}
-                        },
-                        get_icon="icon",
-                        size_scale=1,
-                        get_size=24,
-                        size_min_pixels=18,
-                        size_max_pixels=30,
-                    )
-                )
-            if not layers:
-                return
             try:
                 st.pydeck_chart(
                     pdk.Deck(
-                        layers=layers,
+                        layers=[
+                            pdk.Layer(
+                                "TextLayer",
+                                data=_map_records,
+                                get_position="[lon, lat]",
+                                get_text="pin_text",
+                                get_color="pin_color",
+                                get_size=28,
+                                size_min_pixels=16,
+                                size_max_pixels=28,
+                                get_alignment_baseline="'bottom'",
+                                get_text_anchor="'middle'",
+                                pickable=True,
+                            )
+                        ],
                         initial_view_state=pdk.ViewState(
                             latitude=float(map_df["lat"].mean()),
                             longitude=float(map_df["lon"].mean()),
@@ -3028,7 +2997,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     use_container_width=True,
                 )
             except Exception:
-                # Fallback: circles if SVG IconLayer fails in the browser
+                # Fallback: circles if TextLayer fails in the browser
                 layer = pdk.Layer(
                     "ScatterplotLayer",
                     data=_map_records,
