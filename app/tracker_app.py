@@ -4157,25 +4157,45 @@ def main():
     if section == "Kitchen Master Data":
         _show_refresh_btn = _is_developer() or user_role == "super_user"
         preview_mode_km = bool(st.session_state.get("preview_only_mode"))
-        _pkreg = (st.session_state.get("preview_kitchen_region") or "KSA").strip()
+        _pkreg = ""
         if preview_mode_km:
-            st.caption("Preview tabs (only visible to preview users).")
-            _km_tab_options = ["KSA", "Kuwait", "UAE"]
-            if _pkreg not in _km_tab_options:
-                _pkreg = "KSA"
-            _tab_cols = st.columns(len(_km_tab_options))
-            for _i, _opt in enumerate(_km_tab_options):
-                with _tab_cols[_i]:
-                    _is_sel = _opt == _pkreg
-                    if st.button(
-                        _opt,
-                        key=f"km_preview_tab_{_opt.lower()}",
-                        type="primary" if _is_sel else "secondary",
-                        use_container_width=True,
-                    ):
-                        st.session_state["preview_kitchen_region"] = _opt
-                        _rerun()
-            _pkreg = (st.session_state.get("preview_kitchen_region") or _pkreg).strip()
+            if st.session_state.get("preview_kitchen_region") == "KSA":
+                st.session_state.pop("preview_kitchen_region", None)
+            st.caption(
+                "Preview: open **Kuwait** or **UAE** regional workbooks. "
+                "Default is the standard master kitchen data (same as other users)."
+            )
+            _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
+            _c_kw, _c_ae, _c_std = st.columns([1, 1, 2])
+            with _c_kw:
+                if st.button(
+                    "Kuwait",
+                    key="km_preview_tab_kuwait",
+                    type="primary" if _cur == "Kuwait" else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["preview_kitchen_region"] = "Kuwait"
+                    _rerun()
+            with _c_ae:
+                if st.button(
+                    "UAE",
+                    key="km_preview_tab_uae",
+                    type="primary" if _cur == "UAE" else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["preview_kitchen_region"] = "UAE"
+                    _rerun()
+            with _c_std:
+                if _cur in ("Kuwait", "UAE") and st.button(
+                    "Standard master kitchen",
+                    key="km_preview_tab_standard",
+                    type="secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state.pop("preview_kitchen_region", None)
+                    _rerun()
+            _fin = (st.session_state.get("preview_kitchen_region") or "").strip()
+            _pkreg = _fin if _fin in ("Kuwait", "UAE") else ""
         _preview_regional_km = preview_mode_km and _pkreg in ("Kuwait", "UAE")
         if _preview_regional_km:
             _render_preview_regional_kitchen_master(
