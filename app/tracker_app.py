@@ -3148,51 +3148,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
         map_df = pd.DataFrame(map_rows)
         if map_df.empty:
             return
-        st.caption(
-            f"**{map_title}** — all facilities (default). **Pins:** green = Vacant, yellow = Churning, "
-            "red = Occupied/Sold, gray = other."
-        )
-
-        # Google Maps: without an Embed API key, Google often shows "no map available" in iframes.
-        # We therefore show a robust link-based experience by default, and only iframe-embed when a key is provided.
-        try:
-            _center_lat = float(map_df["lat"].mean())
-            _center_lon = float(map_df["lon"].mean())
-            with st.expander("Google Maps view (live)", expanded=False):
-                _gm_key = ""
-                try:
-                    _gm_key = (st.secrets.get("GOOGLE_MAPS_EMBED_API_KEY") or st.secrets.get("google_maps_embed_api_key") or os.environ.get("GOOGLE_MAPS_EMBED_API_KEY", "")).strip()
-                except Exception:
-                    _gm_key = os.environ.get("GOOGLE_MAPS_EMBED_API_KEY", "").strip()
-                if _gm_key:
-                    # Official Embed API (requires key + billing enabled)
-                    _gm_embed = f"https://www.google.com/maps/embed/v1/view?key={urllib.parse.quote(_gm_key)}&center={_center_lat:.6f},{_center_lon:.6f}&zoom=9&maptype=roadmap"
-                    components.iframe(_gm_embed, height=420, scrolling=False)
-                else:
-                    st.caption("Google Maps embed is disabled (no key). Showing Google Maps links instead.")
-                    st.link_button("Open Google Maps (centered)", f"https://www.google.com/maps?q={_center_lat:.6f},{_center_lon:.6f}&z=9")
-                # Links so users can open actual pins in Google Maps (one per facility).
-                _links = []
-                for _, rr in map_df.sort_values(["facility"]).iterrows():
-                    fac = str(rr.get("facility") or "").strip()
-                    addr = str(rr.get("address") or "").strip()
-                    lat = rr.get("lat")
-                    lon = rr.get("lon")
-                    q = ""
-                    if addr and addr != "—":
-                        q = addr
-                    elif lat is not None and lon is not None:
-                        q = f"{lat},{lon}"
-                    if not q:
-                        continue
-                    url = "https://www.google.com/maps/search/?api=1&query=" + urllib.parse.quote(str(q))
-                    _links.append((fac or q, url))
-                if _links:
-                    st.caption("Open a facility pin in Google Maps:")
-                    for name, url in _links:
-                        st.link_button(name, url)
-        except Exception:
-            pass
+        # No legend/caption text and no Google Maps expander (per request).
 
         if pdk is None:
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
