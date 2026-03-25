@@ -5,6 +5,7 @@ Accepts CSV or Excel (.xlsx) uploads. Can refresh directly from the online Googl
 """
 import base64
 import csv
+import hashlib
 import html
 import io
 import json
@@ -2730,7 +2731,100 @@ _FACILITY_COORDS_APPROX = {
     "tuwaiq": (24.5232, 46.5382),
     "muraslat": (24.7445, 46.7062),
     "aqrabiya": (26.3035, 50.1875),
+    "jarir": (24.5553, 46.7078),
+    "sulimaniah": (24.7056, 46.6780),
+    "rehab": (24.9235, 46.6680),
+    "rawda": (24.7417, 46.7492),
+    "narjis": (24.8460, 46.7280),
+    "hofuf": (25.3833, 49.5877),
+    "yasmin": (24.7950, 46.6420),
+    "mishrifah": (24.7580, 46.7380),
+    "arid": (24.9010, 46.6160),
+    "bishir": (24.7720, 46.7020),
+    "al nazim": (24.8100, 46.7650),
+    "sweidi 2": (24.6000, 46.6880),
+    "king faisal": (24.7580, 46.7720),
+    "arid 2": (24.9050, 46.6180),
+    "ghirnatah 2": (24.7820, 46.6550),
+    "aqiq 2": (24.7920, 46.6350),
+    "rakah": (26.3520, 50.1920),
+    "wurud": (24.6980, 46.6620),
 }
+
+
+# Google Maps "ms" marker icons (teardrop dots) — one URL per status bucket for IconLayer.
+_GOOGLE_MAP_PIN_URLS = {
+    "Vacant": "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+    "Churning": "https://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
+    "Occupied/Sold": "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+    "Unknown": "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+}
+
+# Google dot PNGs are 32×32; anchor tip near bottom center.
+_PIN_ICON_ATLAS_MAPPING = {
+    "pin": {
+        "x": 0,
+        "y": 0,
+        "width": 32,
+        "height": 32,
+        "anchorY": 32,
+        "anchorX": 16,
+    }
+}
+
+
+def _facility_jitter_lat_lon(facility_key: str) -> tuple[float, float]:
+    """Stable pseudo-location for facilities without coordinates (spread around Riyadh)."""
+    h = int(hashlib.md5(facility_key.encode("utf-8")).hexdigest()[:8], 16)
+    lat0, lon0 = 24.7136, 46.6753
+    dlat = ((h % 1000) / 1000.0 - 0.5) * 0.14
+    dlon = (((h // 1000) % 1000) / 1000.0 - 0.5) * 0.16
+    return lat0 + dlat, lon0 + dlon
+
+
+def _resolve_facility_lat_lon(facility: str, lat_raw: str, lon_raw: str) -> tuple[float | None, float | None]:
+    """Resolve coordinates from row values, static table, fuzzy name match, or jitter fallback."""
+    facility_lower = (facility or "").strip().lower()
+    if not facility_lower:
+        return None, None
+    lat = lon = None
+    try:
+        lat = float(lat_raw) if lat_raw else None
+        lon = float(lon_raw) if lon_raw else None
+    except Exception:
+        lat, lon = None, None
+    if lat is not None and lon is not None:
+        return lat, lon
+    lat, lon = _FACILITY_COORDS_APPROX.get(facility_lower, (None, None))
+    if lat is None or lon is None:
+        f_norm = re.sub(r"[^a-z0-9]+", " ", facility_lower).strip()
+        for k, (k_lat, k_lon) in _FACILITY_COORDS_APPROX.items():
+            k_norm = re.sub(r"[^a-z0-9]+", " ", str(k).strip().lower()).strip()
+            if not k_norm:
+                continue
+            if f_norm == k_norm or f_norm.startswith(k_norm) or k_norm.startswith(f_norm) or (k_norm in f_norm) or (f_norm in k_norm):
+                lat, lon = k_lat, k_lon
+                break
+    if lat is None or lon is None:
+        lat, lon = _facility_jitter_lat_lon(facility_lower)
+    return lat, lon
+
+
+def _all_gsheet_facility_rows_for_map(source_ids: dict | None, source_options: list | None) -> list[dict]:
+    """Load every Master Kitchens sheet tab once for the map (independent of table multiselect)."""
+    if not source_ids or not source_options:
+        return []
+    combined: list[dict] = []
+    for label in source_options:
+        tab_id = source_ids.get(label, label)
+        try:
+            sheet_rows = list_generic_tab(tab_id, source="gsheet") or []
+        except Exception:
+            sheet_rows = []
+        for r in sheet_rows:
+            if isinstance(r, dict) and not _is_empty_record(r):
+                combined.append(r)
+    return combined
 
 
 def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
@@ -2750,14 +2844,14 @@ def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
 
 
 def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities map (preview)"):
-    """Landing map for Master Kitchens with status-colored pins. Non-blocking by design."""
+    """Landing map: Google-style pins, status-colored, one pin per facility. Non-blocking."""
     if not rows:
         return
     try:
         facility_key = _get_facility_column(list(rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
         if not facility_key:
             return
-        buckets = {}
+        buckets: dict[str, dict] = {}
         for r in rows:
             if not isinstance(r, dict):
                 continue
@@ -2766,30 +2860,10 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 continue
             lat_raw = _row_value_by_candidates(r, ["Latitude", "lat", "facility_latitude", "facility_lat"])
             lon_raw = _row_value_by_candidates(r, ["Longitude", "lon", "lng", "facility_longitude", "facility_lon"])
-            lat = None
-            lon = None
-            try:
-                lat = float(lat_raw) if lat_raw else None
-                lon = float(lon_raw) if lon_raw else None
-            except Exception:
-                lat, lon = None, None
-            if lat is None or lon is None:
-                lat, lon = _FACILITY_COORDS_APPROX.get(facility, (None, None))
-            if lat is None or lon is None:
-                # Fuzzy match facility names (e.g. "Qurtoba - Old", "Qurtoba RUH", etc.)
-                f_norm = re.sub(r"[^a-z0-9]+", " ", facility).strip()
-                best = None
-                for k, (k_lat, k_lon) in _FACILITY_COORDS_APPROX.items():
-                    k_norm = re.sub(r"[^a-z0-9]+", " ", str(k).strip().lower()).strip()
-                    if not k_norm:
-                        continue
-                    if f_norm == k_norm or f_norm.startswith(k_norm) or k_norm.startswith(f_norm) or (k_norm in f_norm) or (f_norm in k_norm):
-                        best = (k_lat, k_lon)
-                        break
-                if best:
-                    lat, lon = best
-            if lat is None or lon is None:
+            resolved = _resolve_facility_lat_lon(str(r.get(facility_key) or "").strip(), lat_raw, lon_raw)
+            if resolved[0] is None or resolved[1] is None:
                 continue
+            lat, lon = resolved
             b = buckets.setdefault(
                 facility,
                 {
@@ -2820,16 +2894,13 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
         for b in buckets.values():
             if b["vacant"] > 0:
                 status = "Vacant"
-                color = [16, 185, 129, 200]
             elif b["churning"] > 0:
                 status = "Churning"
-                color = [245, 158, 11, 210]
             elif (b["occupied"] + b["sold"]) > 0:
                 status = "Occupied/Sold"
-                color = [220, 38, 38, 210]
             else:
                 status = "Unknown"
-                color = [100, 116, 139, 180]
+            pin_url = _GOOGLE_MAP_PIN_URLS.get(status, _GOOGLE_MAP_PIN_URLS["Unknown"])
             map_rows.append(
                 {
                     "facility": b["facility"],
@@ -2841,47 +2912,61 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     "occupied": b["occupied"],
                     "sold": b["sold"],
                     "status": status,
-                    "color": color,
+                    "pin_url": pin_url,
                 }
             )
         map_df = pd.DataFrame(map_rows)
         if map_df.empty:
             return
-        st.caption(f"**{map_title}** — quick geographic overview by facility.")
+        st.caption(
+            f"**{map_title}** — all facilities (default). Pins use Google Maps–style markers; "
+            "green = Vacant, yellow = Churning, red = Occupied/Sold, blue = other."
+        )
         if pdk is None:
-            # Minimal fallback: show pins without status coloring/tooltip.
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
         else:
-            layer = pdk.Layer(
-                "ScatterplotLayer",
-                data=map_df,
-                get_position="[lon, lat]",
-                get_fill_color="color",
-                get_radius=2600,
-                pickable=True,
-                stroked=True,
-                line_width_min_pixels=1,
-                get_line_color=[15, 23, 42, 200],
-            )
+            layers = []
+            for pin_url, sub in map_df.groupby("pin_url", sort=False):
+                if sub.empty:
+                    continue
+                layers.append(
+                    pdk.Layer(
+                        "IconLayer",
+                        data=sub,
+                        get_position="[lon, lat]",
+                        pickable=True,
+                        icon_atlas=pin_url,
+                        icon_mapping=_PIN_ICON_ATLAS_MAPPING,
+                        get_icon="pin",
+                        size_scale=1,
+                        get_size=36,
+                        size_min_pixels=28,
+                        size_max_pixels=44,
+                    )
+                )
+            if not layers:
+                return
             tooltip = {
                 "html": "<b>{facility}</b><br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
-            st.pydeck_chart(
-                pdk.Deck(
-                    layers=[layer],
-                    initial_view_state=pdk.ViewState(
-                        latitude=float(map_df["lat"].mean()),
-                        longitude=float(map_df["lon"].mean()),
-                        zoom=8.5,
-                        pitch=0,
+            try:
+                st.pydeck_chart(
+                    pdk.Deck(
+                        layers=layers,
+                        initial_view_state=pdk.ViewState(
+                            latitude=float(map_df["lat"].mean()),
+                            longitude=float(map_df["lon"].mean()),
+                            zoom=8.2,
+                            pitch=0,
+                        ),
+                        tooltip=tooltip,
+                        map_style=None,
                     ),
-                    tooltip=tooltip,
-                    # Avoid Mapbox token requirement; points still render.
-                    map_style=None,
-                ),
-                use_container_width=True,
-            )
+                    use_container_width=True,
+                )
+            except Exception:
+                st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
     except Exception:
         # Keep existing tracker flow untouched even if map rendering fails.
         return
@@ -4082,14 +4167,14 @@ def main():
                     is_other_sheet = True
         # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
         if is_other_sheet and chosen_labels:
+            _all_for_map = _all_gsheet_facility_rows_for_map(source_ids, source_options)
+            if _all_for_map:
+                _render_master_kitchens_map(_all_for_map, map_title="Facilities map")
             _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
             if not _labels_to_use:
                 _labels_to_use = chosen_labels[:1]
             _show_combined = len(_labels_to_use) > 1
             if not _show_combined:
-                _single_rows = list_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), source="gsheet") or []
-                _single_rows = [r for r in _single_rows if not _is_empty_record(r)]
-                _render_master_kitchens_map(_single_rows, map_title="Facilities map (selected facility)")
                 _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet", allow_download=False, hide_account_country=True)
             else:
                 # Combined view: load every selected sheet and merge into one table
@@ -4103,7 +4188,6 @@ def main():
                 if not combined_rows:
                     st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                 else:
-                    _render_master_kitchens_map(combined_rows, map_title="Facilities map (selected facilities)")
                     st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
                     cols_combined = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict)))) if combined_rows else []
                     if combined_rows and isinstance(combined_rows[0], dict):
@@ -4210,7 +4294,7 @@ def main():
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
-            _render_master_kitchens_map(rows, map_title="Facilities map (all facilities)")
+            _render_master_kitchens_map(rows, map_title="Facilities map")
             total = len(rows)
             is_tracker = source_id == "main_tracker"
             # No filter bar: single table like Excel sheet (filter via column filters below)
