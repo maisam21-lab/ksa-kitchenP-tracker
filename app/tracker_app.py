@@ -1592,6 +1592,42 @@ def _can_user_export(current_user: str) -> bool:
     return u in export_norm or local in export_norm
 
 
+def _preview_only_ids_from_secrets() -> set[str]:
+    """Users allowed to see in-progress preview features (AE/Kuwait integration, etc.)."""
+    try:
+        raw = (
+            st.secrets.get("PREVIEW_ONLY_IDS")
+            or st.secrets.get("preview_only_ids")
+            or os.environ.get("PREVIEW_ONLY_IDS", "")
+        )
+    except Exception:
+        raw = os.environ.get("PREVIEW_ONLY_IDS", "")
+    out: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            s = (str(item).strip() or "").lower()
+            if s:
+                out.add(s)
+    else:
+        for part in re.split(r"[,\n;\s]+", str(raw or "")):
+            s = (part or "").strip().lower()
+            if s:
+                out.add(s)
+    return out
+
+
+def _is_preview_user(current_user: str) -> bool:
+    """True for users explicitly listed in PREVIEW_ONLY_IDS."""
+    u = (current_user or "").strip().lower()
+    if not u:
+        return False
+    allow = _preview_only_ids_from_secrets()
+    if not allow:
+        return False
+    local = u.split("@", 1)[0] if "@" in u else u
+    return u in allow or local in allow
+
+
 def _render_export_button(rows: list[dict], file_stem: str, key: str):
     """Render CSV download button when rows exist."""
     if rows is None:
@@ -3846,6 +3882,7 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
+    st.session_state["preview_only_mode"] = _is_preview_user(current_user)
 
     # Hide the built-in dataframe Download control for non-export users (must run AFTER can_export is computed).
     if not can_export:
