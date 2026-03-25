@@ -2752,24 +2752,12 @@ _FACILITY_COORDS_APPROX = {
 }
 
 
-# Google Maps "ms" marker icons (teardrop dots) — one URL per status bucket for IconLayer.
-_GOOGLE_MAP_PIN_URLS = {
-    "Vacant": "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-    "Churning": "https://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
-    "Occupied/Sold": "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-    "Unknown": "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-}
-
-# Google dot PNGs are 32×32; anchor tip near bottom center.
-_PIN_ICON_ATLAS_MAPPING = {
-    "pin": {
-        "x": 0,
-        "y": 0,
-        "width": 32,
-        "height": 32,
-        "anchorY": 32,
-        "anchorX": 16,
-    }
+# Status colors for map markers (RGBA). ScatterplotLayer avoids CORS issues from remote pin images.
+_MAP_MARKER_RGBA = {
+    "Vacant": [34, 197, 94, 240],
+    "Churning": [234, 179, 8, 240],
+    "Occupied/Sold": [239, 68, 68, 240],
+    "Unknown": [100, 116, 139, 235],
 }
 
 
@@ -2844,7 +2832,7 @@ def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
 
 
 def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities map (preview)"):
-    """Landing map: Google-style pins, status-colored, one pin per facility. Non-blocking."""
+    """Landing map: one marker per facility, status-colored (ScatterplotLayer — reliable vs remote pin images)."""
     if not rows:
         return
     try:
@@ -2900,7 +2888,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 status = "Occupied/Sold"
             else:
                 status = "Unknown"
-            pin_url = _GOOGLE_MAP_PIN_URLS.get(status, _GOOGLE_MAP_PIN_URLS["Unknown"])
+            rgba = _MAP_MARKER_RGBA.get(status, _MAP_MARKER_RGBA["Unknown"])
             map_rows.append(
                 {
                     "facility": b["facility"],
@@ -2912,48 +2900,43 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     "occupied": b["occupied"],
                     "sold": b["sold"],
                     "status": status,
-                    "pin_url": pin_url,
+                    "marker_rgba": rgba,
                 }
             )
         map_df = pd.DataFrame(map_rows)
         if map_df.empty:
             return
         st.caption(
-            f"**{map_title}** — all facilities (default). Pins use Google Maps–style markers; "
-            "green = Vacant, yellow = Churning, red = Occupied/Sold, blue = other."
+            f"**{map_title}** — all facilities (default). **Markers:** green = Vacant, yellow = Churning, "
+            "red = Occupied/Sold, gray = other. (Map uses drawn circles so markers always show in the browser.)"
         )
         if pdk is None:
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
         else:
-            layers = []
-            for pin_url, sub in map_df.groupby("pin_url", sort=False):
-                if sub.empty:
-                    continue
-                layers.append(
-                    pdk.Layer(
-                        "IconLayer",
-                        data=sub,
-                        get_position="[lon, lat]",
-                        pickable=True,
-                        icon_atlas=pin_url,
-                        icon_mapping=_PIN_ICON_ATLAS_MAPPING,
-                        get_icon="pin",
-                        size_scale=1,
-                        get_size=36,
-                        size_min_pixels=28,
-                        size_max_pixels=44,
-                    )
-                )
-            if not layers:
-                return
             tooltip = {
                 "html": "<b>{facility}</b><br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
+            # Records serialize RGBA lists reliably for deck.gl (DataFrame cells can be flattened wrong).
+            _map_records = map_df.to_dict("records")
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=_map_records,
+                get_position="[lon, lat]",
+                get_fill_color="marker_rgba",
+                get_radius=1,
+                radius_scale=2500,
+                radius_min_pixels=12,
+                radius_max_pixels=28,
+                pickable=True,
+                stroked=True,
+                line_width_min_pixels=2,
+                get_line_color=[15, 23, 42, 220],
+            )
             try:
                 st.pydeck_chart(
                     pdk.Deck(
-                        layers=layers,
+                        layers=[layer],
                         initial_view_state=pdk.ViewState(
                             latitude=float(map_df["lat"].mean()),
                             longitude=float(map_df["lon"].mean()),
