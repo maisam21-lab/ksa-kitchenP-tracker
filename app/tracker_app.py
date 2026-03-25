@@ -964,26 +964,26 @@ def _data_status_from_pulse(last_ts: str | None) -> tuple[str, str, str]:
 
 
 def _format_updated_ago(last_ts: str | None) -> str:
-    """Return human-readable relative time for status pill, e.g. 'Updated 2 min ago'."""
+    """Return human-readable relative time for status pill, e.g. 'Refreshed 2 min ago'."""
     if not last_ts:
-        return "Updated never"
+        return "Never refreshed"
     try:
         from datetime import datetime, timezone
         dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
         now = datetime.now(timezone.utc)
         age_sec = (now - dt).total_seconds()
         if age_sec < 60:
-            return "Updated just now"
+            return "Refreshed just now"
         if age_sec < 3600:
             m = int(age_sec / 60)
-            return f"Updated {m} min ago"
+            return f"Refreshed {m} min ago"
         if age_sec < 86400:
             h = int(age_sec / 3600)
-            return f"Updated {h} hour ago" if h == 1 else f"Updated {h} hours ago"
+            return f"Refreshed {h} hour ago" if h == 1 else f"Refreshed {h} hours ago"
         d = int(age_sec / 86400)
-        return f"Updated {d} day ago" if d == 1 else f"Updated {d} days ago"
+        return f"Refreshed {d} day ago" if d == 1 else f"Refreshed {d} days ago"
     except Exception:
-        return "Updated —"
+        return "Refreshed —"
 
 
 def _gsheet_refresh_is_stale(minutes: int = 15) -> bool:
