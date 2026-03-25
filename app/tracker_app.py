@@ -3001,6 +3001,61 @@ def _declutter_map_points(records: list[dict]) -> list[dict]:
     return records
 
 
+def _cluster_map_points(records: list[dict], cell_deg: float = 0.012) -> list[dict]:
+    """Cluster nearby facilities into map bubbles for cleaner zoomed-out view."""
+    if not records:
+        return []
+    buckets: dict[tuple[int, int], list[dict]] = {}
+    for rec in records:
+        try:
+            lat = float(rec.get("lat", 0))
+            lon = float(rec.get("lon", 0))
+        except Exception:
+            continue
+        key = (int(round(lat / cell_deg)), int(round(lon / cell_deg)))
+        buckets.setdefault(key, []).append(rec)
+
+    out: list[dict] = []
+    for _, group in buckets.items():
+        if not group:
+            continue
+        if len(group) == 1:
+            g = dict(group[0])
+            g["cluster_size"] = 1
+            g["is_cluster"] = False
+            out.append(g)
+            continue
+        lat = sum(float(g.get("lat", 0)) for g in group) / len(group)
+        lon = sum(float(g.get("lon", 0)) for g in group) / len(group)
+        # Choose dominant status in cluster.
+        counts = {"Vacant": 0, "Churning": 0, "Occupied/Sold": 0, "Unknown": 0}
+        for g in group:
+            st = str(g.get("status") or "Unknown")
+            if st not in counts:
+                st = "Unknown"
+            counts[st] += 1
+        dominant = max(counts, key=lambda k: counts[k])
+        out.append(
+            {
+                "facility": f"{len(group)} facilities",
+                "address": "—",
+                "lat": lat,
+                "lon": lon,
+                "total": sum(int(g.get("total") or 0) for g in group),
+                "vacant": sum(int(g.get("vacant") or 0) for g in group),
+                "churning": sum(int(g.get("churning") or 0) for g in group),
+                "occupied": sum(int(g.get("occupied") or 0) for g in group),
+                "sold": sum(int(g.get("sold") or 0) for g in group),
+                "status": dominant,
+                "pin_text": str(len(group)),
+                "pin_color": _MAP_PIN_RGBA.get(dominant, _MAP_PIN_RGBA["Unknown"]),
+                "cluster_size": len(group),
+                "is_cluster": True,
+            }
+        )
+    return out
+
+
 def _is_live_facility_name(fac_norm: str, live_set: set[str]) -> bool:
     """Fuzzy match facility name against live set (handles variants like 'Qurtoba - Old')."""
     if not live_set:
@@ -3158,7 +3213,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
             _map_records = map_df.to_dict("records")
-            _map_records = _declutter_map_points(_map_records)
+            _clustered = _cluster_map_points(_map_records, cell_deg=0.012)
+            _map_records = _declutter_map_points(_clustered)
             try:
                 st.pydeck_chart(
                     pdk.Deck(
@@ -3170,9 +3226,9 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                                 get_position="[plot_lon, plot_lat]",
                                 get_fill_color="pin_color",
                                 get_radius=1,
-                                radius_scale=2200,
-                                radius_min_pixels=6,
-                                radius_max_pixels=12,
+                                radius_scale=2600,
+                                radius_min_pixels=7,
+                                radius_max_pixels=18,
                                 pickable=True,
                                 stroked=True,
                                 line_width_min_pixels=1,
@@ -3183,19 +3239,19 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                                 data=_map_records,
                                 get_position="[plot_lon, plot_lat]",
                                 get_text="pin_text",
-                                get_color="pin_color",
-                                get_size=20,
-                                size_min_pixels=12,
-                                size_max_pixels=20,
+                                get_color=[15, 23, 42, 255],
+                                get_size=16,
+                                size_min_pixels=10,
+                                size_max_pixels=16,
                                 get_alignment_baseline="'bottom'",
                                 get_text_anchor="'middle'",
                                 pickable=True,
                             )
                         ],
                         initial_view_state=pdk.ViewState(
-                            latitude=float(map_df["lat"].mean()),
-                            longitude=float(map_df["lon"].mean()),
-                            zoom=8.2,
+                            latitude=24.7136,
+                            longitude=46.6753,
+                            zoom=9.2,
                             pitch=0,
                         ),
                         tooltip=tooltip,
