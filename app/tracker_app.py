@@ -184,6 +184,9 @@ EXPORT_COLUMNS = [
     "metric_name", "value", "status", "notes",
 ]
 
+# Injected for grid row styling only — never include in user CSV downloads.
+_INTERNAL_CSV_EXPORT_KEYS = frozenset({"_has_opportunity"})
+
 # Map common Google Sheet export headers to our schema (case-insensitive, strip spaces)
 GSHEET_HEADER_MAP = {
     "record id": "record_id",
@@ -1481,7 +1484,7 @@ def export_csv_generic(rows: list[dict]) -> str:
     """Export any list of dicts to CSV (all keys; column order from first row)."""
     if not rows:
         return ""
-    keys = list(rows[0].keys()) if rows else []
+    keys = [k for k in rows[0].keys() if k not in _INTERNAL_CSV_EXPORT_KEYS]
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=keys, extrasaction="ignore")
     writer.writeheader()
