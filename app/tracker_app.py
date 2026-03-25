@@ -1558,6 +1558,8 @@ def _can_user_export(current_user: str, is_developer: bool = False) -> bool:
         local = u.split("@", 1)[0]
     else:
         local = u
+    # Normalize allowed set (strip/lower)
+    allowed = {(a or "").strip().lower() for a in allowed if (a or "").strip()}
     return u in allowed or local in allowed
 
 
@@ -3132,13 +3134,24 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             "red = Occupied/Sold, gray = other."
         )
 
-        # Google Maps (no API key): embed a live map centered on facilities, with per-facility "Open in Google Maps" links.
+        # Google Maps: without an Embed API key, Google often shows "no map available" in iframes.
+        # We therefore show a robust link-based experience by default, and only iframe-embed when a key is provided.
         try:
             _center_lat = float(map_df["lat"].mean())
             _center_lon = float(map_df["lon"].mean())
-            _gm_embed = f"https://www.google.com/maps?q={_center_lat:.6f},{_center_lon:.6f}&z=9&output=embed"
             with st.expander("Google Maps view (live)", expanded=False):
-                components.iframe(_gm_embed, height=420, scrolling=False)
+                _gm_key = ""
+                try:
+                    _gm_key = (st.secrets.get("GOOGLE_MAPS_EMBED_API_KEY") or st.secrets.get("google_maps_embed_api_key") or os.environ.get("GOOGLE_MAPS_EMBED_API_KEY", "")).strip()
+                except Exception:
+                    _gm_key = os.environ.get("GOOGLE_MAPS_EMBED_API_KEY", "").strip()
+                if _gm_key:
+                    # Official Embed API (requires key + billing enabled)
+                    _gm_embed = f"https://www.google.com/maps/embed/v1/view?key={urllib.parse.quote(_gm_key)}&center={_center_lat:.6f},{_center_lon:.6f}&zoom=9&maptype=roadmap"
+                    components.iframe(_gm_embed, height=420, scrolling=False)
+                else:
+                    st.caption("Google Maps embed is disabled (no key). Showing Google Maps links instead.")
+                    st.link_button("Open Google Maps (centered)", f"https://www.google.com/maps?q={_center_lat:.6f},{_center_lon:.6f}&z=9")
                 # Links so users can open actual pins in Google Maps (one per facility).
                 _links = []
                 for _, rr in map_df.sort_values(["facility"]).iterrows():
@@ -4280,6 +4293,15 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user, is_developer=_is_developer())
     st.session_state["can_export"] = can_export
+    # Developer-only diagnostics (collapsed) to confirm export gating without exposing to normal users.
+    if _is_developer():
+        with st.sidebar.expander("Diagnostics (developer)", expanded=False):
+            st.write("Export enabled:", bool(can_export))
+            st.write("Current user:", current_user or "—")
+            try:
+                st.write("Export allowlist size:", len(_export_allowed_ids_from_secrets()))
+            except Exception:
+                st.write("Export allowlist size: —")
 
     # Product shape: section navigation by role (Admin tab removed)
     if _is_developer() or user_role == "super_user" or user_role == "manager_viewer":
