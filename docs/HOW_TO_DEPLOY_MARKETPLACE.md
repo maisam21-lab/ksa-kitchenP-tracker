@@ -18,21 +18,28 @@ You already have the KSA tracker app on Streamlit Cloud. The marketplace is a **
 
 ---
 
-## Step 3: Fill in the form
+## Step 3: Fill in the form (don’t mix these up)
 
-**Repository (first dropdown or box)**  
-- Choose your GitHub account or org.  
-- Then choose the repo: **`ksa-kitchenP-tracker`** (the same repo as your KSA tracker).  
-- If you don’t see it, connect GitHub in Streamlit Cloud settings first.
+**Repository**  
+- This must be your **GitHub repo**, not a filename.  
+- It usually looks like: **`username/repo-name`** or **`org-name/repo-name`**.  
+- Example: **`maisam21-lab/ksa-kitchenP-tracker`**  
+- Use the **dropdown** to pick the repo (same one as your KSA tracker).  
+- Do **not** type `marketplace_app.py` here — that goes in **Main file path** below.
 
 **Branch**  
-- Leave as **`main`** (or the branch you use for the tracker).
+- Type or select: **`main`**
 
 **Main file path**  
-- This is the box that says which file to run.  
-- **Clear** whatever is there (e.g. `app/tracker_app.py`).  
+- This is the **file inside the repo** that Streamlit runs.  
 - Type exactly: **`marketplace_app.py`**  
-- Don’t add `app/` in front — the file is at the root of the repo.
+- Do **not** use `streamlit_app.py` — use **`marketplace_app.py`**.
+
+| Field            | What to put                          | Not this              |
+|------------------|--------------------------------------|------------------------|
+| Repository       | `maisam21-lab/ksa-kitchenP-tracker`  | ~~marketplace_app.py~~ |
+| Branch           | `main`                               | —                      |
+| Main file path   | `marketplace_app.py`                 | ~~streamlit_app.py~~   |
 
 ---
 
