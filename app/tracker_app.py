@@ -1536,7 +1536,8 @@ def _export_allowed_ids_from_secrets() -> set[str]:
             if s:
                 out.add(s)
     else:
-        for part in str(raw or "").split(","):
+        parts = re.split(r"[,\n;\s]+", str(raw or ""))
+        for part in parts:
             s = (part or "").strip().lower()
             if s:
                 out.add(s)
@@ -3036,12 +3037,15 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 continue
             lat_raw = _row_value_by_candidates(r, ["Latitude", "lat", "facility_latitude", "facility_lat"])
             lon_raw = _row_value_by_candidates(r, ["Longitude", "lon", "lng", "facility_longitude", "facility_lon"])
+            row_address = _row_value_by_candidates(r, ["Address", "address", "Location", "location", "Full Address", "full_address"])
             fac_display = str(r.get(facility_key) or "").strip()
             fac_norm = re.sub(r"[^a-z0-9]+", " ", fac_display.lower()).strip()
             if fac_norm in facility_locations:
                 resolved = (facility_locations[fac_norm]["lat"], facility_locations[fac_norm]["lon"])
+                resolved_address = facility_locations[fac_norm].get("address") or row_address
             else:
                 resolved = _resolve_facility_lat_lon(fac_display, lat_raw, lon_raw)
+                resolved_address = row_address
             if resolved[0] is None or resolved[1] is None:
                 continue
             lat, lon = resolved
@@ -3049,6 +3053,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 facility,
                 {
                     "facility": fac_display,
+                    "address": (resolved_address or "").strip(),
                     "lat": lat,
                     "lon": lon,
                     "total": 0,
@@ -3058,6 +3063,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     "sold": 0,
                 },
             )
+            if not b.get("address") and resolved_address:
+                b["address"] = (resolved_address or "").strip()
             b["total"] += 1
             s = _normalize_status_label(r.get("Status") if "Status" in r else r.get("status__c") if "status__c" in r else r.get("status"))
             s_low = str(s).strip().lower()
@@ -3084,6 +3091,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             map_rows.append(
                 {
                     "facility": b["facility"],
+                    "address": b.get("address") or "—",
                     "lat": b["lat"],
                     "lon": b["lon"],
                     "total": b["total"],
@@ -3107,7 +3115,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
         else:
             tooltip = {
-                "html": "<b>{facility}</b><br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
+                "html": "<b>{facility}</b><br/>Address: {address}<br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
             _map_records = map_df.to_dict("records")
