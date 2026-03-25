@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import urllib.parse
 import sqlite3
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -2752,13 +2753,31 @@ _FACILITY_COORDS_APPROX = {
 }
 
 
-# Status colors for map markers (RGBA). ScatterplotLayer avoids CORS issues from remote pin images.
-_MAP_MARKER_RGBA = {
-    "Vacant": [34, 197, 94, 240],
-    "Churning": [234, 179, 8, 240],
-    "Occupied/Sold": [239, 68, 68, 240],
-    "Unknown": [100, 116, 139, 235],
+# Map pin colors (hex) for inline SVG teardrop pins.
+_MAP_PIN_HEX = {
+    "Vacant": "#22c55e",
+    "Churning": "#eab308",
+    "Occupied/Sold": "#ef4444",
+    "Unknown": "#64748b",
 }
+
+
+def _svg_pin_data_url(fill_hex: str) -> str:
+    """Return a data URL for a teardrop map pin SVG (no external assets/CORS)."""
+    fill = (fill_hex or "#64748b").strip()
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="g" cx="28%" cy="22%" r="55%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.65"/>
+      <stop offset="35%" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.12"/>
+    </radialGradient>
+  </defs>
+  <path d="M32 2C20.4 2 11 11.4 11 23c0 15.6 21 39 21 39s21-23.4 21-39C53 11.4 43.6 2 32 2z"
+        fill="{fill}" stroke="#0f172a" stroke-opacity="0.55" stroke-width="2" />
+  <circle cx="32" cy="23" r="10" fill="url(#g)"/>
+</svg>"""
+    return "data:image/svg+xml;charset=utf-8," + urllib.parse.quote(svg)
 
 
 def _facility_jitter_lat_lon(facility_key: str) -> tuple[float, float]:
@@ -2832,7 +2851,7 @@ def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
 
 
 def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities map (preview)"):
-    """Landing map: one marker per facility, status-colored (ScatterplotLayer — reliable vs remote pin images)."""
+    """Landing map: one marker per facility, status-colored teardrop pins (inline SVG icons)."""
     if not rows:
         return
     try:
@@ -2907,8 +2926,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
         if map_df.empty:
             return
         st.caption(
-            f"**{map_title}** — all facilities (default). **Markers:** green = Vacant, yellow = Churning, "
-            "red = Occupied/Sold, gray = other. (Map uses drawn circles so markers always show in the browser.)"
+            f"**{map_title}** — all facilities (default). **Pins:** green = Vacant, yellow = Churning, "
+            "red = Occupied/Sold, gray = other."
         )
         if pdk is None:
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
@@ -2917,26 +2936,38 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 "html": "<b>{facility}</b><br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
-            # Records serialize RGBA lists reliably for deck.gl (DataFrame cells can be flattened wrong).
             _map_records = map_df.to_dict("records")
-            layer = pdk.Layer(
-                "ScatterplotLayer",
-                data=_map_records,
-                get_position="[lon, lat]",
-                get_fill_color="marker_rgba",
-                get_radius=1,
-                radius_scale=2500,
-                radius_min_pixels=12,
-                radius_max_pixels=28,
-                pickable=True,
-                stroked=True,
-                line_width_min_pixels=2,
-                get_line_color=[15, 23, 42, 220],
-            )
+            # Build one IconLayer per status so each can use its own inline SVG icon atlas.
+            layers = []
+            for status, sub in map_df.groupby("status", sort=False):
+                if sub.empty:
+                    continue
+                fill = _MAP_PIN_HEX.get(str(status), _MAP_PIN_HEX["Unknown"])
+                icon_atlas = _svg_pin_data_url(fill)
+                layers.append(
+                    pdk.Layer(
+                        "IconLayer",
+                        data=sub.to_dict("records"),
+                        get_position="[lon, lat]",
+                        pickable=True,
+                        icon_atlas=icon_atlas,
+                        icon_mapping={
+                            "pin": {"x": 0, "y": 0, "width": 64, "height": 64, "anchorY": 64, "anchorX": 32}
+                        },
+                        # Constant icon id. (If set to "pin", deck.gl may treat it as a column name.)
+                        get_icon="'pin'",
+                        size_scale=1,
+                        get_size=34,
+                        size_min_pixels=26,
+                        size_max_pixels=44,
+                    )
+                )
+            if not layers:
+                return
             try:
                 st.pydeck_chart(
                     pdk.Deck(
-                        layers=[layer],
+                        layers=layers,
                         initial_view_state=pdk.ViewState(
                             latitude=float(map_df["lat"].mean()),
                             longitude=float(map_df["lon"].mean()),
@@ -2949,7 +2980,38 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     use_container_width=True,
                 )
             except Exception:
-                st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
+                # Fallback: circles if SVG IconLayer fails in the browser
+                layer = pdk.Layer(
+                    "ScatterplotLayer",
+                    data=_map_records,
+                    get_position="[lon, lat]",
+                    get_fill_color=[100, 116, 139, 235],
+                    get_radius=1,
+                    radius_scale=2500,
+                    radius_min_pixels=10,
+                    radius_max_pixels=24,
+                    pickable=True,
+                    stroked=True,
+                    line_width_min_pixels=2,
+                    get_line_color=[15, 23, 42, 220],
+                )
+                try:
+                    st.pydeck_chart(
+                        pdk.Deck(
+                            layers=[layer],
+                            initial_view_state=pdk.ViewState(
+                                latitude=float(map_df["lat"].mean()),
+                                longitude=float(map_df["lon"].mean()),
+                                zoom=8.2,
+                                pitch=0,
+                            ),
+                            tooltip=tooltip,
+                            map_style=None,
+                        ),
+                        use_container_width=True,
+                    )
+                except Exception:
+                    st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
     except Exception:
         # Keep existing tracker flow untouched even if map rendering fails.
         return
