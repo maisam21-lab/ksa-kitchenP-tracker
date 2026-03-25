@@ -1539,13 +1539,12 @@ def _export_allowed_ids_from_secrets() -> set[str]:
     return out
 
 
-def _can_user_export(current_user: str, is_developer: bool = False) -> bool:
-    """True only for developer sessions and users listed in EXPORT_ALLOWED_IDS (and alias secret keys).
+def _can_user_export(current_user: str) -> bool:
+    """True only when current_user matches EXPORT_ALLOWED_IDS (or alias keys: export_allowed_ids, etc.).
 
-    If the export list is empty, no non-developer may export.
+    Developer / super_user roles do not grant export — add the email to EXPORT_ALLOWED_IDS if they should export.
+    If the export list is empty, nobody may export.
     """
-    if is_developer:
-        return True
     u = (current_user or "").strip().lower()
     if not u:
         return False
@@ -3814,7 +3813,7 @@ def main():
             else:
                 user_role = "associate_viewer"
     st.session_state["user_role"] = user_role
-    can_export = _can_user_export(current_user, is_developer=_is_developer())
+    can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
 
     # Hide the built-in dataframe Download control for non-export users (must run AFTER can_export is computed).
