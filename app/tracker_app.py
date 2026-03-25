@@ -1497,6 +1497,54 @@ def export_csv_generic(rows: list[dict]) -> str:
     return buf.getvalue()
 
 
+def _export_allowed_ids_from_secrets() -> set[str]:
+    """IDs (emails) allowed to export data. Supports comma string or list in secrets/env."""
+    try:
+        raw = (
+            st.secrets.get("EXPORT_ALLOWED_IDS")
+            or st.secrets.get("export_allowed_ids")
+            or os.environ.get("EXPORT_ALLOWED_IDS", "")
+        )
+    except Exception:
+        raw = os.environ.get("EXPORT_ALLOWED_IDS", "")
+    out: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            s = (str(item).strip() or "").lower()
+            if s:
+                out.add(s)
+    else:
+        for part in str(raw or "").split(","):
+            s = (part or "").strip().lower()
+            if s:
+                out.add(s)
+    return out
+
+
+def _can_user_export(current_user: str, is_developer: bool = False) -> bool:
+    """True if current user can export CSV."""
+    if is_developer:
+        return True
+    u = (current_user or "").strip().lower()
+    if not u:
+        return False
+    return u in _export_allowed_ids_from_secrets()
+
+
+def _render_export_button(rows: list[dict], file_stem: str, key: str):
+    """Render CSV download button when rows exist."""
+    if not rows:
+        return
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(file_stem or "export")).strip("_") or "export"
+    st.download_button(
+        "Export CSV",
+        data=export_csv_generic(rows),
+        file_name=f"{safe_stem}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        key=key,
+    )
+
+
 def _dashboard_sources() -> list[tuple[str, str]]:
     """(display_name, source_id). source_id is 'main_tracker' or tab_id. All tabs."""
     out = [("Main tracker (kitchen data)", "main_tracker")]
@@ -3020,7 +3068,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
 
 
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False):
-    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide). hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
+    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if not rows and tab_id == "Kitchens":
@@ -3147,6 +3195,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             _row_count_placeholder.caption(
                 f"**{_displayed_count}** rows shown (out of **{_total_count}** total)"
             )
+            if allow_download:
+                _rows_to_export = grid_response.get("data") if (grid_response and grid_response.get("data") is not None) else rows_shown
+                _render_export_button(_rows_to_export, f"{tab_id}_filtered", key=f"export_{key_suffix}_{tab_id}_grid")
     else:
         st.dataframe(df_display, use_container_width=True, hide_index=True, height=700)
         if rows_shown:
@@ -3154,6 +3205,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             _row_count_placeholder.caption(
                 f"**{_total_count}** rows shown (out of **{_total_count}** total)"
             )
+            if allow_download:
+                _render_export_button(rows_shown, f"{tab_id}_filtered", key=f"export_{key_suffix}_{tab_id}_df")
     # CSV download disabled app-wide (no Download CSV button)
 
 
@@ -3278,9 +3331,6 @@ def main():
     .ag-toolbar [title*="Download"],
     .ag-toolbar button[title*="CSV"],
     [class*="ag-"] [title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-    /* Hide any standalone "Download as CSV" button next to dataframes (do not hide other buttons) */
-    div[data-testid="stHorizontalBlock"] button[aria-label*="ownload"],
-    div[data-testid="stHorizontalBlock"] button[title*="Download"] { display: none !important; visibility: hidden !important; }
     /* Toolbar expand/fullscreen: entire sheet fills viewport; scrollbars only when content exceeds screen */
     [data-testid="stFullscreenFrame"],
     [data-testid="stFullscreenFrame"] > div,
@@ -4040,6 +4090,8 @@ def main():
             else:
                 user_role = "associate_viewer"
     st.session_state["user_role"] = user_role
+    can_export = _can_user_export(current_user, is_developer=_is_developer())
+    st.session_state["can_export"] = can_export
 
     # Product shape: section navigation by role (Admin tab removed)
     if _is_developer() or user_role == "super_user" or user_role == "manager_viewer":
@@ -4222,7 +4274,14 @@ def main():
                 _labels_to_use = chosen_labels[:1]
             _show_combined = len(_labels_to_use) > 1
             if not _show_combined:
-                _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet", allow_download=False, hide_account_country=True)
+                _render_generic_tab(
+                    source_ids.get(_labels_to_use[0], _labels_to_use[0]),
+                    key_suffix="master_other",
+                    is_developer=is_developer,
+                    source="gsheet",
+                    allow_download=can_export,
+                    hide_account_country=True,
+                )
             else:
                 # Combined view: load every selected sheet and merge into one table
                 combined_rows = []
@@ -4331,6 +4390,9 @@ def main():
                             _row_count_placeholder_combined.caption(
                                 f"**{_cnt}** rows shown (out of **{_total_combined}** total)"
                             )
+                            if can_export:
+                                _rows_to_export = grid_res.get("data") if (grid_res and grid_res.get("data") is not None) else rows_shown
+                                _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
                     else:
                         st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
                         if rows_shown:
@@ -4338,6 +4400,8 @@ def main():
                             _row_count_placeholder_combined.caption(
                                 f"**{_total_combined}** rows shown (out of **{_total_combined}** total)"
                             )
+                            if can_export:
+                                _render_export_button(rows_shown, "master_kitchens_combined_filtered", key="export_master_kitchens_combined_df")
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
@@ -4441,6 +4505,9 @@ def main():
                         _row_count_placeholder_single.caption(
                             f"**{_cnt_m}** rows shown (out of **{_total_single}** total)"
                         )
+                        if can_export:
+                            _rows_to_export = grid_res_m.get("data") if (grid_res_m and grid_res_m.get("data") is not None) else rows_display
+                            _render_export_button(_rows_to_export, "master_kitchens_filtered", key="export_master_kitchens_single")
                 else:
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
@@ -4466,6 +4533,8 @@ def main():
                         _row_count_placeholder_single.caption(
                             f"**{_total_single}** rows shown (out of **{_total_single}** total)"
                         )
+                        if can_export:
+                            _render_export_button(rows_display, "master_kitchens_filtered", key="export_master_kitchens_single_df")
             elif rows_filtered and not use_facility_tabs:
                 _show = rows_display if rows_filtered else []
                 for r in _show[:100]:
