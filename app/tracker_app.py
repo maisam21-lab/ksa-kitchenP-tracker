@@ -44,36 +44,46 @@ try:
 except ImportError:
     try:
         import auth
-    except ImportError:
+    except Exception:
         auth = None
+except Exception:
+    auth = None
 try:
     from app import snapshot as snapshot_mod
 except ImportError:
     try:
         import snapshot as snapshot_mod
-    except ImportError:
+    except Exception:
         snapshot_mod = None
+except Exception:
+    snapshot_mod = None
 try:
     from app import fx as fx_mod
 except ImportError:
     try:
         import fx as fx_mod
-    except ImportError:
+    except Exception:
         fx_mod = None
+except Exception:
+    fx_mod = None
 try:
     from app import multipliers as multipliers_mod
 except ImportError:
     try:
         import multipliers as multipliers_mod
-    except ImportError:
+    except Exception:
         multipliers_mod = None
+except Exception:
+    multipliers_mod = None
 try:
     from app import data_store as data_store_mod
 except ImportError:
     try:
         import data_store as data_store_mod
-    except ImportError:
+    except Exception:
         data_store_mod = None
+except Exception:
+    data_store_mod = None
 
 try:
     import pandas as pd
