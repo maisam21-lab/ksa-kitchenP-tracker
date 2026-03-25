@@ -3154,7 +3154,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
         else:
             tooltip = {
-                "html": "<b>{facility}</b><br/>Status: <b>{status}</b>",
+                "html": "<b>{facility}</b>",
                 "style": {"backgroundColor": "#111827", "color": "white"},
             }
             _map_records = map_df.to_dict("records")
