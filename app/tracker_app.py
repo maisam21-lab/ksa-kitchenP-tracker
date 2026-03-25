@@ -3903,6 +3903,14 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
+    if bool(st.session_state.get("preview_only_mode")):
+        st.radio(
+            "Country filter (preview only)",
+            ["KSA", "Kuwait", "UAE"],
+            horizontal=True,
+            key="preview_kitchen_region",
+            help="Kuwait and UAE workbooks are only visible to PREVIEW_ONLY_IDS users.",
+        )
     # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
@@ -4119,14 +4127,6 @@ def main():
     if section == "Kitchen Master Data":
         _show_refresh_btn = _is_developer() or user_role == "super_user"
         preview_mode_km = bool(st.session_state.get("preview_only_mode"))
-        if preview_mode_km:
-            st.radio(
-                "Kitchen data region (preview only)",
-                ["KSA", "Kuwait", "UAE"],
-                horizontal=True,
-                key="preview_kitchen_region",
-                help="Kuwait and UAE workbooks are only visible to PREVIEW_ONLY_IDS users.",
-            )
         _pkreg = (st.session_state.get("preview_kitchen_region") or "KSA").strip()
         _preview_regional_km = preview_mode_km and _pkreg in ("Kuwait", "UAE")
         if _preview_regional_km:
