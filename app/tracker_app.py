@@ -2407,6 +2407,39 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
     return out
 
 
+def _fetch_online_sheet_by_gid(sheet_id: str, gid: int, credentials_path: str) -> list[dict]:
+    """Fetch a single worksheet by gid from the online Google Sheet. Returns list of dict rows."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except ImportError:
+        raise ImportError("Install: pip install gspread google-auth") from None
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    if credentials_path == "__FROM_SECRETS__":
+        info = dict(st.secrets["gsheet_service_account"])
+        info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+        info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(sheet_id)
+    ws = spreadsheet.get_worksheet_by_id(int(gid))
+    if ws is None:
+        return []
+    rows = ws.get_all_values()
+    if not rows:
+        return []
+    headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
+    out = []
+    for row in rows[1:]:
+        r = list(row) + [""] * (len(headers) - len(row))
+        out.append(dict(zip(headers, r[: len(headers)])))
+    return out
+
+
 def _fetch_bq_export_sheet() -> tuple[list[dict] | None, str | None]:
     """Load Kitchen Master Data from a Google Sheet that is fed by BigQuery (pipeline/scheduled query).
     Expects secrets bq_export_sheet_id = \"sheet-id\" or full docs URL. Uses same [gsheet_service_account].
@@ -2883,6 +2916,40 @@ def _resolve_facility_lat_lon(facility: str, lat_raw: str, lon_raw: str) -> tupl
     return lat, lon
 
 
+def _load_facility_locations_from_sheet() -> dict[str, dict]:
+    """Load facility locations (address/lat/lon) from a dedicated sheet tab by gid.
+
+    Expected columns (flexible): facility/account name + address + latitude + longitude.
+    """
+    try:
+        gid = int((getattr(st, "secrets", None) or {}).get("FACILITY_LOCATIONS_GID") or os.environ.get("FACILITY_LOCATIONS_GID", "") or "1030784019")
+    except Exception:
+        gid = 1030784019
+    creds_path = _get_google_credentials_path()
+    if not creds_path:
+        return {}
+    try:
+        rows = _fetch_online_sheet_by_gid(SHEET_ID, gid, creds_path) or []
+    except Exception:
+        return {}
+    out: dict[str, dict] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        name = _row_value_by_candidates(r, ["Facility", "facility", "Account Name", "account_name", "facility_name", "Site", "site_name"])
+        if not name:
+            continue
+        key = re.sub(r"[^a-z0-9]+", " ", str(name).strip().lower()).strip()
+        lat_raw = _row_value_by_candidates(r, ["Latitude", "lat", "facility_latitude"])
+        lon_raw = _row_value_by_candidates(r, ["Longitude", "lon", "lng", "facility_longitude"])
+        address = _row_value_by_candidates(r, ["Address", "address", "Location", "location", "Full Address", "full_address"])
+        lat, lon = _resolve_facility_lat_lon(name, lat_raw, lon_raw)
+        if lat is None or lon is None:
+            continue
+        out[key] = {"facility": name, "address": address, "lat": lat, "lon": lon}
+    return out
+
+
 def _all_gsheet_facility_rows_for_map(source_ids: dict | None, source_options: list | None) -> list[dict]:
     """Load every Master Kitchens sheet tab once for the map (independent of table multiselect)."""
     if not source_ids or not source_options:
@@ -2951,6 +3018,12 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
     if not rows:
         return
     try:
+        # Facility locations: prefer the dedicated locations sheet (gid) when available.
+        loc_key = "_facility_locations_cache"
+        if loc_key not in st.session_state:
+            st.session_state[loc_key] = _load_facility_locations_from_sheet()
+        facility_locations = st.session_state.get(loc_key) or {}
+
         facility_key = _get_facility_column(list(rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
         if not facility_key:
             return
@@ -2963,14 +3036,19 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 continue
             lat_raw = _row_value_by_candidates(r, ["Latitude", "lat", "facility_latitude", "facility_lat"])
             lon_raw = _row_value_by_candidates(r, ["Longitude", "lon", "lng", "facility_longitude", "facility_lon"])
-            resolved = _resolve_facility_lat_lon(str(r.get(facility_key) or "").strip(), lat_raw, lon_raw)
+            fac_display = str(r.get(facility_key) or "").strip()
+            fac_norm = re.sub(r"[^a-z0-9]+", " ", fac_display.lower()).strip()
+            if fac_norm in facility_locations:
+                resolved = (facility_locations[fac_norm]["lat"], facility_locations[fac_norm]["lon"])
+            else:
+                resolved = _resolve_facility_lat_lon(fac_display, lat_raw, lon_raw)
             if resolved[0] is None or resolved[1] is None:
                 continue
             lat, lon = resolved
             b = buckets.setdefault(
                 facility,
                 {
-                    "facility": str(r.get(facility_key) or "").strip(),
+                    "facility": fac_display,
                     "lat": lat,
                     "lon": lon,
                     "total": 0,
