@@ -85,6 +85,17 @@ except ImportError:
 # Same logic as the sheet: country merge (SA/regions → Saudi Arabia, BH → Bahrain), status color coding.
 SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
 
+# Preview-only regional kitchen master workbooks (same service account as KSA; share Viewer with SA).
+KUWAIT_KITCHEN_SHEET_ID = "1N_Ar-KoFWGTHjbz-p_r1y8VeWGLNI4ZQUAbKZpAI99o"
+KUWAIT_KITCHEN_WORKSHEET_GID = 1841714979
+UAE_KITCHEN_SHEET_ID = "1H9M4QoAz71LJlGMzIiLzy7FtIACtrCUF2pJ5Gr3eXIg"
+UAE_KITCHEN_WORKSHEET_GID = 0
+# Stored in SQLite under separate sources so KSA tabs are unchanged.
+GSOURCE_KITCHEN_KW = "gsheet_kw"
+GSOURCE_KITCHEN_AE = "gsheet_ae"
+TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
+TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
+
 # Rerun works in Streamlit 1.27+; fallback for older versions
 def _rerun():
     if hasattr(st, "rerun"): 
@@ -989,6 +1000,20 @@ def _format_updated_ago(last_ts: str | None) -> str:
 def _gsheet_refresh_is_stale(minutes: int = 15) -> bool:
     """True if no GSheet refresh yet or last refresh was more than `minutes` ago."""
     ts = get_last_refresh("gsheet")
+    if not ts:
+        return True
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+        return age_sec > minutes * 60
+    except Exception:
+        return True
+
+
+def _source_refresh_is_stale(source: str, minutes: int = 15) -> bool:
+    """True if no refresh recorded for `source` or last refresh older than `minutes`."""
+    ts = get_last_refresh(source)
     if not ts:
         return True
     try:
@@ -2476,6 +2501,145 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
     return out
 
 
+def _regional_kitchen_workbook_settings(region: str) -> tuple[str | None, int | None, str, str]:
+    """Return (spreadsheet_id, worksheet_gid, tab_id, sqlite source) for Kuwait or UAE."""
+    secrets = getattr(st, "secrets", None) or {}
+
+    def _as_int(v, default: int) -> int:
+        try:
+            return int(str(v).strip())
+        except Exception:
+            return default
+
+    if region == "Kuwait":
+        sid = (
+            (secrets.get("kuwait_kitchen_sheet_id") or secrets.get("KUWAIT_KITCHEN_SHEET_ID") or "")
+            or os.environ.get("KUWAIT_KITCHEN_SHEET_ID", "")
+            or KUWAIT_KITCHEN_SHEET_ID
+        ).strip()
+        gid = _as_int(
+            secrets.get("kuwait_kitchen_worksheet_gid") or secrets.get("KUWAIT_KITCHEN_WORKSHEET_GID") or os.environ.get("KUWAIT_KITCHEN_WORKSHEET_GID"),
+            KUWAIT_KITCHEN_WORKSHEET_GID,
+        )
+        return (sid or None, gid, TAB_ID_KITCHEN_KW, GSOURCE_KITCHEN_KW)
+    if region == "UAE":
+        sid = (
+            (secrets.get("uae_kitchen_sheet_id") or secrets.get("UAE_KITCHEN_SHEET_ID") or "")
+            or os.environ.get("UAE_KITCHEN_SHEET_ID", "")
+            or UAE_KITCHEN_SHEET_ID
+        ).strip()
+        gid = _as_int(
+            secrets.get("uae_kitchen_worksheet_gid") or secrets.get("UAE_KITCHEN_WORKSHEET_GID") or os.environ.get("UAE_KITCHEN_WORKSHEET_GID"),
+            UAE_KITCHEN_WORKSHEET_GID,
+        )
+        return (sid or None, gid, TAB_ID_KITCHEN_AE, GSOURCE_KITCHEN_AE)
+    return None, None, "", ""
+
+
+def _fetch_gsheet_worksheet_by_gid(sheet_id: str, worksheet_gid: int, credentials_path: str) -> list[dict]:
+    """Read a single worksheet by its gid (sheetId from the URL). Same auth as _fetch_online_sheet."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except ImportError:
+        raise ImportError("Install: pip install gspread google-auth") from None
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    if credentials_path == "__FROM_SECRETS__":
+        info = dict(st.secrets["gsheet_service_account"])
+        info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+        info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(sheet_id)
+    ws = spreadsheet.get_worksheet_by_id(int(worksheet_gid))
+    if ws is None:
+        return []
+    rows = ws.get_all_values()
+    if not rows:
+        return []
+    headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
+    data = []
+    for row in rows[1:]:
+        r = list(row) + [""] * (len(headers) - len(row))
+        data.append(dict(zip(headers, r[: len(headers)])))
+    return data
+
+
+def _refresh_regional_kitchen_workbooks() -> None:
+    """Load Kuwait/UAE preview worksheets into SQLite (sources gsheet_kw / gsheet_ae). Non-fatal on error."""
+    creds_path = _get_google_credentials_path()
+    if not creds_path:
+        return
+    for region in ("Kuwait", "UAE"):
+        sid, gid, tab_id, gsource = _regional_kitchen_workbook_settings(region)
+        if not sid or gid is None:
+            continue
+        try:
+            rows = _fetch_gsheet_worksheet_by_gid(sid, int(gid), creds_path)
+            save_generic_tab(tab_id, rows or [], source=gsource)
+            set_last_refresh(gsource)
+        except Exception:
+            continue
+
+
+def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is_developer: bool, show_refresh_btn: bool) -> None:
+    """Kitchen Master Data view for Kuwait/UAE preview workbooks (PREVIEW_ONLY_IDS only)."""
+    sid, gid, tab_id, gsource = _regional_kitchen_workbook_settings(region)
+    docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid else ""
+    st.caption(
+        f"**Preview — {region} kitchen master** — [Open workbook]({docs}). "
+        "Refreshes with the main KSA Google Sheet job or automatically when data is older than 15 minutes."
+    )
+    import time
+
+    now_sec = time.time()
+    last_run = st.session_state.get(f"regional_auto_refresh_{gsource}") or 0
+    if _source_refresh_is_stale(gsource, 15) and (now_sec - last_run) >= 900:
+        st.session_state[f"regional_auto_refresh_{gsource}"] = now_sec
+        creds = _get_google_credentials_path()
+        if creds and sid:
+            try:
+                rows = _fetch_gsheet_worksheet_by_gid(sid, int(gid), creds)
+                save_generic_tab(tab_id, rows or [], source=gsource)
+                set_last_refresh(gsource)
+                _rerun()
+            except Exception as e:
+                st.warning(f"Could not refresh {region} sheet: {type(e).__name__}: {e}")
+
+    rows = list_generic_tab(tab_id, source=gsource)
+    if not rows:
+        st.info(
+            f"No {region} data loaded yet. Share the Google Sheet with the **service account** email (Viewer), "
+            "then refresh from **Admin / Data Health** or wait for the scheduled GSheet job."
+        )
+        if show_refresh_btn and sid:
+            if st.button(f"Refresh {region} sheet now", key=f"btn_refresh_regional_{gsource}"):
+                creds = _get_google_credentials_path()
+                if creds:
+                    try:
+                        new_rows = _fetch_gsheet_worksheet_by_gid(sid, int(gid), creds)
+                        save_generic_tab(tab_id, new_rows or [], source=gsource)
+                        set_last_refresh(gsource)
+                        st.success(f"Loaded {len(new_rows or [])} rows.")
+                        _rerun()
+                    except Exception as e:
+                        st.error(str(e))
+        return
+
+    _render_generic_tab(
+        tab_id,
+        key_suffix=f"preview_{gsource}",
+        is_developer=is_developer,
+        source=gsource,
+        allow_download=can_export,
+        hide_account_country=True,
+    )
+
+
 def _fetch_bq_export_sheet() -> tuple[list[dict] | None, str | None]:
     """Load Kitchen Master Data from a Google Sheet that is fed by BigQuery (pipeline/scheduled query).
     Expects secrets bq_export_sheet_id = \"sheet-id\" or full docs URL. Uses same [gsheet_service_account].
@@ -2588,7 +2752,9 @@ def _refresh_from_online_sheet():
             c.execute("DELETE FROM gsheet_tab_order")
             for i, tid in tab_order:
                 c.execute("INSERT OR REPLACE INTO gsheet_tab_order (tab_index, tab_id) VALUES (?, ?)", (i, tid))
-    return True, "Loaded: " + "; ".join(loaded) if loaded else "No data in sheet."
+    _refresh_regional_kitchen_workbooks()
+    base_msg = "Loaded: " + "; ".join(loaded) if loaded else "No data in sheet."
+    return True, base_msg + " (Kuwait/UAE preview sheets refreshed if configured.)"
 
 
 # When a row has any of these (Account.Country__c, Account__r.Country__c, Country__c, Country, County),
@@ -3952,191 +4118,324 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         _show_refresh_btn = _is_developer() or user_role == "super_user"
-        superset_rows, superset_meta = _get_superset_master_kitchens()
-        if superset_rows is not None:
-            last_refresh = (superset_meta or {}).get("last_refresh_ts_utc")
-            if _superset_stale_warning(superset_meta or {}):
-                st.warning("Last refresh is older than 30 minutes or last run failed. Data may be stale.")
-            st.caption("Filter kitchen details and view your report.")
-            chosen_label = "Master Kitchens (Live)"
-            source_id = "superset"
-            rows = superset_rows
-            source_options = []
-            is_other_sheet = False
-        else:
-            # BigQuery Master Kitchens: cache in session_state; refresh every 3 minutes
-            import time
-            _bq_cache_key = "bq_master_kitchens_rows"
-            _bq_ts_key = "bq_master_kitchens_fetched_at"
-            _bq_refresh_interval_sec = 180  # 3 minutes
-            now_sec = time.time()
-            cached_rows = st.session_state.get(_bq_cache_key)
-            fetched_at = st.session_state.get(_bq_ts_key) or 0
-            if cached_rows is not None and (now_sec - fetched_at) < _bq_refresh_interval_sec:
-                bq_rows = cached_rows
-                bq_error = None
+        preview_mode_km = bool(st.session_state.get("preview_only_mode"))
+        if preview_mode_km:
+            st.radio(
+                "Kitchen data region (preview only)",
+                ["KSA", "Kuwait", "UAE"],
+                horizontal=True,
+                key="preview_kitchen_region",
+                help="Kuwait and UAE workbooks are only visible to PREVIEW_ONLY_IDS users.",
+            )
+        _pkreg = (st.session_state.get("preview_kitchen_region") or "KSA").strip()
+        _preview_regional_km = preview_mode_km and _pkreg in ("Kuwait", "UAE")
+        if _preview_regional_km:
+            _render_preview_regional_kitchen_master(
+                _pkreg,
+                can_export=can_export,
+                is_developer=is_developer,
+                show_refresh_btn=_show_refresh_btn,
+            )
+        if not _preview_regional_km:
+            superset_rows, superset_meta = _get_superset_master_kitchens()
+            if superset_rows is not None:
+                last_refresh = (superset_meta or {}).get("last_refresh_ts_utc")
+                if _superset_stale_warning(superset_meta or {}):
+                    st.warning("Last refresh is older than 30 minutes or last run failed. Data may be stale.")
+                st.caption("Filter kitchen details and view your report.")
+                chosen_label = "Master Kitchens (Live)"
+                source_id = "superset"
+                rows = superset_rows
+                source_options = []
+                is_other_sheet = False
             else:
-                bq_rows, bq_error = _fetch_bigquery_master_kitchens()
-                if bq_rows is not None:
-                    st.session_state[_bq_cache_key] = bq_rows
-                    st.session_state[_bq_ts_key] = now_sec
-                    bq_error = None
-            if bq_rows is not None:
-                _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
-                # Check if GSheet also has data; default source without showing UI (refresh/source moved to Admin / Data Health)
-                sources = _master_kitchens_sources()
-                gsheet_tab_options = [s[0] for s in sources]
-                source_ids_gsheet = {s[0]: s[1] for s in sources}
-                both_sources_available = bool(gsheet_tab_options)
-                _src_key = "master_kitchens_data_source"
-                if both_sources_available:
-                    if _src_key not in st.session_state:
-                        st.session_state[_src_key] = "bigquery" if bq_rows is not None else "gsheet"
-                else:
-                    st.session_state[_src_key] = "bigquery"
-                use_bq = st.session_state.get(_src_key) == "bigquery"
-                if use_bq:
-                    st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
-                    chosen_label = "Master Kitchens (BigQuery)"
-                    source_id = "bigquery"
-                    rows = bq_rows
-                    source_options = []
-                    is_other_sheet = False
-                else:
-                    # User chose Google Sheet; show sheet selector (multi-select: one or multiple facilities/sheets)
-                    first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
-                    _sel_key = "master_sheets_selection"
-                    # Use default only when key not yet set (let widget own session state to avoid Streamlit warning)
-                    _initial = st.session_state.get(_sel_key) if _sel_key in st.session_state else [first_tab]
-                    if not isinstance(_initial, list):
-                        _initial = [_initial] if _initial else [first_tab]
-                    _default = _initial if set(_initial) <= set(gsheet_tab_options) else [first_tab]
-                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=gsheet_tab_options, default=_default, key=_sel_key, placeholder="Select facilities")
-                    if not chosen_labels:
-                        chosen_labels = [first_tab]
-                    chosen_labels = [t for t in chosen_labels if t in gsheet_tab_options] or [first_tab]
-                    source_id = source_ids_gsheet.get(chosen_labels[0], first_tab)
-                    rows = list_generic_tab(source_id, source="gsheet")
-                    source_options = gsheet_tab_options
-                    source_ids = source_ids_gsheet
-                    chosen_label = "Master Kitchens (Google Sheet)"
-                    is_other_sheet = True
-            else:
-                # BigQuery not available — try optional "BQ export" sheet (pipeline/scheduled query → Sheet)
-                _bq_export_sheet_id = (getattr(st, "secrets", None) or {}).get("bq_export_sheet_id") or ""
-                bq_export_rows, bq_export_error = None, None
-                if _bq_export_sheet_id:
-                    _export_cache_key = "bq_export_sheet_rows"
-                    _export_ts_key = "bq_export_sheet_fetched_at"
-                    _export_ttl = 300  # 5 min
-                    now_sec = time.time()
-                    if (st.session_state.get(_export_ts_key) or 0) + _export_ttl > now_sec and st.session_state.get(_export_cache_key):
-                        bq_export_rows = st.session_state[_export_cache_key]
-                    else:
-                        bq_export_rows, bq_export_error = _fetch_bq_export_sheet()
-                        if bq_export_rows:
-                            st.session_state[_export_cache_key] = bq_export_rows
-                            st.session_state[_export_ts_key] = now_sec
-                if bq_export_rows:
-                    st.caption("**Master Kitchens (from BQ export sheet)** — Data is pushed to this sheet by your BigQuery pipeline or scheduled query.")
-                    chosen_label = "Master Kitchens (from BQ export sheet)"
-                    source_id = "bigquery_export_sheet"
-                    rows = bq_export_rows
-                    source_options = []
-                    is_other_sheet = False
-                else:
-                    pass  # No BQ/export data; config messages and refresh moved to Admin / Data Health
-                _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
-                _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
-                # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
-                last_refresh = get_last_refresh("gsheet")
-                # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
+                # BigQuery Master Kitchens: cache in session_state; refresh every 3 minutes
                 import time
+                _bq_cache_key = "bq_master_kitchens_rows"
+                _bq_ts_key = "bq_master_kitchens_fetched_at"
+                _bq_refresh_interval_sec = 180  # 3 minutes
                 now_sec = time.time()
-                last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
-                if _gsheet_refresh_is_stale(15) and (now_sec - last_run) >= 900:  # 15 min cooldown
-                    st.session_state["gsheet_auto_refresh_last_run"] = now_sec
-                    ok, msg = _refresh_from_online_sheet()
-                    if ok:
-                        set_last_refresh("gsheet")
-                        st.session_state["data_source"] = "gsheet"
-                        _rerun()
+                cached_rows = st.session_state.get(_bq_cache_key)
+                fetched_at = st.session_state.get(_bq_ts_key) or 0
+                if cached_rows is not None and (now_sec - fetched_at) < _bq_refresh_interval_sec:
+                    bq_rows = cached_rows
+                    bq_error = None
+                else:
+                    bq_rows, bq_error = _fetch_bigquery_master_kitchens()
+                    if bq_rows is not None:
+                        st.session_state[_bq_cache_key] = bq_rows
+                        st.session_state[_bq_ts_key] = now_sec
+                        bq_error = None
+                if bq_rows is not None:
+                    _mins_ago = (now_sec - st.session_state.get(_bq_ts_key, 0)) / 60.0
+                    # Check if GSheet also has data; default source without showing UI (refresh/source moved to Admin / Data Health)
+                    sources = _master_kitchens_sources()
+                    gsheet_tab_options = [s[0] for s in sources]
+                    source_ids_gsheet = {s[0]: s[1] for s in sources}
+                    both_sources_available = bool(gsheet_tab_options)
+                    _src_key = "master_kitchens_data_source"
+                    if both_sources_available:
+                        if _src_key not in st.session_state:
+                            st.session_state[_src_key] = "bigquery" if bq_rows is not None else "gsheet"
+                    else:
+                        st.session_state[_src_key] = "bigquery"
+                    use_bq = st.session_state.get(_src_key) == "bigquery"
+                    if use_bq:
+                        st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
+                        chosen_label = "Master Kitchens (BigQuery)"
+                        source_id = "bigquery"
+                        rows = bq_rows
+                        source_options = []
+                        is_other_sheet = False
+                    else:
+                        # User chose Google Sheet; show sheet selector (multi-select: one or multiple facilities/sheets)
+                        first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
+                        _sel_key = "master_sheets_selection"
+                        # Use default only when key not yet set (let widget own session state to avoid Streamlit warning)
+                        _initial = st.session_state.get(_sel_key) if _sel_key in st.session_state else [first_tab]
+                        if not isinstance(_initial, list):
+                            _initial = [_initial] if _initial else [first_tab]
+                        _default = _initial if set(_initial) <= set(gsheet_tab_options) else [first_tab]
+                        chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=gsheet_tab_options, default=_default, key=_sel_key, placeholder="Select facilities")
+                        if not chosen_labels:
+                            chosen_labels = [first_tab]
+                        chosen_labels = [t for t in chosen_labels if t in gsheet_tab_options] or [first_tab]
+                        source_id = source_ids_gsheet.get(chosen_labels[0], first_tab)
+                        rows = list_generic_tab(source_id, source="gsheet")
+                        source_options = gsheet_tab_options
+                        source_ids = source_ids_gsheet
+                        chosen_label = "Master Kitchens (Google Sheet)"
+                        is_other_sheet = True
+                else:
+                    # BigQuery not available — try optional "BQ export" sheet (pipeline/scheduled query → Sheet)
+                    _bq_export_sheet_id = (getattr(st, "secrets", None) or {}).get("bq_export_sheet_id") or ""
+                    bq_export_rows, bq_export_error = None, None
+                    if _bq_export_sheet_id:
+                        _export_cache_key = "bq_export_sheet_rows"
+                        _export_ts_key = "bq_export_sheet_fetched_at"
+                        _export_ttl = 300  # 5 min
+                        now_sec = time.time()
+                        if (st.session_state.get(_export_ts_key) or 0) + _export_ttl > now_sec and st.session_state.get(_export_cache_key):
+                            bq_export_rows = st.session_state[_export_cache_key]
+                        else:
+                            bq_export_rows, bq_export_error = _fetch_bq_export_sheet()
+                            if bq_export_rows:
+                                st.session_state[_export_cache_key] = bq_export_rows
+                                st.session_state[_export_ts_key] = now_sec
+                    if bq_export_rows:
+                        st.caption("**Master Kitchens (from BQ export sheet)** — Data is pushed to this sheet by your BigQuery pipeline or scheduled query.")
+                        chosen_label = "Master Kitchens (from BQ export sheet)"
+                        source_id = "bigquery_export_sheet"
+                        rows = bq_export_rows
+                        source_options = []
+                        is_other_sheet = False
+                    else:
+                        pass  # No BQ/export data; config messages and refresh moved to Admin / Data Health
+                    _bq_cfg = (getattr(st, "secrets", None) or {}).get("bigquery_master_kitchens")
+                    _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
+                    # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
                     last_refresh = get_last_refresh("gsheet")
-                # Refresh from Google Sheet moved to Admin / Data Health
-                sources = _master_kitchens_sources()
-                source_options = [s[0] for s in sources]
-                source_ids = {s[0]: s[1] for s in sources}
-                if not source_options:
-                    st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
-                    rows = []
-                    source_id = None
-                    chosen_label = ""
-                    is_other_sheet = False
+                    # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
+                    import time
+                    now_sec = time.time()
+                    last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
+                    if _gsheet_refresh_is_stale(15) and (now_sec - last_run) >= 900:  # 15 min cooldown
+                        st.session_state["gsheet_auto_refresh_last_run"] = now_sec
+                        ok, msg = _refresh_from_online_sheet()
+                        if ok:
+                            set_last_refresh("gsheet")
+                            st.session_state["data_source"] = "gsheet"
+                            _rerun()
+                        last_refresh = get_last_refresh("gsheet")
+                    # Refresh from Google Sheet moved to Admin / Data Health
+                    sources = _master_kitchens_sources()
+                    source_options = [s[0] for s in sources]
+                    source_ids = {s[0]: s[1] for s in sources}
+                    if not source_options:
+                        st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
+                        rows = []
+                        source_id = None
+                        chosen_label = ""
+                        is_other_sheet = False
+                    else:
+                        # Sheet selector: multi-select so user can view one or multiple sheets
+                        first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
+                        _sel_key = "master_sheets_selection"
+                        # Use default only when key not yet set (let widget own session state to avoid Streamlit warning)
+                        _initial = st.session_state.get(_sel_key) if _sel_key in st.session_state else [first_tab]
+                        if not isinstance(_initial, list):
+                            _initial = [_initial] if _initial else [first_tab]
+                        _default = _initial if set(_initial) <= set(source_options) else [first_tab]
+                        chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=source_options, default=_default, key=_sel_key, placeholder="Select facilities")
+                        if not chosen_labels:
+                            chosen_labels = [first_tab]
+                        chosen_labels = [t for t in chosen_labels if t in source_options] or [first_tab]
+                        source_id = source_ids.get(chosen_labels[0], first_tab)
+                        rows = list_generic_tab(source_id, source="gsheet")
+                        is_other_sheet = True
+            # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
+            if is_other_sheet and chosen_labels:
+                _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
+                if not _labels_to_use:
+                    _labels_to_use = chosen_labels[:1]
+                _show_combined = len(_labels_to_use) > 1
+                if not _show_combined:
+                    _render_generic_tab(
+                        source_ids.get(_labels_to_use[0], _labels_to_use[0]),
+                        key_suffix="master_other",
+                        is_developer=is_developer,
+                        source="gsheet",
+                        allow_download=can_export,
+                        hide_account_country=True,
+                    )
                 else:
-                    # Sheet selector: multi-select so user can view one or multiple sheets
-                    first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
-                    _sel_key = "master_sheets_selection"
-                    # Use default only when key not yet set (let widget own session state to avoid Streamlit warning)
-                    _initial = st.session_state.get(_sel_key) if _sel_key in st.session_state else [first_tab]
-                    if not isinstance(_initial, list):
-                        _initial = [_initial] if _initial else [first_tab]
-                    _default = _initial if set(_initial) <= set(source_options) else [first_tab]
-                    chosen_labels = st.multiselect("**Facility** — select one or multiple facilities (sheets) to view", options=source_options, default=_default, key=_sel_key, placeholder="Select facilities")
-                    if not chosen_labels:
-                        chosen_labels = [first_tab]
-                    chosen_labels = [t for t in chosen_labels if t in source_options] or [first_tab]
-                    source_id = source_ids.get(chosen_labels[0], first_tab)
-                    rows = list_generic_tab(source_id, source="gsheet")
-                    is_other_sheet = True
-        # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
-        if is_other_sheet and chosen_labels:
-            _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
-            if not _labels_to_use:
-                _labels_to_use = chosen_labels[:1]
-            _show_combined = len(_labels_to_use) > 1
-            if not _show_combined:
-                _render_generic_tab(
-                    source_ids.get(_labels_to_use[0], _labels_to_use[0]),
-                    key_suffix="master_other",
-                    is_developer=is_developer,
-                    source="gsheet",
-                    allow_download=can_export,
-                    hide_account_country=True,
-                )
-            else:
-                # Combined view: load every selected sheet and merge into one table
-                combined_rows = []
-                for label in _labels_to_use:
-                    tab_id = source_ids.get(label, label)
-                    sheet_rows = list_generic_tab(tab_id, source="gsheet") or []
-                    for r in sheet_rows:
-                        combined_rows.append({"Sheet": label, **r})
-                combined_rows = [r for r in combined_rows if not _is_empty_record(r)]
-                if not combined_rows:
-                    st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
-                else:
-                    st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
-                    cols_combined = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict)))) if combined_rows else []
-                    if combined_rows and isinstance(combined_rows[0], dict):
-                        _df_temp = pd.DataFrame(combined_rows)
-                        cols_combined = sorted(_df_temp.columns.tolist())
-                    cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
-                    rows_shown = combined_rows
-                    _row_count_placeholder_combined = st.empty()
-                    st.divider()
-                    df_combined = pd.DataFrame(rows_shown)
-                    _disp_cols = [c for c in df_combined.columns if c in cols_combined]
-                    if _disp_cols:
-                        df_combined = df_combined[_disp_cols]
-                    df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-                    df_combined = _coerce_numeric_columns(df_combined)
-                    status_col_combined = None
-                    for c in df_combined.columns:
-                        if str(c).strip().lower() in ("status", "status__c"):
-                            status_col_combined = c
-                            break
-                    if _HAS_AGGRI and not df_combined.empty:
-                        gb = GridOptionsBuilder.from_dataframe(df_combined)
+                    # Combined view: load every selected sheet and merge into one table
+                    combined_rows = []
+                    for label in _labels_to_use:
+                        tab_id = source_ids.get(label, label)
+                        sheet_rows = list_generic_tab(tab_id, source="gsheet") or []
+                        for r in sheet_rows:
+                            combined_rows.append({"Sheet": label, **r})
+                    combined_rows = [r for r in combined_rows if not _is_empty_record(r)]
+                    if not combined_rows:
+                        st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
+                    else:
+                        st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
+                        cols_combined = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict)))) if combined_rows else []
+                        if combined_rows and isinstance(combined_rows[0], dict):
+                            _df_temp = pd.DataFrame(combined_rows)
+                            cols_combined = sorted(_df_temp.columns.tolist())
+                        cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
+                        rows_shown = combined_rows
+                        _row_count_placeholder_combined = st.empty()
+                        st.divider()
+                        df_combined = pd.DataFrame(rows_shown)
+                        _disp_cols = [c for c in df_combined.columns if c in cols_combined]
+                        if _disp_cols:
+                            df_combined = df_combined[_disp_cols]
+                        df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
+                        df_combined = _coerce_numeric_columns(df_combined)
+                        status_col_combined = None
+                        for c in df_combined.columns:
+                            if str(c).strip().lower() in ("status", "status__c"):
+                                status_col_combined = c
+                                break
+                        if _HAS_AGGRI and not df_combined.empty:
+                            gb = GridOptionsBuilder.from_dataframe(df_combined)
+                            gb.configure_default_column(
+                                filter=True,
+                                sortable=True,
+                                resizable=True,
+                                floatingFilter=False,
+                                suppressHeaderMenuButton=False,
+                                suppressHeaderFilterButton=False,
+                                menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
+                            )
+                            _max_set_combined = 500
+                            for col in df_combined.columns:
+                                if pd.api.types.is_numeric_dtype(df_combined[col]):
+                                    gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
+                                elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
+                                    gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                                else:
+                                    ser = df_combined[col].dropna().astype(str).str.strip()
+                                    uniq = ser[ser != ""].unique()
+                                    if len(uniq) <= _max_set_combined:
+                                        vals = sorted(uniq.tolist(), key=str)
+                                        gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
+                                    else:
+                                        gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
+                            gb.configure_grid_options(
+                                domLayout="normal",
+                                suppressMenuHide=False,
+                                columnMenu="legacy",
+                            )
+                            gb.configure_side_bar(filters_panel=False, columns_panel=False)
+                            go = gb.build()
+                            go["suppressCsvExport"] = True
+                            if "defaultColDef" not in go:
+                                go["defaultColDef"] = {}
+                            go["defaultColDef"]["filter"] = True
+                            go["defaultColDef"]["floatingFilter"] = False
+                            go["defaultColDef"]["suppressHeaderMenuButton"] = False
+                            go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                            if "floatingFiltersHeight" in go:
+                                del go["floatingFiltersHeight"]
+                            _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+                            go["columnDefs"] = _col_defs
+                            for cdef in _col_defs:
+                                cdef["filter"] = True
+                                cdef["floatingFilter"] = False
+                                cdef["suppressHeaderFilterButton"] = False
+                                if cdef.get("type") == []:
+                                    cdef.pop("type", None)
+                            if status_col_combined and JsCode:
+                                go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
+                            _um = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
+                            _dm = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
+                            _kw = dict(update_mode=_um, data_return_mode=_dm) if (_um and _dm) else {}
+                            grid_res = AgGrid(
+                                df_combined,
+                                gridOptions=go,
+                                use_container_width=True,
+                                height=700,
+                                theme="streamlit",
+                                show_toolbar=True,
+                                show_search=True,
+                                show_download_button=False,
+                                enable_enterprise_modules=True,
+                                allow_unsafe_jscode=True,
+                                key="master_kitchens_grid_combined",
+                                **_kw,
+                            )
+                            _total_combined = len(rows_shown) if rows_shown else 0
+                            _cnt = _total_combined
+                            if grid_res and grid_res.get("data") is not None:
+                                _cnt = len(grid_res["data"])
+                            if rows_shown:
+                                _row_count_placeholder_combined.caption(
+                                    f"**{_cnt}** rows shown (out of **{_total_combined}** total)"
+                                )
+                                if can_export:
+                                    _rows_to_export = grid_res.get("data") if (grid_res and grid_res.get("data") is not None) else rows_shown
+                                    _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
+                        else:
+                            st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                            if rows_shown:
+                                _total_combined = len(rows_shown)
+                                _row_count_placeholder_combined.caption(
+                                    f"**{_total_combined}** rows shown (out of **{_total_combined}** total)"
+                                )
+                                if can_export:
+                                    _render_export_button(rows_shown, "master_kitchens_combined_filtered", key="export_master_kitchens_combined_df")
+            if not rows and not is_other_sheet and chosen_label:
+                st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
+            elif not is_other_sheet and source_id:
+                total = len(rows)
+                is_tracker = source_id == "main_tracker"
+                # No filter bar: single table like Excel sheet (filter via column filters below)
+                use_facility_tabs = False
+                rows_filtered = [r for r in rows if not _is_empty_record(r)]
+                rows_display = rows_filtered  # used for table; updated by column filters when applied
+                st.markdown("---")
+                if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
+                    st.info("No data in this source.")
+                if rows_filtered and not use_facility_tabs:
+                    all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
+                    # Master Kitchens: hide Account Country and Sheet from the sheet
+                    all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
+                    cols_to_show = all_cols
+                    rows_display = rows_filtered
+                if HAS_EXCEL and rows_filtered and not use_facility_tabs:
+                    display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
+                    display_df = display_df.copy()
+                    display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
+                    display_df = _coerce_numeric_columns(display_df)
+                    _row_count_placeholder_single = st.empty()
+                    if _HAS_AGGRI:
+                        # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
+                        status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
+                        gb = GridOptionsBuilder.from_dataframe(display_df)
                         gb.configure_default_column(
                             filter=True,
                             sortable=True,
@@ -4146,16 +4445,16 @@ def main():
                             suppressHeaderFilterButton=False,
                             menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
                         )
-                        _max_set_combined = 500
-                        for col in df_combined.columns:
-                            if pd.api.types.is_numeric_dtype(df_combined[col]):
+                        _max_set_master = 500
+                        for col in display_df.columns:
+                            if pd.api.types.is_numeric_dtype(display_df[col]):
                                 gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
-                            elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
+                            elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
                                 gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
                             else:
-                                ser = df_combined[col].dropna().astype(str).str.strip()
+                                ser = display_df[col].dropna().astype(str).str.strip()
                                 uniq = ser[ser != ""].unique()
-                                if len(uniq) <= _max_set_combined:
+                                if len(uniq) <= _max_set_master:
                                     vals = sorted(uniq.tolist(), key=str)
                                     gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
                                 else:
@@ -4176,21 +4475,21 @@ def main():
                         go["defaultColDef"]["suppressHeaderFilterButton"] = False
                         if "floatingFiltersHeight" in go:
                             del go["floatingFiltersHeight"]
-                        _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
-                        go["columnDefs"] = _col_defs
-                        for cdef in _col_defs:
+                        _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+                        go["columnDefs"] = _col_defs_m
+                        for cdef in _col_defs_m:
                             cdef["filter"] = True
                             cdef["floatingFilter"] = False
                             cdef["suppressHeaderFilterButton"] = False
                             if cdef.get("type") == []:
                                 cdef.pop("type", None)
-                        if status_col_combined and JsCode:
-                            go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
-                        _um = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
-                        _dm = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
-                        _kw = dict(update_mode=_um, data_return_mode=_dm) if (_um and _dm) else {}
-                        grid_res = AgGrid(
-                            df_combined,
+                        if status_col_ag and JsCode:
+                            go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
+                        _um_m = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
+                        _dm_m = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
+                        _kw_m = dict(update_mode=_um_m, data_return_mode=_dm_m) if (_um_m and _dm_m) else {}
+                        grid_res_m = AgGrid(
+                            display_df,
                             gridOptions=go,
                             use_container_width=True,
                             height=700,
@@ -4200,218 +4499,104 @@ def main():
                             show_download_button=False,
                             enable_enterprise_modules=True,
                             allow_unsafe_jscode=True,
-                            key="master_kitchens_grid_combined",
-                            **_kw,
+                            key="master_kitchens_grid_single",
+                            **_kw_m,
                         )
-                        _total_combined = len(rows_shown) if rows_shown else 0
-                        _cnt = _total_combined
-                        if grid_res and grid_res.get("data") is not None:
-                            _cnt = len(grid_res["data"])
-                        if rows_shown:
-                            _row_count_placeholder_combined.caption(
-                                f"**{_cnt}** rows shown (out of **{_total_combined}** total)"
+                        _total_single = len(rows_display) if rows_display else 0
+                        _cnt_m = _total_single
+                        if grid_res_m and grid_res_m.get("data") is not None:
+                            _cnt_m = len(grid_res_m["data"])
+                        if rows_display is not None:
+                            _row_count_placeholder_single.caption(
+                                f"**{_cnt_m}** rows shown (out of **{_total_single}** total)"
                             )
                             if can_export:
-                                _rows_to_export = grid_res.get("data") if (grid_res and grid_res.get("data") is not None) else rows_shown
-                                _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
+                                _rows_to_export = grid_res_m.get("data") if (grid_res_m and grid_res_m.get("data") is not None) else rows_display
+                                _render_export_button(_rows_to_export, "master_kitchens_filtered", key="export_master_kitchens_single")
                     else:
-                        st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
-                        if rows_shown:
-                            _total_combined = len(rows_shown)
-                            _row_count_placeholder_combined.caption(
-                                f"**{_total_combined}** rows shown (out of **{_total_combined}** total)"
+                        display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
+                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+                        _ns = "#B22222"
+                        status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
+                        if status_col_m and not display_df.empty:
+                            def _row_bg_m(row):
+                                v = (str(row[status_col_m]) if row[status_col_m] is not None else "").strip()
+                                low = v.lower()
+                                if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
+                                    return [f"background-color: {_ns}; color: white"] * len(row)
+                                key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+                                bg = _sc.get(key, "") if key else _sc.get(v, "")
+                                if key == "Vacant" and bg:
+                                    has_opp = row.get("_has_opportunity", False)
+                                    if has_opp:
+                                        bg = _sc.get("Occupied", bg)
+                                return [f"background-color: {bg}" if bg else ""] * len(row)
+                            display_df = display_df.style.apply(_row_bg_m, axis=1)
+                        st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                        if rows_display is not None:
+                            _total_single = len(rows_display)
+                            _row_count_placeholder_single.caption(
+                                f"**{_total_single}** rows shown (out of **{_total_single}** total)"
                             )
                             if can_export:
-                                _render_export_button(rows_shown, "master_kitchens_combined_filtered", key="export_master_kitchens_combined_df")
-        if not rows and not is_other_sheet and chosen_label:
-            st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
-        elif not is_other_sheet and source_id:
-            total = len(rows)
-            is_tracker = source_id == "main_tracker"
-            # No filter bar: single table like Excel sheet (filter via column filters below)
-            use_facility_tabs = False
-            rows_filtered = [r for r in rows if not _is_empty_record(r)]
-            rows_display = rows_filtered  # used for table; updated by column filters when applied
-            st.markdown("---")
-            if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
-                st.info("No data in this source.")
-            if rows_filtered and not use_facility_tabs:
-                all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
-                # Master Kitchens: hide Account Country and Sheet from the sheet
-                all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
-                cols_to_show = all_cols
-                rows_display = rows_filtered
-            if HAS_EXCEL and rows_filtered and not use_facility_tabs:
-                display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
-                display_df = display_df.copy()
-                display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
-                display_df = _coerce_numeric_columns(display_df)
-                _row_count_placeholder_single = st.empty()
-                if _HAS_AGGRI:
-                    # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
-                    status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
-                    gb = GridOptionsBuilder.from_dataframe(display_df)
-                    gb.configure_default_column(
-                        filter=True,
-                        sortable=True,
-                        resizable=True,
-                        floatingFilter=False,
-                        suppressHeaderMenuButton=False,
-                        suppressHeaderFilterButton=False,
-                        menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
-                    )
-                    _max_set_master = 500
-                    for col in display_df.columns:
-                        if pd.api.types.is_numeric_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
-                        elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
-                        else:
-                            ser = display_df[col].dropna().astype(str).str.strip()
-                            uniq = ser[ser != ""].unique()
-                            if len(uniq) <= _max_set_master:
-                                vals = sorted(uniq.tolist(), key=str)
-                                gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
-                            else:
-                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
-                    gb.configure_grid_options(
-                        domLayout="normal",
-                        suppressMenuHide=False,
-                        columnMenu="legacy",
-                    )
-                    gb.configure_side_bar(filters_panel=False, columns_panel=False)
-                    go = gb.build()
-                    go["suppressCsvExport"] = True
-                    if "defaultColDef" not in go:
-                        go["defaultColDef"] = {}
-                    go["defaultColDef"]["filter"] = True
-                    go["defaultColDef"]["floatingFilter"] = False
-                    go["defaultColDef"]["suppressHeaderMenuButton"] = False
-                    go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                    if "floatingFiltersHeight" in go:
-                        del go["floatingFiltersHeight"]
-                    _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
-                    go["columnDefs"] = _col_defs_m
-                    for cdef in _col_defs_m:
-                        cdef["filter"] = True
-                        cdef["floatingFilter"] = False
-                        cdef["suppressHeaderFilterButton"] = False
-                        if cdef.get("type") == []:
-                            cdef.pop("type", None)
-                    if status_col_ag and JsCode:
-                        go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
-                    _um_m = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
-                    _dm_m = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
-                    _kw_m = dict(update_mode=_um_m, data_return_mode=_dm_m) if (_um_m and _dm_m) else {}
-                    grid_res_m = AgGrid(
-                        display_df,
-                        gridOptions=go,
-                        use_container_width=True,
-                        height=700,
-                        theme="streamlit",
-                        show_toolbar=True,
-                        show_search=True,
-                        show_download_button=False,
-                        enable_enterprise_modules=True,
-                        allow_unsafe_jscode=True,
-                        key="master_kitchens_grid_single",
-                        **_kw_m,
-                    )
-                    _total_single = len(rows_display) if rows_display else 0
-                    _cnt_m = _total_single
-                    if grid_res_m and grid_res_m.get("data") is not None:
-                        _cnt_m = len(grid_res_m["data"])
-                    if rows_display is not None:
-                        _row_count_placeholder_single.caption(
-                            f"**{_cnt_m}** rows shown (out of **{_total_single}** total)"
-                        )
-                        if can_export:
-                            _rows_to_export = grid_res_m.get("data") if (grid_res_m and grid_res_m.get("data") is not None) else rows_display
-                            _render_export_button(_rows_to_export, "master_kitchens_filtered", key="export_master_kitchens_single")
-                else:
-                    display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
-                    _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                    _ns = "#B22222"
-                    status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
-                    if status_col_m and not display_df.empty:
-                        def _row_bg_m(row):
-                            v = (str(row[status_col_m]) if row[status_col_m] is not None else "").strip()
-                            low = v.lower()
-                            if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                                return [f"background-color: {_ns}; color: white"] * len(row)
-                            key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
-                            bg = _sc.get(key, "") if key else _sc.get(v, "")
-                            if key == "Vacant" and bg:
-                                has_opp = row.get("_has_opportunity", False)
-                                if has_opp:
-                                    bg = _sc.get("Occupied", bg)
-                            return [f"background-color: {bg}" if bg else ""] * len(row)
-                        display_df = display_df.style.apply(_row_bg_m, axis=1)
-                    st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
-                    if rows_display is not None:
-                        _total_single = len(rows_display)
-                        _row_count_placeholder_single.caption(
-                            f"**{_total_single}** rows shown (out of **{_total_single}** total)"
-                        )
-                        if can_export:
-                            _render_export_button(rows_display, "master_kitchens_filtered", key="export_master_kitchens_single_df")
-            elif rows_filtered and not use_facility_tabs:
-                _show = rows_display if rows_filtered else []
-                for r in _show[:100]:
-                    st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
-                if len(_show) > 100:
-                    st.caption(f"… and {len(_show) - 100} more.")
-            if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
-                st.markdown("---")
-                st.subheader("Pivot view")
-                st.caption("Slice your data by rows and columns.")
-                df = pd.DataFrame(rows_display)
-                cols = [c for c in df.columns if df[c].notna().any()]
-                cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
-                if len(cols) < 2:
-                    st.caption("Need at least 2 columns to build a pivot.")
-                else:
-                    row_opts = ["— None —"] + cols
-                    col_opts = ["— None —"] + cols
-                    numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
-                    agg_opts = ["Count"]
-                    for c in numeric_cols:
-                        agg_opts.append(f"Sum of {c}")
-                        agg_opts.append(f"Mean of {c}")
-                    pv_row = st.selectbox("Rows", row_opts, key="master_pivot_row")
-                    pv_col = st.selectbox("Columns", col_opts, key="master_pivot_col")
-                    pv_agg = st.selectbox("Value", agg_opts, key="master_pivot_agg")
-                    if pv_row != "— None —" and pv_col != "— None —":
-                        try:
-                            if pv_agg == "Count":
-                                pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, aggfunc=len, fill_value=0)
-                                pivot = pivot.rename(columns=lambda x: str(x))
-                                pivot = pivot.astype(int)
-                            else:
-                                if pv_agg.startswith("Sum of "):
-                                    val_col = pv_agg.replace("Sum of ", "")
-                                    pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, values=val_col, aggfunc="sum", fill_value=0)
-                                else:
-                                    val_col = pv_agg.replace("Mean of ", "")
-                                    pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, values=val_col, aggfunc="mean", fill_value=0)
-                                pivot = pivot.round(2)
-                                pivot["Total"] = pivot.sum(axis=1)
-                                pivot.loc["Total", :] = pivot.sum(axis=0)
-                            st.dataframe(pivot, use_container_width=True, hide_index=False)
+                                _render_export_button(rows_display, "master_kitchens_filtered", key="export_master_kitchens_single_df")
+                elif rows_filtered and not use_facility_tabs:
+                    _show = rows_display if rows_filtered else []
+                    for r in _show[:100]:
+                        st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
+                    if len(_show) > 100:
+                        st.caption(f"… and {len(_show) - 100} more.")
+                if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
+                    st.markdown("---")
+                    st.subheader("Pivot view")
+                    st.caption("Slice your data by rows and columns.")
+                    df = pd.DataFrame(rows_display)
+                    cols = [c for c in df.columns if df[c].notna().any()]
+                    cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
+                    if len(cols) < 2:
+                        st.caption("Need at least 2 columns to build a pivot.")
+                    else:
+                        row_opts = ["— None —"] + cols
+                        col_opts = ["— None —"] + cols
+                        numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+                        agg_opts = ["Count"]
+                        for c in numeric_cols:
+                            agg_opts.append(f"Sum of {c}")
+                            agg_opts.append(f"Mean of {c}")
+                        pv_row = st.selectbox("Rows", row_opts, key="master_pivot_row")
+                        pv_col = st.selectbox("Columns", col_opts, key="master_pivot_col")
+                        pv_agg = st.selectbox("Value", agg_opts, key="master_pivot_agg")
+                        if pv_row != "— None —" and pv_col != "— None —":
                             try:
-                                import plotly.graph_objects as go
-                                fig = go.Figure(data=go.Heatmap(
-                                    z=pivot.values.tolist(),
-                                    x=[str(x) for x in pivot.columns],
-                                    y=[str(y) for y in pivot.index],
-                                    colorscale="Teal",
-                                ))
-                                fig.update_layout(title="Pivot heatmap", xaxis_title="", yaxis_title="", height=400)
-                                st.plotly_chart(fig, use_container_width=True)
+                                if pv_agg == "Count":
+                                    pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, aggfunc=len, fill_value=0)
+                                    pivot = pivot.rename(columns=lambda x: str(x))
+                                    pivot = pivot.astype(int)
+                                else:
+                                    if pv_agg.startswith("Sum of "):
+                                        val_col = pv_agg.replace("Sum of ", "")
+                                        pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, values=val_col, aggfunc="sum", fill_value=0)
+                                    else:
+                                        val_col = pv_agg.replace("Mean of ", "")
+                                        pivot = pd.pivot_table(df, index=pv_row, columns=pv_col, values=val_col, aggfunc="mean", fill_value=0)
+                                    pivot = pivot.round(2)
+                                    pivot["Total"] = pivot.sum(axis=1)
+                                    pivot.loc["Total", :] = pivot.sum(axis=0)
+                                st.dataframe(pivot, use_container_width=True, hide_index=False)
+                                try:
+                                    import plotly.graph_objects as go
+                                    fig = go.Figure(data=go.Heatmap(
+                                        z=pivot.values.tolist(),
+                                        x=[str(x) for x in pivot.columns],
+                                        y=[str(y) for y in pivot.index],
+                                        colorscale="Teal",
+                                    ))
+                                    fig.update_layout(title="Pivot heatmap", xaxis_title="", yaxis_title="", height=400)
+                                    st.plotly_chart(fig, use_container_width=True)
+                                except Exception:
+                                    pass
                             except Exception:
                                 pass
-                        except Exception:
-                            pass
 
     # Dashboard: management view (section_options already restricts who sees the button)
     elif section == "Dashboard":

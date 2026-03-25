@@ -22,6 +22,15 @@ DB_PATH = REPO_ROOT / "app" / "data" / "tracker.db"
 
 # Match app: sheet ID and tab mapping
 DEFAULT_SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
+# Preview regional kitchen masters (same DB sources as app.tracker_app)
+KUWAIT_KITCHEN_SHEET_ID = "1N_Ar-KoFWGTHjbz-p_r1y8VeWGLNI4ZQUAbKZpAI99o"
+KUWAIT_KITCHEN_WORKSHEET_GID = 1841714979
+UAE_KITCHEN_SHEET_ID = "1H9M4QoAz71LJlGMzIiLzy7FtIACtrCUF2pJ5Gr3eXIg"
+UAE_KITCHEN_WORKSHEET_GID = 0
+TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
+TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
+GSOURCE_KITCHEN_KW = "gsheet_kw"
+GSOURCE_KITCHEN_AE = "gsheet_ae"
 MAIN_TRACKER_TAB_ID = "Tracker"
 KITCHEN_TRACKER_SHEET_ALIASES = ["Kitchen Tracker", "Smart Tracker", "Tracker", "KitchenTracker", "KSA Kitchen Tracker"]
 SHEET_TAB_IDS = [
@@ -91,6 +100,27 @@ def fetch_sheet(sheet_id: str, credentials_path: str) -> dict:
     return out
 
 
+def fetch_worksheet_by_gid(sheet_id: str, worksheet_gid: int, credentials_path: str) -> list[dict]:
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+    client = gspread.authorize(creds)
+    ws = client.open_by_key(sheet_id).get_worksheet_by_id(int(worksheet_gid))
+    if ws is None:
+        return []
+    rows = ws.get_all_values()
+    if not rows:
+        return []
+    headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
+    data = []
+    for row in rows[1:]:
+        r = list(row) + [""] * (len(headers) - len(row))
+        data.append(dict(zip(headers, r[: len(headers)])))
+    return data
+
+
 def resolve_tab_id(ws_title: str) -> str:
     if ws_title.strip() in KITCHEN_TRACKER_SHEET_ALIASES or ws_title.strip().lower() in {s.strip().lower() for s in KITCHEN_TRACKER_SHEET_ALIASES}:
         return MAIN_TRACKER_TAB_ID
@@ -151,8 +181,34 @@ def main() -> int:
             for i, tid in tab_order:
                 c.execute("INSERT OR REPLACE INTO gsheet_tab_order (tab_index, tab_id) VALUES (?, ?)", (i, tid))
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         c.execute("INSERT OR REPLACE INTO refresh_metadata (source, refreshed_at) VALUES (?, ?)", ("gsheet", now))
+        regional = [
+            (
+                os.environ.get("KUWAIT_KITCHEN_SHEET_ID", "").strip() or KUWAIT_KITCHEN_SHEET_ID,
+                int(os.environ.get("KUWAIT_KITCHEN_WORKSHEET_GID", KUWAIT_KITCHEN_WORKSHEET_GID)),
+                TAB_ID_KITCHEN_KW,
+                GSOURCE_KITCHEN_KW,
+            ),
+            (
+                os.environ.get("UAE_KITCHEN_SHEET_ID", "").strip() or UAE_KITCHEN_SHEET_ID,
+                int(os.environ.get("UAE_KITCHEN_WORKSHEET_GID", UAE_KITCHEN_WORKSHEET_GID)),
+                TAB_ID_KITCHEN_AE,
+                GSOURCE_KITCHEN_AE,
+            ),
+        ]
+        for sid, gid, tab_id, gsrc in regional:
+            try:
+                reg_rows = fetch_worksheet_by_gid(sid, gid, creds_path)
+                save_generic_tab(c, tab_id, reg_rows, source=gsrc)
+                c.execute(
+                    "INSERT OR REPLACE INTO refresh_metadata (source, refreshed_at) VALUES (?, ?)",
+                    (gsrc, now),
+                )
+                logger.info("Regional %s: %s rows", gsrc, len(reg_rows))
+            except Exception as e:
+                logger.warning("Regional sheet %s skipped: %s", gsrc, e)
     # conn context manager commits on exit
     logger.info("GSheet refresh done: %s tabs", len(tab_order))
     return 0
