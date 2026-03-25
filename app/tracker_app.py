@@ -3913,14 +3913,6 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
-    if bool(st.session_state.get("preview_only_mode")):
-        st.radio(
-            "Country filter (preview only)",
-            ["KSA", "Kuwait", "UAE"],
-            horizontal=True,
-            key="preview_kitchen_region",
-            help="Kuwait and UAE workbooks are only visible to PREVIEW_ONLY_IDS users.",
-        )
     # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
@@ -4138,6 +4130,24 @@ def main():
         _show_refresh_btn = _is_developer() or user_role == "super_user"
         preview_mode_km = bool(st.session_state.get("preview_only_mode"))
         _pkreg = (st.session_state.get("preview_kitchen_region") or "KSA").strip()
+        if preview_mode_km:
+            st.caption("Preview tabs (only visible to preview users).")
+            _km_tab_options = ["KSA", "Kuwait", "UAE"]
+            if _pkreg not in _km_tab_options:
+                _pkreg = "KSA"
+            _tab_cols = st.columns(len(_km_tab_options))
+            for _i, _opt in enumerate(_km_tab_options):
+                with _tab_cols[_i]:
+                    _is_sel = _opt == _pkreg
+                    if st.button(
+                        _opt,
+                        key=f"km_preview_tab_{_opt.lower()}",
+                        type="primary" if _is_sel else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["preview_kitchen_region"] = _opt
+                        _rerun()
+            _pkreg = (st.session_state.get("preview_kitchen_region") or _pkreg).strip()
         _preview_regional_km = preview_mode_km and _pkreg in ("Kuwait", "UAE")
         if _preview_regional_km:
             _render_preview_regional_kitchen_master(
