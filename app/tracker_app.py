@@ -3025,6 +3025,23 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             st.session_state[loc_key] = _load_facility_locations_from_sheet()
         facility_locations = st.session_state.get(loc_key) or {}
 
+        # Live facilities only (from repo CSV; computed rule inside _fetch_facility_go_live_csv).
+        _live_key = "_live_facilities_cache"
+        if _live_key not in st.session_state:
+            live_rows = _fetch_facility_go_live_csv() or []
+            live_set: set[str] = set()
+            for rr in live_rows:
+                if not isinstance(rr, dict):
+                    continue
+                if not rr.get("is_live"):
+                    continue
+                name = (rr.get("account_name") or rr.get("facility") or rr.get("Facility") or "").strip()
+                if not name:
+                    continue
+                live_set.add(re.sub(r"[^a-z0-9]+", " ", name.lower()).strip())
+            st.session_state[_live_key] = live_set
+        live_facilities = st.session_state.get(_live_key) or set()
+
         facility_key = _get_facility_column(list(rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
         if not facility_key:
             return
@@ -3040,6 +3057,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             row_address = _row_value_by_candidates(r, ["Address", "address", "Location", "location", "Full Address", "full_address"])
             fac_display = str(r.get(facility_key) or "").strip()
             fac_norm = re.sub(r"[^a-z0-9]+", " ", fac_display.lower()).strip()
+            if live_facilities and fac_norm not in live_facilities:
+                continue
             if fac_norm in facility_locations:
                 resolved = (facility_locations[fac_norm]["lat"], facility_locations[fac_norm]["lon"])
                 resolved_address = facility_locations[fac_norm].get("address") or row_address
