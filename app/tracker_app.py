@@ -2624,7 +2624,7 @@ def _refresh_regional_kitchen_workbooks() -> None:
             continue
 
 
-def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is_developer: bool, show_refresh_btn: bool) -> None:
+def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is_developer: bool) -> None:
     """Kitchen Master Data view for Kuwait/UAE preview workbooks (PREVIEW_ONLY_IDS only)."""
     sid, gid, tab_id, gsource = _regional_kitchen_workbook_settings(region)
     docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid else ""
@@ -2652,9 +2652,9 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     if not rows:
         st.info(
             f"No {region} data loaded yet. Share the Google Sheet with the **service account** email (Viewer), "
-            "then refresh from **Admin / Data Health** or wait for the scheduled GSheet job."
+            f"then click **Refresh {region} sheet now** below (or wait for the scheduled GSheet job)."
         )
-        if show_refresh_btn and sid:
+        if sid:
             if st.button(f"Refresh {region} sheet now", key=f"btn_refresh_regional_{gsource}"):
                 creds = _get_google_credentials_path()
                 if creds:
@@ -4182,7 +4182,6 @@ def main():
                 _pkreg,
                 can_export=can_export,
                 is_developer=is_developer,
-                show_refresh_btn=_show_refresh_btn,
             )
         if not _preview_regional_km:
             superset_rows, superset_meta = _get_superset_master_kitchens()
