@@ -2955,7 +2955,6 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 status = "Occupied/Sold"
             else:
                 status = "Unknown"
-            rgba = _MAP_MARKER_RGBA.get(status, _MAP_MARKER_RGBA["Unknown"])
             map_rows.append(
                 {
                     "facility": b["facility"],
@@ -2967,7 +2966,6 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     "occupied": b["occupied"],
                     "sold": b["sold"],
                     "status": status,
-                    "marker_rgba": rgba,
                 }
             )
         map_df = pd.DataFrame(map_rows)
