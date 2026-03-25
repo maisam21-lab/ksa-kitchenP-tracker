@@ -2751,7 +2751,7 @@ def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
 
 def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities map (preview)"):
     """Landing map for Master Kitchens with status-colored pins. Non-blocking by design."""
-    if not rows or pdk is None or not HAS_EXCEL:
+    if not rows:
         return
     try:
         facility_key = _get_facility_column(list(rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
@@ -2775,6 +2775,19 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 lat, lon = None, None
             if lat is None or lon is None:
                 lat, lon = _FACILITY_COORDS_APPROX.get(facility, (None, None))
+            if lat is None or lon is None:
+                # Fuzzy match facility names (e.g. "Qurtoba - Old", "Qurtoba RUH", etc.)
+                f_norm = re.sub(r"[^a-z0-9]+", " ", facility).strip()
+                best = None
+                for k, (k_lat, k_lon) in _FACILITY_COORDS_APPROX.items():
+                    k_norm = re.sub(r"[^a-z0-9]+", " ", str(k).strip().lower()).strip()
+                    if not k_norm:
+                        continue
+                    if f_norm == k_norm or f_norm.startswith(k_norm) or k_norm.startswith(f_norm) or (k_norm in f_norm) or (f_norm in k_norm):
+                        best = (k_lat, k_lon)
+                        break
+                if best:
+                    lat, lon = best
             if lat is None or lon is None:
                 continue
             b = buckets.setdefault(
@@ -2835,35 +2848,40 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
         if map_df.empty:
             return
         st.caption(f"**{map_title}** — quick geographic overview by facility.")
-        layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=map_df,
-            get_position="[lon, lat]",
-            get_fill_color="color",
-            get_radius=2600,
-            pickable=True,
-            stroked=True,
-            line_width_min_pixels=1,
-            get_line_color=[15, 23, 42, 200],
-        )
-        tooltip = {
-            "html": "<b>{facility}</b><br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
-            "style": {"backgroundColor": "#111827", "color": "white"},
-        }
-        st.pydeck_chart(
-            pdk.Deck(
-                layers=[layer],
-                initial_view_state=pdk.ViewState(
-                    latitude=float(map_df["lat"].mean()),
-                    longitude=float(map_df["lon"].mean()),
-                    zoom=8.5,
-                    pitch=0,
+        if pdk is None:
+            # Minimal fallback: show pins without status coloring/tooltip.
+            st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
+        else:
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=map_df,
+                get_position="[lon, lat]",
+                get_fill_color="color",
+                get_radius=2600,
+                pickable=True,
+                stroked=True,
+                line_width_min_pixels=1,
+                get_line_color=[15, 23, 42, 200],
+            )
+            tooltip = {
+                "html": "<b>{facility}</b><br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
+                "style": {"backgroundColor": "#111827", "color": "white"},
+            }
+            st.pydeck_chart(
+                pdk.Deck(
+                    layers=[layer],
+                    initial_view_state=pdk.ViewState(
+                        latitude=float(map_df["lat"].mean()),
+                        longitude=float(map_df["lon"].mean()),
+                        zoom=8.5,
+                        pitch=0,
+                    ),
+                    tooltip=tooltip,
+                    # Avoid Mapbox token requirement; points still render.
+                    map_style=None,
                 ),
-                tooltip=tooltip,
-                map_style="mapbox://styles/mapbox/light-v10",
-            ),
-            use_container_width=True,
-        )
+                use_container_width=True,
+            )
     except Exception:
         # Keep existing tracker flow untouched even if map rendering fails.
         return
