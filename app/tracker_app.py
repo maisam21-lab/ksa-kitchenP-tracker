@@ -1539,22 +1539,48 @@ def _export_allowed_ids_from_secrets() -> set[str]:
     return out
 
 
+def _export_strict_list_only() -> bool:
+    """If true, only EXPORT_ALLOWED_IDS (etc.) grants export — not general app allowlist.
+
+    Set EXPORT_STRICT_ALLOWLIST=1 or EXPORT_STRICT=1 in secrets/env when a subset of users may export.
+    """
+    try:
+        v = (
+            st.secrets.get("EXPORT_STRICT_ALLOWLIST")
+            or st.secrets.get("EXPORT_STRICT")
+            or os.environ.get("EXPORT_STRICT_ALLOWLIST", "")
+            or os.environ.get("EXPORT_STRICT", "")
+        )
+    except Exception:
+        v = os.environ.get("EXPORT_STRICT_ALLOWLIST", "") or os.environ.get("EXPORT_STRICT", "")
+    return str(v).strip().lower() in ("1", "true", "yes")
+
+
 def _can_user_export(current_user: str, is_developer: bool = False) -> bool:
-    """True if current user can export CSV."""
+    """True if current user can export CSV.
+
+    By default, anyone who may use the app (secrets/DB allowlist when ALLOWLIST_ENABLED) may export,
+    in addition to anyone listed in EXPORT_ALLOWED_IDS. Set EXPORT_STRICT_ALLOWLIST=1 to require
+    EXPORT_* list only (subset of users).
+    """
     if is_developer:
         return True
     u = (current_user or "").strip().lower()
     if not u:
         return False
-    allowed = _export_allowed_ids_from_secrets()
-    # Also allow bare local-part entries like "john.doe" to match "john.doe@company.com".
+    export_set = _export_allowed_ids_from_secrets()
     if "@" in u:
         local = u.split("@", 1)[0]
     else:
         local = u
-    # Normalize allowed set (strip/lower)
-    allowed = {(a or "").strip().lower() for a in allowed if (a or "").strip()}
-    return u in allowed or local in allowed
+    export_norm = {(a or "").strip().lower() for a in export_set if (a or "").strip()}
+    if u in export_norm or local in export_norm:
+        return True
+    if _export_strict_list_only():
+        return False
+    if _allowlist_enabled() and is_user_allowed(current_user):
+        return True
+    return False
 
 
 def _render_export_button(rows: list[dict], file_stem: str, key: str):
@@ -3836,6 +3862,8 @@ def main():
             st.write("Current user:", current_user or "—")
             try:
                 st.write("Export allowlist size:", len(_export_allowed_ids_from_secrets()))
+                st.write("Export strict (EXPORT_* only):", bool(_export_strict_list_only()))
+                st.write("On app allowlist:", bool(is_user_allowed(current_user or "")))
             except Exception:
                 st.write("Export allowlist size: —")
 
