@@ -1629,10 +1629,38 @@ def _can_user_export(current_user: str) -> bool:
 
 def _preview_only_ids_from_secrets() -> set[str]:
     """Users allowed to see in-progress preview features (AE/Kuwait integration, etc.)."""
+    def _nonempty(v):
+        if v is None:
+            return False
+        if isinstance(v, str):
+            return bool(v.strip())
+        if isinstance(v, (list, dict)):
+            return len(v) > 0
+        return True
+
+    def _secrets_preview_raw():
+        keys = ("PREVIEW_ONLY_IDS", "preview_only_ids")
+        try:
+            sec = getattr(st, "secrets", None)
+            if sec:
+                for k in keys:
+                    v = sec.get(k)
+                    if _nonempty(v):
+                        return v
+                # Support nested TOML tables, e.g. [preview] PREVIEW_ONLY_IDS = "..."
+                for obj in sec.values():
+                    if isinstance(obj, dict):
+                        for k in keys:
+                            v = obj.get(k)
+                            if _nonempty(v):
+                                return v
+        except Exception:
+            pass
+        return None
+
     try:
         raw = (
-            st.secrets.get("PREVIEW_ONLY_IDS")
-            or st.secrets.get("preview_only_ids")
+            _secrets_preview_raw()
             or os.environ.get("PREVIEW_ONLY_IDS", "")
         )
     except Exception:
