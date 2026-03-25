@@ -1493,16 +1493,49 @@ def export_csv_generic(rows: list[dict]) -> str:
     return buf.getvalue()
 
 
+def _secrets_get_export_allowed_raw():
+    """Resolve EXPORT_* from top-level secrets or nested TOML tables (e.g. [export] EXPORT_ALLOWED_IDS = ...)."""
+
+    def _nonempty(v):
+        if v is None:
+            return False
+        if isinstance(v, str):
+            return bool(v.strip())
+        if isinstance(v, (list, dict)):
+            return len(v) > 0
+        return True
+
+    names = (
+        "EXPORT_ALLOWED_IDS",
+        "export_allowed_ids",
+        "EXPORT_ALLOWED_USERS",
+        "export_allowed_users",
+        "ALLOWED_EXPORT_IDS",
+        "allowed_export_ids",
+    )
+    try:
+        sec = getattr(st, "secrets", None)
+        if sec:
+            for name in names:
+                v = sec.get(name)
+                if _nonempty(v):
+                    return v
+            for val in sec.values():
+                if isinstance(val, dict):
+                    for name in names:
+                        v = val.get(name)
+                        if _nonempty(v):
+                            return v
+    except Exception:
+        pass
+    return None
+
+
 def _export_allowed_ids_from_secrets() -> set[str]:
     """IDs (emails) allowed to export data. Supports comma string or list in secrets/env."""
     try:
         raw = (
-            st.secrets.get("EXPORT_ALLOWED_IDS")
-            or st.secrets.get("export_allowed_ids")
-            or st.secrets.get("EXPORT_ALLOWED_USERS")
-            or st.secrets.get("export_allowed_users")
-            or st.secrets.get("ALLOWED_EXPORT_IDS")
-            or st.secrets.get("allowed_export_ids")
+            _secrets_get_export_allowed_raw()
             or os.environ.get("EXPORT_ALLOWED_IDS", "")
             or os.environ.get("EXPORT_ALLOWED_USERS", "")
             or os.environ.get("ALLOWED_EXPORT_IDS", "")
@@ -3611,10 +3644,8 @@ def main():
             return True
         return (user or "").strip().lower() in ids_list
 
-    dev_ids = _get_developer_ids_list()
-    if dev_ids and (current_user or "").strip().lower() in dev_ids and not is_developer:
-        st.session_state["developer_unlocked"] = True
-        is_developer = True
+    # Do NOT set developer_unlocked from DEVELOPER_IDS. That made _is_developer() true and forced
+    # super_user (Dashboard) for everyone on that list. DEVELOPER_IDS only elevates role in RBAC below.
 
     # Single-row top bar: logo + title/status (left) | help, avatar, sign out (right)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
