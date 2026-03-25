@@ -20,6 +20,7 @@ from pathlib import Path
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode, DataReturnMode
@@ -3130,6 +3131,37 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             f"**{map_title}** — all facilities (default). **Pins:** green = Vacant, yellow = Churning, "
             "red = Occupied/Sold, gray = other."
         )
+
+        # Google Maps (no API key): embed a live map centered on facilities, with per-facility "Open in Google Maps" links.
+        try:
+            _center_lat = float(map_df["lat"].mean())
+            _center_lon = float(map_df["lon"].mean())
+            _gm_embed = f"https://www.google.com/maps?q={_center_lat:.6f},{_center_lon:.6f}&z=9&output=embed"
+            with st.expander("Google Maps view (live)", expanded=False):
+                components.iframe(_gm_embed, height=420, scrolling=False)
+                # Links so users can open actual pins in Google Maps (one per facility).
+                _links = []
+                for _, rr in map_df.sort_values(["facility"]).iterrows():
+                    fac = str(rr.get("facility") or "").strip()
+                    addr = str(rr.get("address") or "").strip()
+                    lat = rr.get("lat")
+                    lon = rr.get("lon")
+                    q = ""
+                    if addr and addr != "—":
+                        q = addr
+                    elif lat is not None and lon is not None:
+                        q = f"{lat},{lon}"
+                    if not q:
+                        continue
+                    url = "https://www.google.com/maps/search/?api=1&query=" + urllib.parse.quote(str(q))
+                    _links.append((fac or q, url))
+                if _links:
+                    st.caption("Open a facility pin in Google Maps:")
+                    for name, url in _links:
+                        st.link_button(name, url)
+        except Exception:
+            pass
+
         if pdk is None:
             st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
         else:
