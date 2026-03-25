@@ -1533,7 +1533,15 @@ def _can_user_export(current_user: str, is_developer: bool = False) -> bool:
 
 def _render_export_button(rows: list[dict], file_stem: str, key: str):
     """Render CSV download button when rows exist."""
-    if not rows:
+    if rows is None:
+        return
+    # grid_response["data"] can be a pandas DataFrame in some st_aggrid versions.
+    if hasattr(rows, "to_dict"):
+        try:
+            rows = rows.to_dict("records")
+        except Exception:
+            rows = []
+    if not isinstance(rows, list) or len(rows) == 0:
         return
     safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(file_stem or "export")).strip("_") or "export"
     st.download_button(
@@ -2971,6 +2979,21 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                 st.pydeck_chart(
                     pdk.Deck(
                         layers=[
+                            # Always draw visible markers, even if text glyphs are unsupported by the browser/font.
+                            pdk.Layer(
+                                "ScatterplotLayer",
+                                data=_map_records,
+                                get_position="[lon, lat]",
+                                get_fill_color="pin_color",
+                                get_radius=1,
+                                radius_scale=2200,
+                                radius_min_pixels=8,
+                                radius_max_pixels=16,
+                                pickable=True,
+                                stroked=True,
+                                line_width_min_pixels=1.5,
+                                get_line_color=[15, 23, 42, 180],
+                            ),
                             pdk.Layer(
                                 "TextLayer",
                                 data=_map_records,
