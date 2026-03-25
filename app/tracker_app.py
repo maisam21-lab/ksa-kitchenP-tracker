@@ -3001,6 +3001,23 @@ def _declutter_map_points(records: list[dict]) -> list[dict]:
     return records
 
 
+def _is_live_facility_name(fac_norm: str, live_set: set[str]) -> bool:
+    """Fuzzy match facility name against live set (handles variants like 'Qurtoba - Old')."""
+    if not live_set:
+        return True
+    f = (fac_norm or "").strip()
+    if not f:
+        return False
+    if f in live_set:
+        return True
+    for live in live_set:
+        if not live:
+            continue
+        if f == live or f.startswith(live) or live.startswith(f) or (live in f) or (f in live):
+            return True
+    return False
+
+
 def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
     if not row or not isinstance(row, dict):
         return ""
@@ -3060,7 +3077,7 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             row_address = _row_value_by_candidates(r, ["Address", "address", "Location", "location", "Full Address", "full_address"])
             fac_display = str(r.get(facility_key) or "").strip()
             fac_norm = re.sub(r"[^a-z0-9]+", " ", fac_display.lower()).strip()
-            if live_facilities and fac_norm not in live_facilities:
+            if live_facilities and not _is_live_facility_name(fac_norm, live_facilities):
                 continue
             if fac_norm in facility_locations:
                 resolved = (facility_locations[fac_norm]["lat"], facility_locations[fac_norm]["lon"])
@@ -3099,6 +3116,8 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
             elif s_low == "sold":
                 b["sold"] += 1
         if not buckets:
+            if _is_developer():
+                st.info(f"Map: no facilities to plot (rows={len(rows):,}, live_facilities={len(live_facilities):,}). Check facility name matching.")
             return
         map_rows = []
         for b in buckets.values():
@@ -3263,8 +3282,10 @@ def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities m
                     )
                 except Exception:
                     st.map(map_df.rename(columns={"lat": "latitude", "lon": "longitude"})[["latitude", "longitude"]])
-    except Exception:
+    except Exception as e:
         # Keep existing tracker flow untouched even if map rendering fails.
+        if _is_developer():
+            st.warning(f"Map failed to render: {type(e).__name__}")
         return
 
 
