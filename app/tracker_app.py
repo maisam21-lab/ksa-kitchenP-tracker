@@ -81,6 +81,11 @@ try:
 except ImportError:
     HAS_EXCEL = False
 
+try:
+    import pydeck as pdk
+except ImportError:
+    pdk = None
+
 # Online sheet: same ID as the workbook (docs.google.com/.../d/SHEET_ID/edit?gid=...)
 # Same logic as the sheet: country merge (SA/regions → Saudi Arabia, BH → Bahrain), status color coding.
 SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
@@ -2703,6 +2708,167 @@ def _status_get_row_style_js(status_col_name: str):
     """ % col_key)
 
 
+_FACILITY_COORDS_APPROX = {
+    # Approximate coordinates to visualize facilities on landing map.
+    "qurtoba": (24.8106, 46.7810),
+    "wadi": (24.7880, 46.7180),
+    "olaya": (24.7118, 46.6753),
+    "dahrat laban": (24.5935, 46.5585),
+    "suwaidi": (24.5926, 46.6861),
+    "malga": (24.8216, 46.6142),
+    "khaleej": (24.7713, 46.8022),
+    "nahda": (24.7487, 46.7769),
+    "safa": (24.6856, 46.7347),
+    "zuhur": (24.8390, 46.6640),
+    "aqiq": (24.7896, 46.6326),
+    "king fahd": (24.7685, 46.6652),
+    "malga 2": (24.8255, 46.6201),
+    "rawdah": (24.7417, 46.7492),
+    "bawadi": (24.7244, 46.7483),
+    "salam": (24.6698, 46.6714),
+    "marwa": (21.5850, 39.2248),
+    "tuwaiq": (24.5232, 46.5382),
+    "muraslat": (24.7445, 46.7062),
+    "aqrabiya": (26.3035, 50.1875),
+}
+
+
+def _row_value_by_candidates(row: dict, candidates: list[str]) -> str:
+    if not row or not isinstance(row, dict):
+        return ""
+    by_norm = {re.sub(r"[\s_\.]+", "", str(k).strip().lower()): k for k in row.keys()}
+    for c in candidates:
+        if c in row and row.get(c) is not None and str(row.get(c)).strip():
+            return str(row.get(c)).strip()
+    for c in candidates:
+        key = by_norm.get(re.sub(r"[\s_\.]+", "", c.strip().lower()))
+        if key is not None:
+            v = row.get(key)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+    return ""
+
+
+def _render_master_kitchens_map(rows: list[dict], map_title: str = "Facilities map (preview)"):
+    """Landing map for Master Kitchens with status-colored pins. Non-blocking by design."""
+    if not rows or pdk is None or not HAS_EXCEL:
+        return
+    try:
+        facility_key = _get_facility_column(list(rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
+        if not facility_key:
+            return
+        buckets = {}
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            facility = (str(r.get(facility_key, "")).strip() or "").lower()
+            if not facility:
+                continue
+            lat_raw = _row_value_by_candidates(r, ["Latitude", "lat", "facility_latitude", "facility_lat"])
+            lon_raw = _row_value_by_candidates(r, ["Longitude", "lon", "lng", "facility_longitude", "facility_lon"])
+            lat = None
+            lon = None
+            try:
+                lat = float(lat_raw) if lat_raw else None
+                lon = float(lon_raw) if lon_raw else None
+            except Exception:
+                lat, lon = None, None
+            if lat is None or lon is None:
+                lat, lon = _FACILITY_COORDS_APPROX.get(facility, (None, None))
+            if lat is None or lon is None:
+                continue
+            b = buckets.setdefault(
+                facility,
+                {
+                    "facility": str(r.get(facility_key) or "").strip(),
+                    "lat": lat,
+                    "lon": lon,
+                    "total": 0,
+                    "vacant": 0,
+                    "churning": 0,
+                    "occupied": 0,
+                    "sold": 0,
+                },
+            )
+            b["total"] += 1
+            s = _normalize_status_label(r.get("Status") if "Status" in r else r.get("status__c") if "status__c" in r else r.get("status"))
+            s_low = str(s).strip().lower()
+            if s_low == "vacant":
+                b["vacant"] += 1
+            elif s_low == "churning":
+                b["churning"] += 1
+            elif s_low == "occupied":
+                b["occupied"] += 1
+            elif s_low == "sold":
+                b["sold"] += 1
+        if not buckets:
+            return
+        map_rows = []
+        for b in buckets.values():
+            if b["vacant"] > 0:
+                status = "Vacant"
+                color = [16, 185, 129, 200]
+            elif b["churning"] > 0:
+                status = "Churning"
+                color = [245, 158, 11, 210]
+            elif (b["occupied"] + b["sold"]) > 0:
+                status = "Occupied/Sold"
+                color = [220, 38, 38, 210]
+            else:
+                status = "Unknown"
+                color = [100, 116, 139, 180]
+            map_rows.append(
+                {
+                    "facility": b["facility"],
+                    "lat": b["lat"],
+                    "lon": b["lon"],
+                    "total": b["total"],
+                    "vacant": b["vacant"],
+                    "churning": b["churning"],
+                    "occupied": b["occupied"],
+                    "sold": b["sold"],
+                    "status": status,
+                    "color": color,
+                }
+            )
+        map_df = pd.DataFrame(map_rows)
+        if map_df.empty:
+            return
+        st.caption(f"**{map_title}** — quick geographic overview by facility.")
+        layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=map_df,
+            get_position="[lon, lat]",
+            get_fill_color="color",
+            get_radius=2600,
+            pickable=True,
+            stroked=True,
+            line_width_min_pixels=1,
+            get_line_color=[15, 23, 42, 200],
+        )
+        tooltip = {
+            "html": "<b>{facility}</b><br/>Status: <b>{status}</b><br/>Total: {total}<br/>Vacant: {vacant}<br/>Churning: {churning}<br/>Occupied/Sold: {occupied}/{sold}",
+            "style": {"backgroundColor": "#111827", "color": "white"},
+        }
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[layer],
+                initial_view_state=pdk.ViewState(
+                    latitude=float(map_df["lat"].mean()),
+                    longitude=float(map_df["lon"].mean()),
+                    zoom=8.5,
+                    pitch=0,
+                ),
+                tooltip=tooltip,
+                map_style="mapbox://styles/mapbox/light-v10",
+            ),
+            use_container_width=True,
+        )
+    except Exception:
+        # Keep existing tracker flow untouched even if map rendering fails.
+        return
+
+
 def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False):
     """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. allow_download is always False (download disabled app-wide). hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
@@ -3903,6 +4069,9 @@ def main():
                 _labels_to_use = chosen_labels[:1]
             _show_combined = len(_labels_to_use) > 1
             if not _show_combined:
+                _single_rows = list_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), source="gsheet") or []
+                _single_rows = [r for r in _single_rows if not _is_empty_record(r)]
+                _render_master_kitchens_map(_single_rows, map_title="Facilities map (selected facility)")
                 _render_generic_tab(source_ids.get(_labels_to_use[0], _labels_to_use[0]), key_suffix="master_other", is_developer=is_developer, source="gsheet", allow_download=False, hide_account_country=True)
             else:
                 # Combined view: load every selected sheet and merge into one table
@@ -3916,6 +4085,7 @@ def main():
                 if not combined_rows:
                     st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                 else:
+                    _render_master_kitchens_map(combined_rows, map_title="Facilities map (selected facilities)")
                     st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
                     cols_combined = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict)))) if combined_rows else []
                     if combined_rows and isinstance(combined_rows[0], dict):
@@ -4022,6 +4192,7 @@ def main():
         if not rows and not is_other_sheet and chosen_label:
             st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
         elif not is_other_sheet and source_id:
+            _render_master_kitchens_map(rows, map_title="Facilities map (all facilities)")
             total = len(rows)
             is_tracker = source_id == "main_tracker"
             # No filter bar: single table like Excel sheet (filter via column filters below)
