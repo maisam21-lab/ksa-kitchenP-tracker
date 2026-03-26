@@ -1105,6 +1105,13 @@ def _use_compact_tables() -> bool:
     return False
 
 
+def _table_height_px(default: int = 700) -> int:
+    """Adaptive table height; supports expanded table view on mobile."""
+    if _mobile_mode_enabled() and st.session_state.get("mobile_table_expanded", False):
+        return 1200
+    return default
+
+
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
     """Apply row status colors in non-AgGrid paths (mobile/tablet fallback)."""
     if df is None or df.empty or not status_col:
@@ -3326,7 +3333,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             gridOptions=go,
             use_container_width=True,
             fit_columns_on_grid_load=False,
-            height=700,
+            height=_table_height_px(),
             theme="streamlit",
             show_toolbar=True,
             show_search=True,
@@ -3355,7 +3362,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                 _df_mobile = _df_mobile.copy()
                 _df_mobile["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
             _df_mobile = _style_df_status_rows(_df_mobile, status_col)
-        st.dataframe(_df_mobile, use_container_width=True, hide_index=True, height=700, column_config=_cc)
+        st.dataframe(_df_mobile, use_container_width=True, hide_index=True, height=_table_height_px(), column_config=_cc)
         if rows_shown:
             _total_count = len(rows_shown)
             _row_count_placeholder.caption(
@@ -4325,6 +4332,14 @@ def main():
                     st.session_state["section_radio"] = opt
                     _rerun()
 
+    if _mobile_mode_enabled():
+        st.toggle(
+            "Expanded table view",
+            key="mobile_table_expanded",
+            value=bool(st.session_state.get("mobile_table_expanded", False)),
+            help="Use a taller table viewport on phones when fullscreen is not available.",
+        )
+
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         _show_refresh_btn = _is_developer() or user_role == "super_user"
@@ -4634,7 +4649,7 @@ def main():
                             gridOptions=go,
                             use_container_width=True,
                             fit_columns_on_grid_load=False,
-                            height=700,
+                            height=_table_height_px(),
                             theme="streamlit",
                             show_toolbar=True,
                             show_search=True,
@@ -4657,7 +4672,7 @@ def main():
                                 _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
                     else:
                             _df_combined_show = _style_df_status_rows(df_combined, status_col_combined)
-                            st.dataframe(_df_combined_show, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                            st.dataframe(_df_combined_show, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=_table_height_px())
                             if rows_shown:
                                 _total_combined = len(rows_shown)
                                 _row_count_placeholder_combined.caption(
@@ -4751,7 +4766,7 @@ def main():
                         gridOptions=go,
                         use_container_width=True,
                         fit_columns_on_grid_load=False,
-                        height=700,
+                        height=_table_height_px(),
                         theme="streamlit",
                         show_toolbar=True,
                         show_search=True,
@@ -4791,7 +4806,7 @@ def main():
                                         bg = _sc.get("Occupied", bg)
                                 return [f"background-color: {bg}" if bg else ""] * len(row)
                             display_df = display_df.style.apply(_row_bg_m, axis=1)
-                        st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                        st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=_table_height_px())
                         if rows_display is not None:
                             _total_single = len(rows_display)
                             _row_count_placeholder_single.caption(
