@@ -3181,6 +3181,25 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                 if _status_vals:
                     _status_opts += _status_vals
                 _status_pick = st.selectbox("Status", _status_opts, key=f"mobile_status_{key_suffix}_{tab_id}")
+            with st.expander("More filters", expanded=False):
+                _filterable_cols = [c for c in cols if rows_shown and c in rows_shown[0]]
+                _mf_col = st.selectbox(
+                    "Filter column",
+                    options=["None"] + _filterable_cols,
+                    key=f"mobile_filter_col_{key_suffix}_{tab_id}",
+                )
+                _mf_values = []
+                if _mf_col != "None":
+                    _raw_vals = sorted({
+                        str((r or {}).get(_mf_col, "")).strip()
+                        for r in rows_shown if isinstance(r, dict)
+                    })
+                    _raw_vals = [v for v in _raw_vals if v]
+                    _mf_values = st.multiselect(
+                        f"{_mf_col} values",
+                        options=_raw_vals[:500],
+                        key=f"mobile_filter_vals_{key_suffix}_{tab_id}",
+                    )
         if _q:
             rows_shown = [
                 r for r in rows_shown
@@ -3191,6 +3210,12 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             rows_shown = [
                 r for r in rows_shown
                 if str((r.get("Status") if "Status" in r else r.get("status__c") if "status__c" in r else r.get("status") or "")).strip().lower() == _pick
+            ]
+        if "_mf_col" in locals() and _mf_col != "None" and _mf_values:
+            _mf_set = {str(v).strip() for v in _mf_values}
+            rows_shown = [
+                r for r in rows_shown
+                if str((r or {}).get(_mf_col, "")).strip() in _mf_set
             ]
     _row_count_placeholder = st.empty()
     st.divider()
