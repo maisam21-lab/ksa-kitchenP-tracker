@@ -1035,6 +1035,24 @@ def _source_refresh_is_stale(source: str, minutes: int = 15) -> bool:
         return True
 
 
+def _mobile_mode_enabled() -> bool:
+    """Mobile-friendly rendering mode: disables heavy grid components."""
+    if "mobile_friendly_mode" in st.session_state:
+        return bool(st.session_state.get("mobile_friendly_mode"))
+    enabled = False
+    try:
+        q = getattr(st, "query_params", None)
+        if q is not None:
+            raw = q.get("mobile")
+            if isinstance(raw, list):
+                raw = raw[0] if raw else ""
+            enabled = str(raw or "").strip().lower() in ("1", "true", "yes", "y", "on")
+    except Exception:
+        enabled = False
+    st.session_state["mobile_friendly_mode"] = enabled
+    return enabled
+
+
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
     """Add a discussion post or reply (parent_id=None for top-level)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -3114,7 +3132,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         if str(c).strip().lower() in ("status", "status__c"):
             status_col = c
             break
-    if _HAS_AGGRI and HAS_EXCEL and not df_display.empty:
+    if _HAS_AGGRI and HAS_EXCEL and not df_display.empty and not _mobile_mode_enabled():
         if status_col:
             df_display = df_display.copy()
             df_display["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
@@ -3941,6 +3959,16 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
+    _mobile_now = bool(_mobile_mode_enabled())
+    _mobile_next = st.toggle(
+        "Mobile-friendly tables",
+        value=_mobile_now,
+        key="mobile_friendly_toggle",
+        help="Use simpler table rendering for phones/small screens.",
+    )
+    if _mobile_next != _mobile_now:
+        st.session_state["mobile_friendly_mode"] = bool(_mobile_next)
+        _rerun()
     # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
@@ -4387,86 +4415,86 @@ def main():
                             if str(c).strip().lower() in ("status", "status__c"):
                                 status_col_combined = c
                                 break
-                        if _HAS_AGGRI and not df_combined.empty:
-                            gb = GridOptionsBuilder.from_dataframe(df_combined)
-                            gb.configure_default_column(
-                                filter=True,
-                                sortable=True,
-                                resizable=True,
-                                floatingFilter=False,
-                                suppressHeaderMenuButton=False,
-                                suppressHeaderFilterButton=False,
-                                menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
-                            )
-                            _max_set_combined = 500
-                            for col in df_combined.columns:
-                                if pd.api.types.is_numeric_dtype(df_combined[col]):
-                                    gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
-                                elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
-                                    gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                    if _HAS_AGGRI and not df_combined.empty and not _mobile_mode_enabled():
+                        gb = GridOptionsBuilder.from_dataframe(df_combined)
+                        gb.configure_default_column(
+                            filter=True,
+                            sortable=True,
+                            resizable=True,
+                            floatingFilter=False,
+                            suppressHeaderMenuButton=False,
+                            suppressHeaderFilterButton=False,
+                            menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
+                        )
+                        _max_set_combined = 500
+                        for col in df_combined.columns:
+                            if pd.api.types.is_numeric_dtype(df_combined[col]):
+                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
+                            elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
+                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                            else:
+                                ser = df_combined[col].dropna().astype(str).str.strip()
+                                uniq = ser[ser != ""].unique()
+                                if len(uniq) <= _max_set_combined:
+                                    vals = sorted(uniq.tolist(), key=str)
+                                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
                                 else:
-                                    ser = df_combined[col].dropna().astype(str).str.strip()
-                                    uniq = ser[ser != ""].unique()
-                                    if len(uniq) <= _max_set_combined:
-                                        vals = sorted(uniq.tolist(), key=str)
-                                        gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
-                                    else:
-                                        gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
-                            gb.configure_grid_options(
-                                domLayout="normal",
-                                suppressMenuHide=False,
-                                columnMenu="legacy",
+                                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
+                        gb.configure_grid_options(
+                            domLayout="normal",
+                            suppressMenuHide=False,
+                            columnMenu="legacy",
+                        )
+                        gb.configure_side_bar(filters_panel=False, columns_panel=False)
+                        go = gb.build()
+                        go["suppressCsvExport"] = True
+                        if "defaultColDef" not in go:
+                            go["defaultColDef"] = {}
+                        go["defaultColDef"]["filter"] = True
+                        go["defaultColDef"]["floatingFilter"] = False
+                        go["defaultColDef"]["suppressHeaderMenuButton"] = False
+                        go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                        if "floatingFiltersHeight" in go:
+                            del go["floatingFiltersHeight"]
+                        _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+                        go["columnDefs"] = _col_defs
+                        for cdef in _col_defs:
+                            cdef["filter"] = True
+                            cdef["floatingFilter"] = False
+                            cdef["suppressHeaderFilterButton"] = False
+                            if cdef.get("type") == []:
+                                cdef.pop("type", None)
+                        if status_col_combined and JsCode:
+                            go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
+                        _um = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
+                        _dm = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
+                        _kw = dict(update_mode=_um, data_return_mode=_dm) if (_um and _dm) else {}
+                        grid_res = AgGrid(
+                            df_combined,
+                            gridOptions=go,
+                            use_container_width=True,
+                            height=700,
+                            theme="streamlit",
+                            show_toolbar=True,
+                            show_search=True,
+                            show_download_button=False,
+                            enable_enterprise_modules=True,
+                            allow_unsafe_jscode=True,
+                            key="master_kitchens_grid_combined",
+                            **_kw,
+                        )
+                        _total_combined = len(rows_shown) if rows_shown else 0
+                        _cnt = _total_combined
+                        if grid_res and grid_res.get("data") is not None:
+                            _cnt = len(grid_res["data"])
+                        if rows_shown:
+                            _row_count_placeholder_combined.caption(
+                                f"**{_cnt}** rows shown (out of **{_total_combined}** total)"
                             )
-                            gb.configure_side_bar(filters_panel=False, columns_panel=False)
-                            go = gb.build()
-                            go["suppressCsvExport"] = True
-                            if "defaultColDef" not in go:
-                                go["defaultColDef"] = {}
-                            go["defaultColDef"]["filter"] = True
-                            go["defaultColDef"]["floatingFilter"] = False
-                            go["defaultColDef"]["suppressHeaderMenuButton"] = False
-                            go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                            if "floatingFiltersHeight" in go:
-                                del go["floatingFiltersHeight"]
-                            _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
-                            go["columnDefs"] = _col_defs
-                            for cdef in _col_defs:
-                                cdef["filter"] = True
-                                cdef["floatingFilter"] = False
-                                cdef["suppressHeaderFilterButton"] = False
-                                if cdef.get("type") == []:
-                                    cdef.pop("type", None)
-                            if status_col_combined and JsCode:
-                                go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
-                            _um = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
-                            _dm = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
-                            _kw = dict(update_mode=_um, data_return_mode=_dm) if (_um and _dm) else {}
-                            grid_res = AgGrid(
-                                df_combined,
-                                gridOptions=go,
-                                use_container_width=True,
-                                height=700,
-                                theme="streamlit",
-                                show_toolbar=True,
-                                show_search=True,
-                                show_download_button=False,
-                                enable_enterprise_modules=True,
-                                allow_unsafe_jscode=True,
-                                key="master_kitchens_grid_combined",
-                                **_kw,
-                            )
-                            _total_combined = len(rows_shown) if rows_shown else 0
-                            _cnt = _total_combined
-                            if grid_res and grid_res.get("data") is not None:
-                                _cnt = len(grid_res["data"])
-                            if rows_shown:
-                                _row_count_placeholder_combined.caption(
-                                    f"**{_cnt}** rows shown (out of **{_total_combined}** total)"
-                                )
-                                if can_export:
-                                    _rows_to_export = grid_res.get("data") if (grid_res and grid_res.get("data") is not None) else rows_shown
-                                    _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
-                        else:
+                            if can_export:
+                                _rows_to_export = grid_res.get("data") if (grid_res and grid_res.get("data") is not None) else rows_shown
+                                _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
+                    else:
                             st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
                             if rows_shown:
                                 _total_combined = len(rows_shown)
@@ -4499,88 +4527,88 @@ def main():
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     display_df = _coerce_numeric_columns(display_df)
                     _row_count_placeholder_single = st.empty()
-                    if _HAS_AGGRI:
-                        # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
-                        status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
-                        gb = GridOptionsBuilder.from_dataframe(display_df)
-                        gb.configure_default_column(
-                            filter=True,
-                            sortable=True,
-                            resizable=True,
-                            floatingFilter=False,
-                            suppressHeaderMenuButton=False,
-                            suppressHeaderFilterButton=False,
-                            menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
-                        )
-                        _max_set_master = 500
-                        for col in display_df.columns:
-                            if pd.api.types.is_numeric_dtype(display_df[col]):
-                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
-                            elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                if _HAS_AGGRI and not _mobile_mode_enabled():
+                    # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
+                    status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
+                    gb = GridOptionsBuilder.from_dataframe(display_df)
+                    gb.configure_default_column(
+                        filter=True,
+                        sortable=True,
+                        resizable=True,
+                        floatingFilter=False,
+                        suppressHeaderMenuButton=False,
+                        suppressHeaderFilterButton=False,
+                        menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
+                    )
+                    _max_set_master = 500
+                    for col in display_df.columns:
+                        if pd.api.types.is_numeric_dtype(display_df[col]):
+                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
+                        elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
+                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                        else:
+                            ser = display_df[col].dropna().astype(str).str.strip()
+                            uniq = ser[ser != ""].unique()
+                            if len(uniq) <= _max_set_master:
+                                vals = sorted(uniq.tolist(), key=str)
+                                gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
                             else:
-                                ser = display_df[col].dropna().astype(str).str.strip()
-                                uniq = ser[ser != ""].unique()
-                                if len(uniq) <= _max_set_master:
-                                    vals = sorted(uniq.tolist(), key=str)
-                                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
-                                else:
-                                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
-                        gb.configure_grid_options(
-                            domLayout="normal",
-                            suppressMenuHide=False,
-                            columnMenu="legacy",
+                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
+                    gb.configure_grid_options(
+                        domLayout="normal",
+                        suppressMenuHide=False,
+                        columnMenu="legacy",
+                    )
+                    gb.configure_side_bar(filters_panel=False, columns_panel=False)
+                    go = gb.build()
+                    go["suppressCsvExport"] = True
+                    if "defaultColDef" not in go:
+                        go["defaultColDef"] = {}
+                    go["defaultColDef"]["filter"] = True
+                    go["defaultColDef"]["floatingFilter"] = False
+                    go["defaultColDef"]["suppressHeaderMenuButton"] = False
+                    go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                    if "floatingFiltersHeight" in go:
+                        del go["floatingFiltersHeight"]
+                    _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+                    go["columnDefs"] = _col_defs_m
+                    for cdef in _col_defs_m:
+                        cdef["filter"] = True
+                        cdef["floatingFilter"] = False
+                        cdef["suppressHeaderFilterButton"] = False
+                        if cdef.get("type") == []:
+                            cdef.pop("type", None)
+                    if status_col_ag and JsCode:
+                        go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
+                    _um_m = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
+                    _dm_m = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
+                    _kw_m = dict(update_mode=_um_m, data_return_mode=_dm_m) if (_um_m and _dm_m) else {}
+                    grid_res_m = AgGrid(
+                        display_df,
+                        gridOptions=go,
+                        use_container_width=True,
+                        height=700,
+                        theme="streamlit",
+                        show_toolbar=True,
+                        show_search=True,
+                        show_download_button=False,
+                        enable_enterprise_modules=True,
+                        allow_unsafe_jscode=True,
+                        key="master_kitchens_grid_single",
+                        **_kw_m,
+                    )
+                    _total_single = len(rows_display) if rows_display else 0
+                    _cnt_m = _total_single
+                    if grid_res_m and grid_res_m.get("data") is not None:
+                        _cnt_m = len(grid_res_m["data"])
+                    if rows_display is not None:
+                        _row_count_placeholder_single.caption(
+                            f"**{_cnt_m}** rows shown (out of **{_total_single}** total)"
                         )
-                        gb.configure_side_bar(filters_panel=False, columns_panel=False)
-                        go = gb.build()
-                        go["suppressCsvExport"] = True
-                        if "defaultColDef" not in go:
-                            go["defaultColDef"] = {}
-                        go["defaultColDef"]["filter"] = True
-                        go["defaultColDef"]["floatingFilter"] = False
-                        go["defaultColDef"]["suppressHeaderMenuButton"] = False
-                        go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                        if "floatingFiltersHeight" in go:
-                            del go["floatingFiltersHeight"]
-                        _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
-                        go["columnDefs"] = _col_defs_m
-                        for cdef in _col_defs_m:
-                            cdef["filter"] = True
-                            cdef["floatingFilter"] = False
-                            cdef["suppressHeaderFilterButton"] = False
-                            if cdef.get("type") == []:
-                                cdef.pop("type", None)
-                        if status_col_ag and JsCode:
-                            go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
-                        _um_m = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
-                        _dm_m = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
-                        _kw_m = dict(update_mode=_um_m, data_return_mode=_dm_m) if (_um_m and _dm_m) else {}
-                        grid_res_m = AgGrid(
-                            display_df,
-                            gridOptions=go,
-                            use_container_width=True,
-                            height=700,
-                            theme="streamlit",
-                            show_toolbar=True,
-                            show_search=True,
-                            show_download_button=False,
-                            enable_enterprise_modules=True,
-                            allow_unsafe_jscode=True,
-                            key="master_kitchens_grid_single",
-                            **_kw_m,
-                        )
-                        _total_single = len(rows_display) if rows_display else 0
-                        _cnt_m = _total_single
-                        if grid_res_m and grid_res_m.get("data") is not None:
-                            _cnt_m = len(grid_res_m["data"])
-                        if rows_display is not None:
-                            _row_count_placeholder_single.caption(
-                                f"**{_cnt_m}** rows shown (out of **{_total_single}** total)"
-                            )
-                            if can_export:
-                                _rows_to_export = grid_res_m.get("data") if (grid_res_m and grid_res_m.get("data") is not None) else rows_display
-                                _render_export_button(_rows_to_export, "master_kitchens_filtered", key="export_master_kitchens_single")
-                    else:
+                        if can_export:
+                            _rows_to_export = grid_res_m.get("data") if (grid_res_m and grid_res_m.get("data") is not None) else rows_display
+                            _render_export_button(_rows_to_export, "master_kitchens_filtered", key="export_master_kitchens_single")
+                else:
                         display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                         _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
                         _ns = "#B22222"
@@ -4607,7 +4635,7 @@ def main():
                             )
                             if can_export:
                                 _render_export_button(rows_display, "master_kitchens_filtered", key="export_master_kitchens_single_df")
-                elif rows_filtered and not use_facility_tabs:
+                if rows_filtered and not use_facility_tabs:
                     _show = rows_display if rows_filtered else []
                     for r in _show[:100]:
                         st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
