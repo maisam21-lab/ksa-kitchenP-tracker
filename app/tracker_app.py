@@ -1107,8 +1107,6 @@ def _use_compact_tables() -> bool:
 
 def _table_height_px(default: int = 700) -> int:
     """Adaptive table height; supports expanded table view on mobile."""
-    if _mobile_mode_enabled() and st.session_state.get("mobile_table_expanded", False):
-        return 1200
     return default
 
 
@@ -3488,7 +3486,25 @@ def main():
     .ag-toolbar [title*="Download"],
     .ag-toolbar button[title*="CSV"],
     [class*="ag-"] [title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-    /* Keep Streamlit's native fullscreen behavior (custom overrides removed for mobile reliability). */
+    /* Mobile Safari fallback for fullscreen button on dataframe toolbar:
+       if native fullscreen fails, JS toggles this class on the table wrapper. */
+    .mobile-fullscreen-fallback {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 1000000 !important;
+        background: #ffffff !important;
+        margin: 0 !important;
+        padding: 8px !important;
+        overflow: auto !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: 100vw !important;
+        max-height: 100vh !important;
+    }
+    .mobile-fullscreen-fallback [data-testid="stDataFrame"] {
+        height: calc(100vh - 24px) !important;
+        min-height: calc(100vh - 24px) !important;
+    }
     /* Remove space above section tabs and shift main content up */
     [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
     [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
@@ -4331,14 +4347,6 @@ def main():
                 ):
                     st.session_state["section_radio"] = opt
                     _rerun()
-
-    if _mobile_mode_enabled():
-        st.toggle(
-            "Expanded table view",
-            key="mobile_table_expanded",
-            value=bool(st.session_state.get("mobile_table_expanded", False)),
-            help="Use a taller table viewport on phones when fullscreen is not available.",
-        )
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
@@ -5185,6 +5193,35 @@ def main():
         div[data-testid="stDataFrame"] { border-radius: 10px; box-shadow: 0 2px 8px rgba(15,118,110,0.08); border: 1px solid rgba(15,118,110,0.2); overflow: hidden; }
         div[data-testid="stDataFrame"]:hover { box-shadow: 0 4px 14px rgba(15,118,110,0.12); }
         </style>
+    <script>
+    (function() {
+      if (window.__mobileFullscreenPatched) return;
+      window.__mobileFullscreenPatched = true;
+      function closestDataframeWrap(el) {
+        var n = el;
+        while (n && n !== document.body) {
+          if (n.querySelector && n.querySelector('[data-testid="stDataFrame"]')) return n;
+          n = n.parentElement;
+        }
+        return null;
+      }
+      document.addEventListener('click', function(ev) {
+        var btn = ev.target && ev.target.closest ? ev.target.closest('button,[role="button"]') : null;
+        if (!btn) return;
+        var label = ((btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '')).toLowerCase();
+        if (!(label.includes('full') || label.includes('expand'))) return;
+        var wrap = closestDataframeWrap(btn);
+        if (!wrap) return;
+        // Let native fullscreen run first; if it fails on mobile Safari, apply fallback.
+        setTimeout(function() {
+          var inNative = !!document.fullscreenElement;
+          if (!inNative) {
+            wrap.classList.toggle('mobile-fullscreen-fallback');
+          }
+        }, 80);
+      }, true);
+    })();
+    </script>
         """, unsafe_allow_html=True)
         glance_label = f"{selected_country or 'All'} at a glance" if (selected_country and selected_country != "All") else "All countries at a glance"
         st.markdown(
