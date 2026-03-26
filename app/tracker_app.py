@@ -820,7 +820,11 @@ def _clear_session_params() -> None:
     try:
         qp = getattr(st, "query_params", None)
         if qp is not None:
+            # Keep long-lived remembered email, clear only short session tokens.
+            remember = qp.get(_TRACKER_PARAM_REMEMBER)
             qp.clear()
+            if remember:
+                qp[_TRACKER_PARAM_REMEMBER] = remember[0] if isinstance(remember, list) else remember
     except Exception:
         pass
 
@@ -1081,6 +1085,14 @@ def _mobile_mode_enabled() -> bool:
 def _compact_layout_enabled() -> bool:
     """Global compact layout mode for phones/small screens."""
     return bool(_mobile_mode_enabled())
+
+
+def _use_compact_tables() -> bool:
+    """Whether to use lightweight dataframe tables (vs AgGrid) for current client."""
+    if not _mobile_mode_enabled():
+        return False
+    # On mobile, allow users to opt into full grid filters if needed.
+    return not bool(st.session_state.get("mobile_advanced_grid", False))
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -3183,7 +3195,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         if str(c).strip().lower() in ("status", "status__c"):
             status_col = c
             break
-    if _HAS_AGGRI and HAS_EXCEL and not df_display.empty and not _mobile_mode_enabled():
+    if _HAS_AGGRI and HAS_EXCEL and not df_display.empty and not _use_compact_tables():
         if status_col:
             df_display = df_display.copy()
             df_display["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
@@ -4052,7 +4064,14 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
-    # Keep this silent; compact mode is auto-detected.
+    if _mobile_mode_enabled():
+        _adv = st.toggle(
+            "Advanced table filters",
+            value=bool(st.session_state.get("mobile_advanced_grid", False)),
+            key="mobile_advanced_grid_toggle",
+            help="Enable full grid filters on mobile (heavier, but closer to desktop behavior).",
+        )
+        st.session_state["mobile_advanced_grid"] = bool(_adv)
     # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
@@ -4525,7 +4544,7 @@ def main():
                             if str(c).strip().lower() in ("status", "status__c"):
                                 status_col_combined = c
                                 break
-                    if _HAS_AGGRI and not df_combined.empty and not _mobile_mode_enabled():
+                    if _HAS_AGGRI and not df_combined.empty and not _use_compact_tables():
                         gb = GridOptionsBuilder.from_dataframe(df_combined)
                         gb.configure_default_column(
                             filter=True,
@@ -4638,7 +4657,7 @@ def main():
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     display_df = _coerce_numeric_columns(display_df)
                     _row_count_placeholder_single = st.empty()
-                if _HAS_AGGRI and not _mobile_mode_enabled():
+                if _HAS_AGGRI and not _use_compact_tables():
                     # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
                     status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
                     gb = GridOptionsBuilder.from_dataframe(display_df)
