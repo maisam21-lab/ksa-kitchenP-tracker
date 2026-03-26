@@ -1036,26 +1036,57 @@ def _source_refresh_is_stale(source: str, minutes: int = 15) -> bool:
 
 
 def _mobile_mode_enabled() -> bool:
-    """Mobile-friendly rendering mode: disables heavy grid components."""
-    if "mobile_friendly_mode" in st.session_state:
-        return bool(st.session_state.get("mobile_friendly_mode"))
+    """Auto-detect mobile/tablet clients to enable compact rendering."""
+    if "_mobile_detected" in st.session_state:
+        return bool(st.session_state.get("_mobile_detected"))
     enabled = False
     try:
+        # Explicit query override if needed: ?mobile=1 or ?mobile=0
         q = getattr(st, "query_params", None)
         if q is not None:
             raw = q.get("mobile")
             if isinstance(raw, list):
                 raw = raw[0] if raw else ""
-            enabled = str(raw or "").strip().lower() in ("1", "true", "yes", "y", "on")
+            raw_s = str(raw or "").strip().lower()
+            if raw_s in ("1", "true", "yes", "y", "on"):
+                enabled = True
+            elif raw_s in ("0", "false", "no", "n", "off"):
+                enabled = False
+            else:
+                ctx = getattr(st, "context", None)
+                headers = getattr(ctx, "headers", {}) if ctx is not None else {}
+                ua = str((headers or {}).get("user-agent", "")).lower()
+                enabled = any(tok in ua for tok in ("iphone", "android", "mobile", "ipad", "tablet"))
     except Exception:
         enabled = False
-    st.session_state["mobile_friendly_mode"] = enabled
+    st.session_state["_mobile_detected"] = enabled
     return enabled
 
 
 def _compact_layout_enabled() -> bool:
     """Global compact layout mode for phones/small screens."""
     return bool(_mobile_mode_enabled())
+
+
+def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
+    """Apply row status colors in non-AgGrid paths (mobile/tablet fallback)."""
+    if df is None or df.empty or not status_col:
+        return df
+    _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
+    _ns = "#B22222"
+
+    def _row_bg(row):
+        v = (str(row[status_col]) if row.get(status_col) is not None else "").strip()
+        low = v.lower()
+        if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
+            return [f"background-color: {_ns}; color: white"] * len(row)
+        key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
+        bg = _sc.get(key, "") if key else _sc.get(v, "")
+        if key == "Vacant" and bg and bool(row.get("_has_opportunity", False)):
+            bg = _sc.get("Occupied", bg)
+        return [f"background-color: {bg}" if bg else ""] * len(row)
+
+    return df.style.apply(_row_bg, axis=1)
 
 
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
@@ -3222,7 +3253,14 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
                 _rows_to_export = grid_response.get("data") if (grid_response and grid_response.get("data") is not None) else rows_shown
                 _render_export_button(_rows_to_export, f"{tab_id}_filtered", key=f"export_{key_suffix}_{tab_id}_grid")
     else:
-        st.dataframe(df_display, use_container_width=True, hide_index=True, height=700)
+        _df_mobile = df_display
+        _cc = {"_has_opportunity": None}
+        if status_col:
+            if "_has_opportunity" not in _df_mobile.columns:
+                _df_mobile = _df_mobile.copy()
+                _df_mobile["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
+            _df_mobile = _style_df_status_rows(_df_mobile, status_col)
+        st.dataframe(_df_mobile, use_container_width=True, hide_index=True, height=700, column_config=_cc)
         if rows_shown:
             _total_count = len(rows_shown)
             _row_count_placeholder.caption(
@@ -3964,16 +4002,8 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
-    _mobile_now = bool(_mobile_mode_enabled())
-    _mobile_next = st.toggle(
-        "Mobile-friendly tables",
-        value=_mobile_now,
-        key="mobile_friendly_toggle",
-        help="Use simpler table rendering for phones/small screens.",
-    )
-    if _mobile_next != _mobile_now:
-        st.session_state["mobile_friendly_mode"] = bool(_mobile_next)
-        _rerun()
+    if _mobile_mode_enabled():
+        st.caption("Mobile layout detected. Using compact, phone-friendly tables.")
     # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
@@ -4528,7 +4558,8 @@ def main():
                                 _rows_to_export = grid_res.get("data") if (grid_res and grid_res.get("data") is not None) else rows_shown
                                 _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
                     else:
-                            st.dataframe(df_combined, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
+                            _df_combined_show = _style_df_status_rows(df_combined, status_col_combined)
+                            st.dataframe(_df_combined_show, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=700)
                             if rows_shown:
                                 _total_combined = len(rows_shown)
                                 _row_count_placeholder_combined.caption(
