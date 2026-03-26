@@ -749,6 +749,7 @@ def _allowlist_enabled() -> bool:
 SESSION_PERSISTENCE_HOURS = 6
 _TRACKER_PARAM_USER = "u"
 _TRACKER_PARAM_EXPIRY = "e"
+_TRACKER_PARAM_REMEMBER = "r"
 
 
 def _restore_session_from_params() -> bool:
@@ -761,7 +762,18 @@ def _restore_session_from_params() -> bool:
             return False
         u = q.get(_TRACKER_PARAM_USER)
         e = q.get(_TRACKER_PARAM_EXPIRY)
+        r = q.get(_TRACKER_PARAM_REMEMBER)
         if not u or not e:
+            # Fallback: long-lived remember param for typed email convenience.
+            if r:
+                r = r[0] if isinstance(r, list) else r
+                try:
+                    email = base64.b64decode(str(r).encode()).decode()
+                except Exception:
+                    email = ""
+                if email and "@" in email:
+                    st.session_state["user_display_name"] = email
+                    return True
             return False
         u = u[0] if isinstance(u, list) else u
         e = e[0] if isinstance(e, list) else e
@@ -791,11 +803,14 @@ def _persist_session_to_params(user: str) -> None:
     try:
         import time
         expiry_ts = int(time.time()) + (SESSION_PERSISTENCE_HOURS * 3600)
-        u = base64.b64encode((user or "").strip().encode()).decode()
+        u_plain = (user or "").strip()
+        u = base64.b64encode(u_plain.encode()).decode()
         qp = getattr(st, "query_params", None)
         if qp is not None:
             qp[_TRACKER_PARAM_USER] = u
             qp[_TRACKER_PARAM_EXPIRY] = str(expiry_ts)
+            # Keep a long-lived "remember email" param so users don't need to retype after session expiry.
+            qp[_TRACKER_PARAM_REMEMBER] = base64.b64encode(u_plain.encode()).decode()
     except Exception:
         pass
 
