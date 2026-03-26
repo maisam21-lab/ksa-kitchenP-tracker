@@ -4020,8 +4020,18 @@ def main():
             if _prefill:
                 pass  # Shown in row 2 below
             else:
-                st.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
+                _remembered = (st.session_state.get("remembered_email") or "").strip()
+                st.text_input(
+                    "Your name or email",
+                    key="user_display_name",
+                    value=_remembered,
+                    placeholder="e.g. jane@company.com",
+                    help="Shown on comments and discussions. Not used for access when allowlist is off.",
+                )
             current_user = (st.session_state.get("user_display_name") or "").strip()
+            if st.session_state.get("_force_signed_out") and not current_user:
+                st.info("You are signed out. Enter your email to continue.")
+                st.stop()
 
     # User has identified again; clear one-shot sign-out guard.
     if current_user:
