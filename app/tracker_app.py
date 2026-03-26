@@ -749,6 +749,7 @@ def _allowlist_enabled() -> bool:
 SESSION_PERSISTENCE_HOURS = 6
 _TRACKER_PARAM_USER = "u"
 _TRACKER_PARAM_EXPIRY = "e"
+_TRACKER_PARAM_REMEMBER = "r"
 
 
 def _restore_session_from_params() -> bool:
@@ -761,6 +762,16 @@ def _restore_session_from_params() -> bool:
             return False
         u = q.get(_TRACKER_PARAM_USER)
         e = q.get(_TRACKER_PARAM_EXPIRY)
+        r = q.get(_TRACKER_PARAM_REMEMBER)
+        # Always prefill remembered email for convenience (does not imply verified sign-in).
+        if r and "remembered_email" not in st.session_state:
+            r = r[0] if isinstance(r, list) else r
+            try:
+                rem = base64.b64decode(str(r).encode()).decode()
+            except Exception:
+                rem = ""
+            if rem and "@" in rem:
+                st.session_state["remembered_email"] = rem
         if not u or not e:
             return False
         u = u[0] if isinstance(u, list) else u
@@ -796,6 +807,7 @@ def _persist_session_to_params(user: str) -> None:
         if qp is not None:
             qp[_TRACKER_PARAM_USER] = u
             qp[_TRACKER_PARAM_EXPIRY] = str(expiry_ts)
+            qp[_TRACKER_PARAM_REMEMBER] = u
     except Exception:
         pass
 
@@ -805,7 +817,10 @@ def _clear_session_params() -> None:
     try:
         qp = getattr(st, "query_params", None)
         if qp is not None:
+            remember = qp.get(_TRACKER_PARAM_REMEMBER)
             qp.clear()
+            if remember:
+                qp[_TRACKER_PARAM_REMEMBER] = remember[0] if isinstance(remember, list) else remember
     except Exception:
         pass
 
@@ -3297,8 +3312,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             fit_columns_on_grid_load=False,
             height=700,
             theme="streamlit",
-            show_toolbar=True,
-            show_search=True,
+            show_toolbar=not _mobile_mode_enabled(),
+            show_search=not _mobile_mode_enabled(),
             show_download_button=False,
             enable_enterprise_modules=True,
             allow_unsafe_jscode=True,
@@ -3952,7 +3967,14 @@ def main():
             if _prefill:
                 pass  # Shown in row 2 below
             else:
-                st.text_input("Your email", key="user_display_name", placeholder="e.g. jane@company.com", help="Used for access check and comments. Must be on the allowed list.")
+                _remembered = (st.session_state.get("remembered_email") or "").strip()
+                st.text_input(
+                    "Your email",
+                    key="user_display_name",
+                    value=_remembered,
+                    placeholder="e.g. jane@company.com",
+                    help="Used for access check and comments. Must be on the allowed list.",
+                )
             current_user = (st.session_state.get("user_display_name") or "").strip()
             if not current_user:
                 st.warning("Enter your email to continue.")
@@ -4636,8 +4658,8 @@ def main():
                             fit_columns_on_grid_load=False,
                             height=700,
                             theme="streamlit",
-                            show_toolbar=True,
-                            show_search=True,
+                            show_toolbar=not _mobile_mode_enabled(),
+                            show_search=not _mobile_mode_enabled(),
                             show_download_button=False,
                             enable_enterprise_modules=True,
                             allow_unsafe_jscode=True,
@@ -4753,8 +4775,8 @@ def main():
                         fit_columns_on_grid_load=False,
                         height=700,
                         theme="streamlit",
-                        show_toolbar=True,
-                        show_search=True,
+                        show_toolbar=not _mobile_mode_enabled(),
+                        show_search=not _mobile_mode_enabled(),
                         show_download_button=False,
                         enable_enterprise_modules=True,
                         allow_unsafe_jscode=True,
