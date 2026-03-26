@@ -1070,8 +1070,8 @@ def _compact_layout_enabled() -> bool:
 
 def _use_compact_tables() -> bool:
     """Whether to use lightweight dataframe tables (vs AgGrid) for current client."""
-    # On phones/tablets, prefer compact dataframe rendering.
-    return bool(_mobile_mode_enabled())
+    # User requested same web-style table/filter behavior on all devices.
+    return False
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -3240,7 +3240,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             filter=True,
             sortable=True,
             resizable=True,
-            floatingFilter=False,
+            floatingFilter=True,
             suppressHeaderMenuButton=False,
             suppressHeaderFilterButton=False,
             menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
@@ -3248,18 +3248,18 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         _max_set_filter_values = 500
         for col in df_display.columns:
             if pd.api.types.is_numeric_dtype(df_display[col]):
-                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
+                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
             elif pd.api.types.is_datetime64_any_dtype(df_display[col]):
-                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
             else:
                 # Set filter so all unique values appear when user clicks Filter (checkboxes)
                 ser = df_display[col].dropna().astype(str).str.strip()
                 uniq = ser[ser != ""].unique()
                 if len(uniq) <= _max_set_filter_values:
                     vals = sorted(uniq.tolist(), key=str)
-                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
+                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=True)
                 else:
-                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
+                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
         gb.configure_grid_options(
             domLayout="normal",
             suppressMenuHide=False,
@@ -3271,7 +3271,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         if "defaultColDef" not in go:
             go["defaultColDef"] = {}
         go["defaultColDef"]["filter"] = True
-        go["defaultColDef"]["floatingFilter"] = False
+        go["defaultColDef"]["floatingFilter"] = True
         go["defaultColDef"]["suppressHeaderMenuButton"] = False
         go["defaultColDef"]["suppressHeaderFilterButton"] = False
         if "floatingFiltersHeight" in go:
@@ -3280,7 +3280,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         go["columnDefs"] = _column_defs
         for cdef in _column_defs:
             cdef["filter"] = True
-            cdef["floatingFilter"] = False
+            cdef["floatingFilter"] = True
             cdef["suppressHeaderFilterButton"] = False
             if cdef.get("type") == []:
                 cdef.pop("type", None)
@@ -4578,7 +4578,7 @@ def main():
                             filter=True,
                             sortable=True,
                             resizable=True,
-                            floatingFilter=False,
+                            floatingFilter=True,
                             suppressHeaderMenuButton=False,
                             suppressHeaderFilterButton=False,
                             menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
@@ -4586,17 +4586,17 @@ def main():
                         _max_set_combined = 500
                         for col in df_combined.columns:
                             if pd.api.types.is_numeric_dtype(df_combined[col]):
-                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
+                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
                             elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
-                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
                             else:
                                 ser = df_combined[col].dropna().astype(str).str.strip()
                                 uniq = ser[ser != ""].unique()
                                 if len(uniq) <= _max_set_combined:
                                     vals = sorted(uniq.tolist(), key=str)
-                                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
+                                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=True)
                                 else:
-                                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
+                                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
                         gb.configure_grid_options(
                             domLayout="normal",
                             suppressMenuHide=False,
@@ -4608,7 +4608,7 @@ def main():
                         if "defaultColDef" not in go:
                             go["defaultColDef"] = {}
                         go["defaultColDef"]["filter"] = True
-                        go["defaultColDef"]["floatingFilter"] = False
+                        go["defaultColDef"]["floatingFilter"] = True
                         go["defaultColDef"]["suppressHeaderMenuButton"] = False
                         go["defaultColDef"]["suppressHeaderFilterButton"] = False
                         if "floatingFiltersHeight" in go:
@@ -4617,7 +4617,7 @@ def main():
                         go["columnDefs"] = _col_defs
                         for cdef in _col_defs:
                             cdef["filter"] = True
-                            cdef["floatingFilter"] = False
+                            cdef["floatingFilter"] = True
                             cdef["suppressHeaderFilterButton"] = False
                             if cdef.get("type") == []:
                                 cdef.pop("type", None)
@@ -4693,7 +4693,7 @@ def main():
                         filter=True,
                         sortable=True,
                         resizable=True,
-                        floatingFilter=False,
+                        floatingFilter=True,
                         suppressHeaderMenuButton=False,
                         suppressHeaderFilterButton=False,
                         menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
@@ -4701,17 +4701,17 @@ def main():
                     _max_set_master = 500
                     for col in display_df.columns:
                         if pd.api.types.is_numeric_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=False)
+                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
                         elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=False)
+                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
                         else:
                             ser = display_df[col].dropna().astype(str).str.strip()
                             uniq = ser[ser != ""].unique()
                             if len(uniq) <= _max_set_master:
                                 vals = sorted(uniq.tolist(), key=str)
-                                gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=False)
+                                gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=True)
                             else:
-                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=False)
+                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
                     gb.configure_grid_options(
                         domLayout="normal",
                         suppressMenuHide=False,
@@ -4723,7 +4723,7 @@ def main():
                     if "defaultColDef" not in go:
                         go["defaultColDef"] = {}
                     go["defaultColDef"]["filter"] = True
-                    go["defaultColDef"]["floatingFilter"] = False
+                    go["defaultColDef"]["floatingFilter"] = True
                     go["defaultColDef"]["suppressHeaderMenuButton"] = False
                     go["defaultColDef"]["suppressHeaderFilterButton"] = False
                     if "floatingFiltersHeight" in go:
@@ -4732,7 +4732,7 @@ def main():
                     go["columnDefs"] = _col_defs_m
                     for cdef in _col_defs_m:
                         cdef["filter"] = True
-                        cdef["floatingFilter"] = False
+                        cdef["floatingFilter"] = True
                         cdef["suppressHeaderFilterButton"] = False
                         if cdef.get("type") == []:
                             cdef.pop("type", None)
