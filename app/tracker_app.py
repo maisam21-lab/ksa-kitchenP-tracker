@@ -750,6 +750,7 @@ SESSION_PERSISTENCE_HOURS = 6
 _TRACKER_PARAM_USER = "u"
 _TRACKER_PARAM_EXPIRY = "e"
 _TRACKER_PARAM_REMEMBER = "r"
+_TRACKER_PARAM_SIGNED_OUT = "so"
 
 
 def _restore_session_from_params() -> bool:
@@ -829,6 +830,45 @@ def _clear_session_params() -> None:
         pass
 
 
+def _signed_out_gate_active() -> bool:
+    if st.session_state.get("_force_signed_out"):
+        return True
+    try:
+        qp = getattr(st, "query_params", None)
+        if qp is not None:
+            so = qp.get(_TRACKER_PARAM_SIGNED_OUT)
+            if isinstance(so, list):
+                so = so[0] if so else ""
+            if str(so or "").strip() in ("1", "true", "yes"):
+                st.session_state["_force_signed_out"] = True
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _render_signed_out_gate() -> None:
+    _remembered = (st.session_state.get("remembered_email") or "").strip()
+    st.text_input(
+        "Your email",
+        key="user_display_name",
+        value=_remembered,
+        placeholder="e.g. jane@company.com",
+        help="Prefilled for convenience. Tap Continue to enter the app again.",
+    )
+    st.info("You are signed out.")
+    if st.button("Continue", key="signed_out_continue_global", type="primary"):
+        st.session_state.pop("_force_signed_out", None)
+        try:
+            qp = getattr(st, "query_params", None)
+            if qp is not None:
+                qp.pop(_TRACKER_PARAM_SIGNED_OUT, None)
+        except Exception:
+            pass
+        _rerun()
+    st.stop()
+
+
 def _do_sign_out() -> None:
     """Sign out current session while keeping remembered email for sign-in form prefill."""
     st.session_state["_force_signed_out"] = True
@@ -836,6 +876,12 @@ def _do_sign_out() -> None:
         del st.session_state["user_display_name"]
     st.session_state["developer_unlocked"] = False
     _clear_session_params()
+    try:
+        qp = getattr(st, "query_params", None)
+        if qp is not None:
+            qp[_TRACKER_PARAM_SIGNED_OUT] = "1"
+    except Exception:
+        pass
     _rerun()
 
 
@@ -3374,6 +3420,9 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
+    if _signed_out_gate_active():
+        _render_signed_out_gate()
+
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
     _streamlit_user = getattr(st, "user", None)
     _verified_email = None
@@ -3943,22 +3992,6 @@ def main():
     if not _verified_email:
         _restore_session_from_params()
 
-    # Hard sign-out gate: always stop here until user explicitly continues, even if provider still has a session.
-    if st.session_state.get("_force_signed_out"):
-        _remembered = (st.session_state.get("remembered_email") or "").strip()
-        st.text_input(
-            "Your email",
-            key="user_display_name",
-            value=_remembered,
-            placeholder="e.g. jane@company.com",
-            help="Prefilled for convenience. Tap Continue to enter the app again.",
-        )
-        st.info("You are signed out.")
-        if st.button("Continue", key="signed_out_continue_global", type="primary"):
-            st.session_state.pop("_force_signed_out", None)
-            _rerun()
-        st.stop()
-
     # When allowlist is on: require verified sign-in, developer key, or (if fallback allowed) typed email
     def _require_verified_signin() -> bool:
         """If true, only verified sign-in or developer key; no typed email. Set ALLOWLIST_REQUIRE_VERIFIED_SIGNIN=1 for strict."""
@@ -4045,16 +4078,16 @@ def main():
                     help="Shown on comments and discussions. Not used for access when allowlist is off.",
                 )
             current_user = (st.session_state.get("user_display_name") or "").strip()
-            if st.session_state.get("_force_signed_out"):
-                st.info("You are signed out. Tap **Continue** to enter again.")
-                if st.button("Continue", key="signed_out_continue", type="primary"):
-                    st.session_state.pop("_force_signed_out", None)
-                    _rerun()
-                st.stop()
 
     # User has identified again; clear one-shot sign-out guard.
     if current_user:
         st.session_state.pop("_force_signed_out", None)
+        try:
+            qp = getattr(st, "query_params", None)
+            if qp is not None:
+                qp.pop(_TRACKER_PARAM_SIGNED_OUT, None)
+        except Exception:
+            pass
 
     # Persist session to URL params so refresh keeps user for SESSION_PERSISTENCE_HOURS
     if current_user:
