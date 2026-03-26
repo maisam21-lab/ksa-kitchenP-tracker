@@ -832,7 +832,6 @@ def _clear_session_params() -> None:
 def _do_sign_out() -> None:
     """Sign out current session while keeping remembered email for sign-in form prefill."""
     st.session_state["_force_signed_out"] = True
-    st.session_state["_pending_logout"] = True
     if "user_display_name" in st.session_state:
         del st.session_state["user_display_name"]
     st.session_state["developer_unlocked"] = False
@@ -3374,17 +3373,6 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
 def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
     init_db()
-
-    # Deterministic sign-out flow: force provider logout on rerun when requested.
-    if st.session_state.get("_pending_logout"):
-        _st_logout = getattr(st, "logout", None)
-        if callable(_st_logout):
-            try:
-                _st_logout()
-                st.stop()
-            except Exception:
-                pass
-        st.session_state.pop("_pending_logout", None)
 
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
     _streamlit_user = getattr(st, "user", None)
