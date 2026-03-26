@@ -1053,6 +1053,11 @@ def _mobile_mode_enabled() -> bool:
     return enabled
 
 
+def _compact_layout_enabled() -> bool:
+    """Global compact layout mode for phones/small screens."""
+    return bool(_mobile_mode_enabled())
+
+
 def insert_app_discussion(author: str, message: str, parent_id: int | None = None) -> None:
     """Add a discussion post or reply (parent_id=None for top-level)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -4167,19 +4172,31 @@ def main():
         section = section_options[0]
         st.session_state["section_radio"] = section
 
-    # Tab row: one button per section (selected = primary, rest = secondary)
-    tab_cols = st.columns(len(section_options))
-    for i, opt in enumerate(section_options):
-        with tab_cols[i]:
-            is_selected = opt == section
-            if st.button(
-                opt,
-                key=f"section_tab_{i}_{opt.replace(' ', '_')}",
-                type="primary" if is_selected else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state["section_radio"] = opt
-                _rerun()
+    # Tab row: desktop buttons; compact mode uses a single segmented control.
+    if _compact_layout_enabled():
+        _seg = st.segmented_control(
+            "Section",
+            options=section_options,
+            default=section,
+            selection_mode="single",
+            key="section_mobile_selector",
+        )
+        if _seg and _seg != section:
+            st.session_state["section_radio"] = _seg
+            _rerun()
+    else:
+        tab_cols = st.columns(len(section_options))
+        for i, opt in enumerate(section_options):
+            with tab_cols[i]:
+                is_selected = opt == section
+                if st.button(
+                    opt,
+                    key=f"section_tab_{i}_{opt.replace(' ', '_')}",
+                    type="primary" if is_selected else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["section_radio"] = opt
+                    _rerun()
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
@@ -4194,34 +4211,50 @@ def main():
                 "Default is the standard master kitchen data (same as other users)."
             )
             _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
-            _c_kw, _c_ae, _c_std = st.columns([1, 1, 2])
-            with _c_kw:
-                if st.button(
-                    "Kuwait",
-                    key="km_preview_tab_kuwait",
-                    type="primary" if _cur == "Kuwait" else "secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state["preview_kitchen_region"] = "Kuwait"
+            if _compact_layout_enabled():
+                _pick = st.segmented_control(
+                    "Preview country",
+                    options=["Standard", "Kuwait", "UAE"],
+                    default=("Standard" if _cur not in ("Kuwait", "UAE") else _cur),
+                    selection_mode="single",
+                    key="km_preview_segmented",
+                )
+                if _pick == "Standard":
+                    if _cur in ("Kuwait", "UAE"):
+                        st.session_state.pop("preview_kitchen_region", None)
+                        _rerun()
+                elif _pick in ("Kuwait", "UAE") and _pick != _cur:
+                    st.session_state["preview_kitchen_region"] = _pick
                     _rerun()
-            with _c_ae:
-                if st.button(
-                    "UAE",
-                    key="km_preview_tab_uae",
-                    type="primary" if _cur == "UAE" else "secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state["preview_kitchen_region"] = "UAE"
-                    _rerun()
-            with _c_std:
-                if _cur in ("Kuwait", "UAE") and st.button(
-                    "Standard master kitchen",
-                    key="km_preview_tab_standard",
-                    type="secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state.pop("preview_kitchen_region", None)
-                    _rerun()
+            else:
+                _c_kw, _c_ae, _c_std = st.columns([1, 1, 2])
+                with _c_kw:
+                    if st.button(
+                        "Kuwait",
+                        key="km_preview_tab_kuwait",
+                        type="primary" if _cur == "Kuwait" else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["preview_kitchen_region"] = "Kuwait"
+                        _rerun()
+                with _c_ae:
+                    if st.button(
+                        "UAE",
+                        key="km_preview_tab_uae",
+                        type="primary" if _cur == "UAE" else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["preview_kitchen_region"] = "UAE"
+                        _rerun()
+                with _c_std:
+                    if _cur in ("Kuwait", "UAE") and st.button(
+                        "Standard master kitchen",
+                        key="km_preview_tab_standard",
+                        type="secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state.pop("preview_kitchen_region", None)
+                        _rerun()
             _fin = (st.session_state.get("preview_kitchen_region") or "").strip()
             _pkreg = _fin if _fin in ("Kuwait", "UAE") else ""
         _preview_regional_km = preview_mode_km and _pkreg in ("Kuwait", "UAE")
@@ -4737,39 +4770,66 @@ def main():
         if not unique_countries:
             unique_countries = ["(No country)"]
         n_filter_cols = 3 if has_go_live else 2
-        filter_cols = st.columns(n_filter_cols)
-        with filter_cols[0]:
+        selected_live = "All"
+        if _compact_layout_enabled():
             selected_country = st.selectbox(
                 "Country",
                 options=["All"] + unique_countries,
                 key="dashboard_country",
                 help="Filter all dashboard metrics and tables by country.",
             )
-        with filter_cols[1]:
-            # Facilities depend on selected country
             if selected_country and selected_country != "All":
                 rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
             else:
                 rows_for_facilities = rows_kitchens
             facility_set = sorted({(_facility(r) or "(No facility)") for r in rows_for_facilities})
-            facility_set = [f for f in facility_set if f]
-            if not facility_set:
-                facility_set = ["(No facility)"]
+            facility_set = [f for f in facility_set if f] or ["(No facility)"]
             selected_facility = st.selectbox(
                 "Facility",
                 options=["All"] + facility_set,
                 key="dashboard_facility",
                 help="Filter by facility within the selected country.",
             )
-        selected_live = "All"
-        if has_go_live and n_filter_cols >= 3:
-            with filter_cols[2]:
+            if has_go_live:
                 selected_live = st.selectbox(
                     "Live status",
                     options=["All", "Live", "Not live"],
                     key="dashboard_live",
                     help="Filter by kitchens marked live vs not live (from BigQuery go-live data).",
                 )
+        else:
+            filter_cols = st.columns(n_filter_cols)
+            with filter_cols[0]:
+                selected_country = st.selectbox(
+                    "Country",
+                    options=["All"] + unique_countries,
+                    key="dashboard_country",
+                    help="Filter all dashboard metrics and tables by country.",
+                )
+            with filter_cols[1]:
+                # Facilities depend on selected country
+                if selected_country and selected_country != "All":
+                    rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
+                else:
+                    rows_for_facilities = rows_kitchens
+                facility_set = sorted({(_facility(r) or "(No facility)") for r in rows_for_facilities})
+                facility_set = [f for f in facility_set if f]
+                if not facility_set:
+                    facility_set = ["(No facility)"]
+                selected_facility = st.selectbox(
+                    "Facility",
+                    options=["All"] + facility_set,
+                    key="dashboard_facility",
+                    help="Filter by facility within the selected country.",
+                )
+            if has_go_live and n_filter_cols >= 3:
+                with filter_cols[2]:
+                    selected_live = st.selectbox(
+                        "Live status",
+                        options=["All", "Live", "Not live"],
+                        key="dashboard_live",
+                        help="Filter by kitchens marked live vs not live (from BigQuery go-live data).",
+                    )
         # Apply filters
         if selected_country and selected_country != "All":
             rows_kitchens = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
@@ -4987,19 +5047,18 @@ def main():
         )
         # —— Scorecard (Sales-first: Sold Rate + Ops Occupancy) ——
         st.subheader("Scorecard")
-        sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
-        with sc1:
-            st.metric("Total kitchens", f"{total:,}", help="Sellable only (Vacant+Sold+Occupied+Churning)")
-        with sc2:
-            st.metric("Sold Rate %", _pct_fmt(sold_rate_pct), help=f"(Occupied + Sold + Churning + Vacant with Opportunity Name) ÷ Total. **{vacant_approved_deal}** Vacant kitchens with Opportunity Name filled are included.")
-        with sc3:
-            st.metric("Occupancy % (Ops)", _pct_fmt(occ_pct), help="(Occupied + Churning) / Total")
-        with sc4:
-            st.metric("Vacancy %", _pct_fmt(vac_pct), help="Vacant / Total")
-        with sc5:
-            st.metric("Churn %", _pct_fmt(churn_pct), help="Churning / Total")
-        with sc6:
-            st.metric("Sold", f"{sold:,}", help="Closed Won, future access")
+        _score_metrics = [
+            ("Total kitchens", f"{total:,}", "Sellable only (Vacant+Sold+Occupied+Churning)"),
+            ("Sold Rate %", _pct_fmt(sold_rate_pct), f"(Occupied + Sold + Churning + Vacant with Opportunity Name) ÷ Total. **{vacant_approved_deal}** Vacant kitchens with Opportunity Name filled are included."),
+            ("Occupancy % (Ops)", _pct_fmt(occ_pct), "(Occupied + Churning) / Total"),
+            ("Vacancy %", _pct_fmt(vac_pct), "Vacant / Total"),
+            ("Churn %", _pct_fmt(churn_pct), "Churning / Total"),
+            ("Sold", f"{sold:,}", "Closed Won, future access"),
+        ]
+        _score_cols = st.columns(2 if _compact_layout_enabled() else 6)
+        for _i, (_label, _val, _help) in enumerate(_score_metrics):
+            with _score_cols[_i % len(_score_cols)]:
+                st.metric(_label, _val, help=_help)
         # —— Value: MRR only (no ARR toggle) ——
         mult = 1
         value_label = "MRR"
@@ -5255,10 +5314,10 @@ def main():
                 if monthly_summary:
                     # Month cards row (eye-catching)
                     n_cards = len(monthly_summary)
-                    n_cols = min(n_cards, 6)
+                    n_cols = min(n_cards, 2 if _compact_layout_enabled() else 6)
                     cols = st.columns(n_cols)
                     for i, row in enumerate(monthly_summary[:12]):  # cap at 12 months
-                        if i > 0 and i % 6 == 0:
+                        if i > 0 and i % n_cols == 0:
                             cols = st.columns(n_cols)
                         with cols[i % n_cols]:
                             st.markdown(
@@ -5373,11 +5432,15 @@ def main():
                     st.caption(f"Replying to: **{snippet}**")
                     reply_author = st.text_input("Your name", value=current_name, key="reply_author", placeholder="e.g. Jane")
                     reply_message = st.text_area("Your reply", key="reply_message", placeholder="Type your reply… Use @name to mention someone.", height=80)
-                    col_r1, col_r2 = st.columns(2)
-                    with col_r1:
-                        post_clicked = st.form_submit_button("Post reply")
-                    with col_r2:
-                        cancel_clicked = st.form_submit_button("Cancel")
+                    if _compact_layout_enabled():
+                        post_clicked = st.form_submit_button("Post reply", use_container_width=True)
+                        cancel_clicked = st.form_submit_button("Cancel", use_container_width=True)
+                    else:
+                        col_r1, col_r2 = st.columns(2)
+                        with col_r1:
+                            post_clicked = st.form_submit_button("Post reply")
+                        with col_r2:
+                            cancel_clicked = st.form_submit_button("Cancel")
                     if cancel_clicked:
                         st.session_state.pop("discussion_reply_to_id", None)
                         _rerun()
