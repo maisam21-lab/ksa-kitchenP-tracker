@@ -824,6 +824,23 @@ def _clear_session_params() -> None:
     except Exception:
         pass
 
+
+def _do_sign_out() -> None:
+    """Sign out current session while keeping remembered email for sign-in form prefill."""
+    if "user_display_name" in st.session_state:
+        del st.session_state["user_display_name"]
+    st.session_state["developer_unlocked"] = False
+    _clear_session_params()
+    _st_logout = getattr(st, "logout", None)
+    if callable(_st_logout):
+        try:
+            _st_logout()
+            return
+        except Exception:
+            pass
+    _rerun()
+
+
 def list_allowed_users():
     """Return list of allowed identifiers with role: [{identifier, added_at, role}, ...]."""
     with get_conn() as c:
@@ -3312,8 +3329,8 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             fit_columns_on_grid_load=False,
             height=700,
             theme="streamlit",
-            show_toolbar=not _mobile_mode_enabled(),
-            show_search=not _mobile_mode_enabled(),
+            show_toolbar=True,
+            show_search=True,
             show_download_button=False,
             enable_enterprise_modules=True,
             allow_unsafe_jscode=True,
@@ -4069,11 +4086,7 @@ def main():
                 )
             with c_sign:
                 if st.button("Sign out", key="header_sign_out_mobile", help="Sign out", use_container_width=True):
-                    if "user_display_name" in st.session_state:
-                        del st.session_state["user_display_name"]
-                    st.session_state["developer_unlocked"] = False
-                    _clear_session_params()
-                    _rerun()
+                    _do_sign_out()
         else:
             left_col, right_col = st.columns([4, 1])  # Left fills space (title + status); right compact for help/avatar/sign out
             with left_col:
@@ -4114,11 +4127,7 @@ def main():
                     )
                 with r3:
                     if st.button("Sign out", key="header_sign_out", help="Sign out"):
-                        if "user_display_name" in st.session_state:
-                            del st.session_state["user_display_name"]
-                        st.session_state["developer_unlocked"] = False
-                        _clear_session_params()
-                        _rerun()
+                        _do_sign_out()
     st.markdown(
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
@@ -4658,8 +4667,8 @@ def main():
                             fit_columns_on_grid_load=False,
                             height=700,
                             theme="streamlit",
-                            show_toolbar=not _mobile_mode_enabled(),
-                            show_search=not _mobile_mode_enabled(),
+                            show_toolbar=True,
+                            show_search=True,
                             show_download_button=False,
                             enable_enterprise_modules=True,
                             allow_unsafe_jscode=True,
@@ -4775,8 +4784,8 @@ def main():
                         fit_columns_on_grid_load=False,
                         height=700,
                         theme="streamlit",
-                        show_toolbar=not _mobile_mode_enabled(),
-                        show_search=not _mobile_mode_enabled(),
+                        show_toolbar=True,
+                        show_search=True,
                         show_download_button=False,
                         enable_enterprise_modules=True,
                         allow_unsafe_jscode=True,
