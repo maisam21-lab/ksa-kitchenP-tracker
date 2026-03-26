@@ -4029,8 +4029,11 @@ def main():
                     help="Shown on comments and discussions. Not used for access when allowlist is off.",
                 )
             current_user = (st.session_state.get("user_display_name") or "").strip()
-            if st.session_state.get("_force_signed_out") and not current_user:
-                st.info("You are signed out. Enter your email to continue.")
+            if st.session_state.get("_force_signed_out"):
+                st.info("You are signed out. Tap **Continue** to enter again.")
+                if st.button("Continue", key="signed_out_continue", type="primary"):
+                    st.session_state.pop("_force_signed_out", None)
+                    _rerun()
                 st.stop()
 
     # User has identified again; clear one-shot sign-out guard.
