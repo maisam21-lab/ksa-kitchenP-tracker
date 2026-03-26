@@ -1070,8 +1070,8 @@ def _compact_layout_enabled() -> bool:
 
 def _use_compact_tables() -> bool:
     """Whether to use lightweight dataframe tables (vs AgGrid) for current client."""
-    # Keep full web-app behavior (AgGrid + filters) on all devices.
-    return False
+    # On phones/tablets, prefer compact dataframe rendering.
+    return bool(_mobile_mode_enabled())
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -3161,6 +3161,37 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
     rows_shown = rows
+    if _use_compact_tables():
+        _flt = st.container()
+        with _flt:
+            c_search, c_status = st.columns([2, 1])
+            with c_search:
+                _q = st.text_input(
+                    "Search rows",
+                    key=f"mobile_search_{key_suffix}_{tab_id}",
+                    placeholder="Type to filter rows...",
+                ).strip().lower()
+            with c_status:
+                _status_opts = ["All"]
+                _status_vals = sorted({
+                    str(r.get("Status") if "Status" in r else r.get("status__c") if "status__c" in r else r.get("status") or "").strip()
+                    for r in rows_shown if isinstance(r, dict)
+                })
+                _status_vals = [s for s in _status_vals if s]
+                if _status_vals:
+                    _status_opts += _status_vals
+                _status_pick = st.selectbox("Status", _status_opts, key=f"mobile_status_{key_suffix}_{tab_id}")
+        if _q:
+            rows_shown = [
+                r for r in rows_shown
+                if any(_q in str(v).lower() for v in (r or {}).values() if v is not None)
+            ]
+        if _status_pick and _status_pick != "All":
+            _pick = _status_pick.strip().lower()
+            rows_shown = [
+                r for r in rows_shown
+                if str((r.get("Status") if "Status" in r else r.get("status__c") if "status__c" in r else r.get("status") or "")).strip().lower() == _pick
+            ]
     _row_count_placeholder = st.empty()
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
