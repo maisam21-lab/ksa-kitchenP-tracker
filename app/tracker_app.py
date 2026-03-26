@@ -3272,6 +3272,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             go["defaultColDef"] = {}
         go["defaultColDef"]["filter"] = True
         go["defaultColDef"]["floatingFilter"] = True
+        go["defaultColDef"]["minWidth"] = 140
         go["defaultColDef"]["suppressHeaderMenuButton"] = False
         go["defaultColDef"]["suppressHeaderFilterButton"] = False
         if "floatingFiltersHeight" in go:
@@ -3293,6 +3294,7 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
             df_display,
             gridOptions=go,
             use_container_width=True,
+            fit_columns_on_grid_load=False,
             height=700,
             theme="streamlit",
             show_toolbar=True,
@@ -4609,6 +4611,7 @@ def main():
                             go["defaultColDef"] = {}
                         go["defaultColDef"]["filter"] = True
                         go["defaultColDef"]["floatingFilter"] = True
+                        go["defaultColDef"]["minWidth"] = 140
                         go["defaultColDef"]["suppressHeaderMenuButton"] = False
                         go["defaultColDef"]["suppressHeaderFilterButton"] = False
                         if "floatingFiltersHeight" in go:
@@ -4630,6 +4633,7 @@ def main():
                             df_combined,
                             gridOptions=go,
                             use_container_width=True,
+                            fit_columns_on_grid_load=False,
                             height=700,
                             theme="streamlit",
                             show_toolbar=True,
@@ -4724,6 +4728,7 @@ def main():
                         go["defaultColDef"] = {}
                     go["defaultColDef"]["filter"] = True
                     go["defaultColDef"]["floatingFilter"] = True
+                    go["defaultColDef"]["minWidth"] = 140
                     go["defaultColDef"]["suppressHeaderMenuButton"] = False
                     go["defaultColDef"]["suppressHeaderFilterButton"] = False
                     if "floatingFiltersHeight" in go:
@@ -4745,6 +4750,7 @@ def main():
                         display_df,
                         gridOptions=go,
                         use_container_width=True,
+                        fit_columns_on_grid_load=False,
                         height=700,
                         theme="streamlit",
                         show_toolbar=True,
