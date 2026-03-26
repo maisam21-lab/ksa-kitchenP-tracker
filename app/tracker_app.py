@@ -754,6 +754,8 @@ _TRACKER_PARAM_REMEMBER = "r"
 
 def _restore_session_from_params() -> bool:
     """If URL has valid tracker session params, restore user_display_name and return True."""
+    if st.session_state.get("_force_signed_out"):
+        return False
     try:
         q = getattr(st, "query_params", None) or getattr(st, "experimental_get_query_params", lambda: {})()
         if callable(q):
@@ -800,6 +802,8 @@ def _persist_session_to_params(user: str) -> None:
     if not (user or "").strip():
         return
     try:
+        if st.session_state.get("_force_signed_out"):
+            return
         import time
         expiry_ts = int(time.time()) + (SESSION_PERSISTENCE_HOURS * 3600)
         u = base64.b64encode((user or "").strip().encode()).decode()
@@ -827,6 +831,7 @@ def _clear_session_params() -> None:
 
 def _do_sign_out() -> None:
     """Sign out current session while keeping remembered email for sign-in form prefill."""
+    st.session_state["_force_signed_out"] = True
     if "user_display_name" in st.session_state:
         del st.session_state["user_display_name"]
     st.session_state["developer_unlocked"] = False
@@ -837,19 +842,8 @@ def _do_sign_out() -> None:
     if _is_oidc_logged and callable(_st_logout):
         try:
             _st_logout()
-            # If logout does not trigger navigation on some mobile browsers, force reload.
-            st.markdown(
-                """
-                <script>
-                try {
-                  window.location.href = window.location.pathname;
-                } catch (e) {}
-                </script>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.stop()
-        except BaseException:
+            return
+        except Exception:
             pass
     _rerun()
 
@@ -4033,6 +4027,10 @@ def main():
             else:
                 st.text_input("Your name or email", key="user_display_name", placeholder="e.g. jane@company.com", help="Shown on comments and discussions. Not used for access when allowlist is off.")
             current_user = (st.session_state.get("user_display_name") or "").strip()
+
+    # User has identified again; clear one-shot sign-out guard.
+    if current_user:
+        st.session_state.pop("_force_signed_out", None)
 
     # Persist session to URL params so refresh keeps user for SESSION_PERSISTENCE_HOURS
     if current_user:
