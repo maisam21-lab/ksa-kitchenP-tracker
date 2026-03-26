@@ -831,11 +831,25 @@ def _do_sign_out() -> None:
         del st.session_state["user_display_name"]
     st.session_state["developer_unlocked"] = False
     _clear_session_params()
+    _st_user = getattr(st, "user", None)
+    _is_oidc_logged = bool(getattr(_st_user, "is_logged_in", False))
     _st_logout = getattr(st, "logout", None)
-    if callable(_st_logout):
+    if _is_oidc_logged and callable(_st_logout):
         try:
             _st_logout()
-        except Exception:
+            # If logout does not trigger navigation on some mobile browsers, force reload.
+            st.markdown(
+                """
+                <script>
+                try {
+                  window.location.href = window.location.pathname;
+                } catch (e) {}
+                </script>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.stop()
+        except BaseException:
             pass
     _rerun()
 
