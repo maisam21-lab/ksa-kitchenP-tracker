@@ -3390,6 +3390,9 @@ def main():
         _verified_email = (_streamlit_user.email or "").strip()
         if _verified_email:
             st.session_state["user_display_name"] = _verified_email
+    # After clicking Sign out, ignore st.user until user explicitly identifies again.
+    if st.session_state.get("_force_signed_out"):
+        _verified_email = None
     # Do NOT pre-fill from URL (?email= etc.) — that would allow anyone to impersonate by link
 
     # One-time fetch from Salesforce (direct report IDs) when Superset store is empty, so data is available without manual refresh.
