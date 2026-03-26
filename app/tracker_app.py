@@ -3943,6 +3943,22 @@ def main():
     if not _verified_email:
         _restore_session_from_params()
 
+    # Hard sign-out gate: always stop here until user explicitly continues, even if provider still has a session.
+    if st.session_state.get("_force_signed_out"):
+        _remembered = (st.session_state.get("remembered_email") or "").strip()
+        st.text_input(
+            "Your email",
+            key="user_display_name",
+            value=_remembered,
+            placeholder="e.g. jane@company.com",
+            help="Prefilled for convenience. Tap Continue to enter the app again.",
+        )
+        st.info("You are signed out.")
+        if st.button("Continue", key="signed_out_continue_global", type="primary"):
+            st.session_state.pop("_force_signed_out", None)
+            _rerun()
+        st.stop()
+
     # When allowlist is on: require verified sign-in, developer key, or (if fallback allowed) typed email
     def _require_verified_signin() -> bool:
         """If true, only verified sign-in or developer key; no typed email. Set ALLOWLIST_REQUIRE_VERIFIED_SIGNIN=1 for strict."""
