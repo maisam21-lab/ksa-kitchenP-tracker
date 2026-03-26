@@ -835,7 +835,6 @@ def _do_sign_out() -> None:
     if callable(_st_logout):
         try:
             _st_logout()
-            return
         except Exception:
             pass
     _rerun()
@@ -3482,37 +3481,7 @@ def main():
     .ag-toolbar [title*="Download"],
     .ag-toolbar button[title*="CSV"],
     [class*="ag-"] [title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-    /* Toolbar expand/fullscreen: entire sheet fills viewport; scrollbars only when content exceeds screen */
-    [data-testid="stFullscreenFrame"],
-    [data-testid="stFullscreenFrame"] > div,
-    div[data-testid="stAppViewContainer"] [data-testid="stFullscreenFrame"],
-    section[data-testid="stFullscreenFrame"],
-    .stFullscreenFrame,
-    [class*="fullscreenFrame"],
-    [class*="FullscreenFrame"] {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: 100vw !important;
-        max-height: 100vh !important;
-        z-index: 999999 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: var(--background-color, #0f172a) !important;
-        overflow: auto !important;
-    }
-    [data-testid="stFullscreenFrame"] [data-testid="stDataFrame"],
-    [data-testid="stFullscreenFrame"] .glide-data-grid-container,
-    [data-testid="stFullscreenFrame"] [class*="dataFrame"],
-    .stFullscreenFrame [data-testid="stDataFrame"],
-    [class*="fullscreenFrame"] [data-testid="stDataFrame"] {
-        width: 100% !important;
-        min-height: calc(100vh - 2rem) !important;
-        height: calc(100vh - 2rem) !important;
-        max-height: none !important;
-    }
+    /* Keep Streamlit's native fullscreen behavior (custom overrides removed for mobile reliability). */
     /* Remove space above section tabs and shift main content up */
     [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
     [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
