@@ -98,6 +98,27 @@ SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
 # Preview-only regional kitchen master workbooks (same service account as KSA; share Viewer with SA).
 KUWAIT_KITCHEN_SHEET_ID = "1N_Ar-KoFWGTHjbz-p_r1y8VeWGLNI4ZQUAbKZpAI99o"
 KUWAIT_KITCHEN_WORKSHEET_GID = 1841714979
+KUWAIT_KITCHEN_FACILITY_GIDS = [
+    1238868875,
+    1841714979,
+    882958805,
+    957808050,
+    907327211,
+    1936874701,
+    477755898,
+    968021133,
+    1395349722,
+    1364857082,
+    1997767336,
+    553716236,
+    294895439,
+    145680163,
+    646323112,
+    1007765601,
+    1459899749,
+    488170085,
+    521341533,
+]
 UAE_KITCHEN_SHEET_ID = "1H9M4QoAz71LJlGMzIiLzy7FtIACtrCUF2pJ5Gr3eXIg"
 UAE_KITCHEN_WORKSHEET_GID = 0
 # Stored in SQLite under separate sources so KSA tabs are unchanged.
@@ -2681,7 +2702,7 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
 
 
 def _regional_kitchen_workbook_settings(region: str) -> tuple[str | None, int | None, str, str]:
-    """Return (spreadsheet_id, worksheet_gid, tab_id, sqlite source) for Kuwait or UAE."""
+    """Return (spreadsheet_id, worksheet_gid_default, legacy_tab_id, sqlite source) for Kuwait or UAE."""
     secrets = getattr(st, "secrets", None) or {}
 
     def _as_int(v, default: int) -> int:
@@ -2748,18 +2769,88 @@ def _fetch_gsheet_worksheet_by_gid(sheet_id: str, worksheet_gid: int, credential
     return data
 
 
+def _regional_kitchen_target_gids(region: str) -> list[int] | None:
+    """Optional gid filter per region; None means load all worksheets from workbook."""
+    if region != "Kuwait":
+        return None
+    secrets = getattr(st, "secrets", None) or {}
+    raw = (
+        secrets.get("KUWAIT_KITCHEN_FACILITY_GIDS")
+        or secrets.get("kuwait_kitchen_facility_gids")
+        or os.environ.get("KUWAIT_KITCHEN_FACILITY_GIDS", "")
+    )
+    if raw:
+        out = []
+        for token in str(raw).replace(";", ",").split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                out.append(int(token))
+            except Exception:
+                continue
+        if out:
+            return out
+    return list(KUWAIT_KITCHEN_FACILITY_GIDS)
+
+
+def _fetch_regional_workbook_data(region: str, sheet_id: str, credentials_path: str) -> dict[str, list[dict]]:
+    """Load selected worksheets by gid (if configured), otherwise full workbook."""
+    target_gids = _regional_kitchen_target_gids(region)
+    if not target_gids:
+        return _fetch_online_sheet(sheet_id, credentials_path) or {}
+
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except ImportError:
+        raise ImportError("Install: pip install gspread google-auth") from None
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    if credentials_path == "__FROM_SECRETS__":
+        info = dict(st.secrets["gsheet_service_account"])
+        info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+        info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(sheet_id)
+    out: dict[str, list[dict]] = {}
+    for gid in target_gids:
+        ws = spreadsheet.get_worksheet_by_id(int(gid))
+        if ws is None:
+            continue
+        rows = ws.get_all_values()
+        if not rows:
+            continue
+        headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
+        ws_data = []
+        for row in rows[1:]:
+            r = list(row) + [""] * (len(headers) - len(row))
+            ws_data.append(dict(zip(headers, r[: len(headers)])))
+        out[str(ws.title).strip() or f"gid_{gid}"] = ws_data
+    return out
+
+
 def _refresh_regional_kitchen_workbooks() -> None:
-    """Load Kuwait/UAE preview worksheets into SQLite (sources gsheet_kw / gsheet_ae). Non-fatal on error."""
+    """Load Kuwait/UAE preview workbooks (all worksheets) into SQLite by source. Non-fatal on error."""
     creds_path = _get_google_credentials_path()
     if not creds_path:
         return
     for region in ("Kuwait", "UAE"):
-        sid, gid, tab_id, gsource = _regional_kitchen_workbook_settings(region)
-        if not sid or gid is None:
+        sid, _gid, _legacy_tab_id, gsource = _regional_kitchen_workbook_settings(region)
+        if not sid:
             continue
         try:
-            rows = _fetch_gsheet_worksheet_by_gid(sid, int(gid), creds_path)
-            save_generic_tab(tab_id, rows or [], source=gsource)
+            data = _fetch_regional_workbook_data(region, sid, creds_path) or {}
+            with get_conn() as c:
+                c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
+            for ws_title, ws_rows in data.items():
+                if not ws_rows:
+                    continue
+                save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
             set_last_refresh(gsource)
         except Exception:
             continue
@@ -2767,8 +2858,8 @@ def _refresh_regional_kitchen_workbooks() -> None:
 
 def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is_developer: bool) -> None:
     """Kitchen Master Data view for Kuwait/UAE preview workbooks (PREVIEW_ONLY_IDS only)."""
-    sid, gid, tab_id, gsource = _regional_kitchen_workbook_settings(region)
-    docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid else ""
+    sid, gid, _legacy_tab_id, gsource = _regional_kitchen_workbook_settings(region)
+    docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid and gid is not None else (f"https://docs.google.com/spreadsheets/d/{sid}/edit" if sid else "")
     st.caption(
         f"**Preview — {region} kitchen master** — [Open workbook]({docs}). "
         "Refreshes with the main KSA Google Sheet job or automatically when data is older than 15 minutes."
@@ -2782,15 +2873,31 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
         creds = _get_google_credentials_path()
         if creds and sid:
             try:
-                rows = _fetch_gsheet_worksheet_by_gid(sid, int(gid), creds)
-                save_generic_tab(tab_id, rows or [], source=gsource)
+                data = _fetch_regional_workbook_data(region, sid, creds) or {}
+                with get_conn() as c:
+                    c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
+                for ws_title, ws_rows in data.items():
+                    if not ws_rows:
+                        continue
+                    save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
                 set_last_refresh(gsource)
                 _rerun()
             except Exception as e:
                 st.warning(f"Could not refresh {region} sheet: {type(e).__name__}: {e}")
 
-    rows = list_generic_tab(tab_id, source=gsource)
-    if not rows:
+    _legacy_hidden = {
+        (TAB_ID_KITCHEN_KW or "").strip().lower(),
+        (TAB_ID_KITCHEN_AE or "").strip().lower(),
+        "standard master kitchen",
+        "ksa master kitchen data",
+    }
+    source_options = [
+        t
+        for t in list_tab_ids_for_source(gsource)
+        if (t or "").strip() and (t or "").strip().lower() not in _legacy_hidden
+    ]
+    source_ids = {t: t for t in source_options}
+    if not source_options:
         st.info(
             f"No {region} data loaded yet. Share the Google Sheet with the **service account** email (Viewer), "
             f"then click **Refresh {region} sheet now** below (or wait for the scheduled GSheet job)."
@@ -2800,22 +2907,85 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
                 creds = _get_google_credentials_path()
                 if creds:
                     try:
-                        new_rows = _fetch_gsheet_worksheet_by_gid(sid, int(gid), creds)
-                        save_generic_tab(tab_id, new_rows or [], source=gsource)
+                        data = _fetch_regional_workbook_data(region, sid, creds) or {}
+                        with get_conn() as c:
+                            c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
+                        _loaded_rows = 0
+                        _loaded_tabs = 0
+                        for ws_title, ws_rows in data.items():
+                            if not ws_rows:
+                                continue
+                            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+                            _loaded_tabs += 1
+                            _loaded_rows += len(ws_rows or [])
                         set_last_refresh(gsource)
-                        st.success(f"Loaded {len(new_rows or [])} rows.")
+                        st.success(f"Loaded {_loaded_rows:,} rows from {_loaded_tabs} sheets.")
                         _rerun()
                     except Exception as e:
                         st.error(str(e))
         return
 
+    _sel_key = f"regional_sheets_selection_{gsource}"
+    _first_tab = source_options[0]
+    _initial = st.session_state.get(_sel_key) if _sel_key in st.session_state else [_first_tab]
+    if not isinstance(_initial, list):
+        _initial = [_initial] if _initial else [_first_tab]
+    _default = _initial if set(_initial) <= set(source_options) else [_first_tab]
+    chosen_labels = st.multiselect(
+        f"**{region} Facility** — select one or multiple facilities (sheets) to view",
+        options=source_options,
+        default=_default,
+        key=_sel_key,
+        placeholder="Select facilities",
+    )
+    if not chosen_labels:
+        chosen_labels = [_first_tab]
+    _labels_to_use = [t for t in chosen_labels if t in source_options] or [_first_tab]
+    _show_combined = len(_labels_to_use) > 1
+    if not _show_combined:
+        _single_tab_id = source_ids.get(_labels_to_use[0], _labels_to_use[0])
+        _single_rows = list_generic_tab(_single_tab_id, source=gsource) or []
+        _single_rows = [r for r in _single_rows if not _is_empty_record(r)]
+        _single_rows = _apply_facility_name_filter_ui(
+            _single_rows,
+            key_suffix=f"{gsource}_single_{_single_tab_id}",
+        )
+        _render_generic_tab(
+            _single_tab_id,
+            key_suffix=f"preview_{gsource}_{_single_tab_id}",
+            is_developer=is_developer,
+            source=gsource,
+            allow_download=can_export,
+            hide_account_country=True,
+            rows_override=_single_rows,
+        )
+        return
+    combined_rows = []
+    for label in _labels_to_use:
+        tab_id = source_ids.get(label, label)
+        sheet_rows = list_generic_tab(tab_id, source=gsource) or []
+        for r in sheet_rows:
+            combined_rows.append({"Sheet": label, **r})
+    combined_rows = [r for r in combined_rows if not _is_empty_record(r)]
+    if not combined_rows:
+        st.info("No rows in the selected sheets yet.")
+        return
+    combined_rows = _apply_facility_name_filter_ui(
+        combined_rows,
+        key_suffix=f"{gsource}_combined",
+    )
+    if not combined_rows:
+        st.info("No rows match the selected Facility Name filter.")
+        return
+    st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
     _render_generic_tab(
-        tab_id,
-        key_suffix=f"preview_{gsource}",
+        f"{region} Combined",
+        key_suffix=f"preview_{gsource}_combined",
         is_developer=is_developer,
         source=gsource,
         allow_download=can_export,
         hide_account_country=True,
+        rows_override=combined_rows,
     )
 
 
@@ -3084,6 +3254,34 @@ def _get_facility_column(keys: list) -> str | None:
     return None
 
 
+def _apply_facility_name_filter_ui(rows: list[dict], *, key_suffix: str, label: str = "Facility Name") -> list[dict]:
+    """Render facility-name filter and return filtered rows."""
+    if not rows:
+        return rows
+    keys = list(rows[0].keys()) if isinstance(rows[0], dict) else []
+    facility_col = _get_facility_column(keys)
+    if not facility_col:
+        return rows
+    facility_values = sorted({
+        str((r or {}).get(facility_col, "")).strip()
+        for r in rows
+        if isinstance(r, dict)
+    })
+    facility_values = [v for v in facility_values if v]
+    if not facility_values:
+        return rows
+    picked = st.multiselect(
+        f"**{label}**",
+        options=facility_values,
+        key=f"facility_name_filter_{key_suffix}",
+        placeholder="All facilities",
+    )
+    if not picked:
+        return rows
+    picked_set = {str(v).strip() for v in picked}
+    return [r for r in rows if str((r or {}).get(facility_col, "")).strip() in picked_set]
+
+
 def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Convert columns that look numeric (e.g. string '14.78') to numeric type so AgGrid sorts by value, not text."""
     if df is None or df.empty:
@@ -3208,14 +3406,14 @@ def _status_get_row_style_js(status_col_name: str):
     """ % col_key)
 
 
-def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False):
+def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False, rows_override=None):
     """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
-    rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
+    rows = rows_override if rows_override is not None else (list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id))
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
-    if not rows and tab_id == "Kitchens":
+    if rows_override is None and not rows and tab_id == "Kitchens":
         rows = list_generic_tab("SF Kitchen Data", source=source) if source else list_generic_tab("SF Kitchen Data")
     # Master Kitchens list: fallback to Kitchens if empty
-    if not rows and tab_id == "Master Kitchens list":
+    if rows_override is None and not rows and tab_id == "Master Kitchens list":
         rows = (list_generic_tab("Kitchens", source=source) or list_generic_tab("SF Kitchen Data", source=source)) if source else (list_generic_tab("Kitchens") or list_generic_tab("SF Kitchen Data"))
     if not rows:
         st.info("No data yet. Data is refreshed every 15 minutes by the scheduler.")
@@ -4427,17 +4625,17 @@ def main():
                 st.session_state.pop("preview_kitchen_region", None)
             st.caption(
                 "Preview: open **Kuwait** or **UAE** regional workbooks. "
-                "Default is the standard master kitchen data (same as other users)."
+                "Default is **KSA master kitchen data** (same as other users)."
             )
             _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
             if _compact_layout_enabled():
                 _pick = st.selectbox(
                     "Preview country",
-                    options=["Standard", "Kuwait", "UAE"],
+                    options=["KSA", "Kuwait", "UAE"],
                     index=(0 if _cur not in ("Kuwait", "UAE") else (1 if _cur == "Kuwait" else 2)),
                     key="km_preview_segmented",
                 )
-                if _pick == "Standard":
+                if _pick == "KSA":
                     if _cur in ("Kuwait", "UAE"):
                         st.session_state.pop("preview_kitchen_region", None)
                         _rerun()
@@ -4445,7 +4643,7 @@ def main():
                     st.session_state["preview_kitchen_region"] = _pick
                     _rerun()
             else:
-                _c_kw, _c_ae, _c_std = st.columns([1, 1, 2])
+                _c_kw, _c_ae = st.columns([1, 1])
                 with _c_kw:
                     if st.button(
                         "Kuwait",
@@ -4463,15 +4661,6 @@ def main():
                         use_container_width=True,
                     ):
                         st.session_state["preview_kitchen_region"] = "UAE"
-                        _rerun()
-                with _c_std:
-                    if _cur in ("Kuwait", "UAE") and st.button(
-                        "Standard master kitchen",
-                        key="km_preview_tab_standard",
-                        type="secondary",
-                        use_container_width=True,
-                    ):
-                        st.session_state.pop("preview_kitchen_region", None)
                         _rerun()
             _fin = (st.session_state.get("preview_kitchen_region") or "").strip()
             _pkreg = _fin if _fin in ("Kuwait", "UAE") else ""
