@@ -832,19 +832,11 @@ def _clear_session_params() -> None:
 def _do_sign_out() -> None:
     """Sign out current session while keeping remembered email for sign-in form prefill."""
     st.session_state["_force_signed_out"] = True
+    st.session_state["_pending_logout"] = True
     if "user_display_name" in st.session_state:
         del st.session_state["user_display_name"]
     st.session_state["developer_unlocked"] = False
     _clear_session_params()
-    _st_user = getattr(st, "user", None)
-    _is_oidc_logged = bool(getattr(_st_user, "is_logged_in", False))
-    _st_logout = getattr(st, "logout", None)
-    if _is_oidc_logged and callable(_st_logout):
-        try:
-            _st_logout()
-            return
-        except Exception:
-            pass
     _rerun()
 
 
@@ -3383,16 +3375,28 @@ def main():
     st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
+    # Deterministic sign-out flow: force provider logout on rerun when requested.
+    if st.session_state.get("_pending_logout"):
+        _st_logout = getattr(st, "logout", None)
+        if callable(_st_logout):
+            try:
+                _st_logout()
+                st.stop()
+            except Exception:
+                pass
+        st.session_state.pop("_pending_logout", None)
+
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
     _streamlit_user = getattr(st, "user", None)
     _verified_email = None
     if _streamlit_user and getattr(_streamlit_user, "is_logged_in", False) and getattr(_streamlit_user, "email", None):
         _verified_email = (_streamlit_user.email or "").strip()
-        if _verified_email:
+        if _verified_email and not st.session_state.get("_force_signed_out"):
             st.session_state["user_display_name"] = _verified_email
     # After clicking Sign out, ignore st.user until user explicitly identifies again.
     if st.session_state.get("_force_signed_out"):
         _verified_email = None
+        st.session_state.pop("user_display_name", None)
     # Do NOT pre-fill from URL (?email= etc.) — that would allow anyone to impersonate by link
 
     # One-time fetch from Salesforce (direct report IDs) when Superset store is empty, so data is available without manual refresh.
