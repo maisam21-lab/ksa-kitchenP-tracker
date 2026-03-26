@@ -3952,23 +3952,22 @@ def main():
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
+    _compact_ui = _compact_layout_enabled()
     st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
     with st.container():
-        left_col, right_col = st.columns([4, 1])  # Left fills space (title + status); right compact for help/avatar/sign out
-        with left_col:
-            l1, l2 = st.columns([1, 12])
-            with l1:
+        if _compact_ui:
+            c_logo, c_main = st.columns([1, 3])
+            with c_logo:
                 logo_path = _logo_path()
                 if logo_path:
-                    st.image(str(logo_path), use_container_width=True)
+                    st.image(str(logo_path), width=84)
                 else:
                     st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
-            with l2:
+            with c_main:
                 st.markdown(
                     f'<div class="header-brand-status">'
-                    f'<div class="header-divider"></div>'
                     f'<div class="header-title-block">'
-                    f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                    f'<h1 class="header-brand-title" style="font-size:1.35rem;margin-bottom:2px;">KSA Kitchens Tracker</h1>'
                     f'<div class="header-status-row">'
                     f'<span class="header-status-pill {status_class}">'
                     f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
@@ -3976,34 +3975,69 @@ def main():
                     f'</div></div></div>',
                     unsafe_allow_html=True,
                 )
-        with right_col:
-            r1, r2, r3 = st.columns([1, 1, 1])
-            with r1:
+            c_help, c_sign = st.columns([1, 2])
+            with c_help:
                 st.markdown(
                     '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Help">?</a>',
                     unsafe_allow_html=True,
                 )
-            with r2:
-                initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
-                st.markdown(
-                    f'<div class="header-avatar-chevron" title="{current_user or ""}">'
-                    f'<span class="header-user-avatar">{initials}</span>'
-                    f'<span class="header-chevron">▼</span></div>',
-                    unsafe_allow_html=True,
-                )
-            with r3:
-                if st.button("Sign out", key="header_sign_out", help="Sign out"):
+            with c_sign:
+                if st.button("Sign out", key="header_sign_out_mobile", help="Sign out", use_container_width=True):
                     if "user_display_name" in st.session_state:
                         del st.session_state["user_display_name"]
                     st.session_state["developer_unlocked"] = False
                     _clear_session_params()
                     _rerun()
+        else:
+            left_col, right_col = st.columns([4, 1])  # Left fills space (title + status); right compact for help/avatar/sign out
+            with left_col:
+                l1, l2 = st.columns([1, 12])
+                with l1:
+                    logo_path = _logo_path()
+                    if logo_path:
+                        st.image(str(logo_path), use_container_width=True)
+                    else:
+                        st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
+                with l2:
+                    st.markdown(
+                        f'<div class="header-brand-status">'
+                        f'<div class="header-divider"></div>'
+                        f'<div class="header-title-block">'
+                        f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                        f'<div class="header-status-row">'
+                        f'<span class="header-status-pill {status_class}">'
+                        f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
+                        f'<span class="header-updated-muted">{updated_ago}</span>'
+                        f'</div></div></div>',
+                        unsafe_allow_html=True,
+                    )
+            with right_col:
+                r1, r2, r3 = st.columns([1, 1, 1])
+                with r1:
+                    st.markdown(
+                        '<a href="mailto:maysam.abukashabeh@cloudkitchens.com" class="header-icon-btn header-help-btn" title="Help">?</a>',
+                        unsafe_allow_html=True,
+                    )
+                with r2:
+                    initials = "".join((c[0] for c in (current_user or "?").split("@")[0].split(".")[:2]))[:2].upper() if current_user else "?"
+                    st.markdown(
+                        f'<div class="header-avatar-chevron" title="{current_user or ""}">'
+                        f'<span class="header-user-avatar">{initials}</span>'
+                        f'<span class="header-chevron">▼</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                with r3:
+                    if st.button("Sign out", key="header_sign_out", help="Sign out"):
+                        if "user_display_name" in st.session_state:
+                            del st.session_state["user_display_name"]
+                        st.session_state["developer_unlocked"] = False
+                        _clear_session_params()
+                        _rerun()
     st.markdown(
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
-    if _mobile_mode_enabled():
-        st.caption("Mobile layout detected. Using compact, phone-friendly tables.")
+    # Keep this silent; compact mode is auto-detected.
     # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
@@ -4204,15 +4238,14 @@ def main():
 
     # Tab row: desktop buttons; compact mode uses a single segmented control.
     if _compact_layout_enabled():
-        _seg = st.segmented_control(
+        _sel = st.selectbox(
             "Section",
             options=section_options,
-            default=section,
-            selection_mode="single",
+            index=section_options.index(section) if section in section_options else 0,
             key="section_mobile_selector",
         )
-        if _seg and _seg != section:
-            st.session_state["section_radio"] = _seg
+        if _sel and _sel != section:
+            st.session_state["section_radio"] = _sel
             _rerun()
     else:
         tab_cols = st.columns(len(section_options))
@@ -4242,11 +4275,10 @@ def main():
             )
             _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
             if _compact_layout_enabled():
-                _pick = st.segmented_control(
+                _pick = st.selectbox(
                     "Preview country",
                     options=["Standard", "Kuwait", "UAE"],
-                    default=("Standard" if _cur not in ("Kuwait", "UAE") else _cur),
-                    selection_mode="single",
+                    index=(0 if _cur not in ("Kuwait", "UAE") else (1 if _cur == "Kuwait" else 2)),
                     key="km_preview_segmented",
                 )
                 if _pick == "Standard":
