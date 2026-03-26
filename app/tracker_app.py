@@ -749,7 +749,6 @@ def _allowlist_enabled() -> bool:
 SESSION_PERSISTENCE_HOURS = 6
 _TRACKER_PARAM_USER = "u"
 _TRACKER_PARAM_EXPIRY = "e"
-_TRACKER_PARAM_REMEMBER = "r"
 
 
 def _restore_session_from_params() -> bool:
@@ -762,18 +761,7 @@ def _restore_session_from_params() -> bool:
             return False
         u = q.get(_TRACKER_PARAM_USER)
         e = q.get(_TRACKER_PARAM_EXPIRY)
-        r = q.get(_TRACKER_PARAM_REMEMBER)
         if not u or not e:
-            # Fallback: long-lived remember param for typed email convenience.
-            if r:
-                r = r[0] if isinstance(r, list) else r
-                try:
-                    email = base64.b64decode(str(r).encode()).decode()
-                except Exception:
-                    email = ""
-                if email and "@" in email:
-                    st.session_state["user_display_name"] = email
-                    return True
             return False
         u = u[0] if isinstance(u, list) else u
         e = e[0] if isinstance(e, list) else e
@@ -803,14 +791,11 @@ def _persist_session_to_params(user: str) -> None:
     try:
         import time
         expiry_ts = int(time.time()) + (SESSION_PERSISTENCE_HOURS * 3600)
-        u_plain = (user or "").strip()
-        u = base64.b64encode(u_plain.encode()).decode()
+        u = base64.b64encode((user or "").strip().encode()).decode()
         qp = getattr(st, "query_params", None)
         if qp is not None:
             qp[_TRACKER_PARAM_USER] = u
             qp[_TRACKER_PARAM_EXPIRY] = str(expiry_ts)
-            # Keep a long-lived "remember email" param so users don't need to retype after session expiry.
-            qp[_TRACKER_PARAM_REMEMBER] = base64.b64encode(u_plain.encode()).decode()
     except Exception:
         pass
 
@@ -820,11 +805,7 @@ def _clear_session_params() -> None:
     try:
         qp = getattr(st, "query_params", None)
         if qp is not None:
-            # Keep long-lived remembered email, clear only short session tokens.
-            remember = qp.get(_TRACKER_PARAM_REMEMBER)
             qp.clear()
-            if remember:
-                qp[_TRACKER_PARAM_REMEMBER] = remember[0] if isinstance(remember, list) else remember
     except Exception:
         pass
 
@@ -1089,10 +1070,8 @@ def _compact_layout_enabled() -> bool:
 
 def _use_compact_tables() -> bool:
     """Whether to use lightweight dataframe tables (vs AgGrid) for current client."""
-    if not _mobile_mode_enabled():
-        return False
-    # On mobile, allow users to opt into full grid filters if needed.
-    return not bool(st.session_state.get("mobile_advanced_grid", False))
+    # Keep full web-app behavior (AgGrid + filters) on all devices.
+    return False
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -4064,14 +4043,7 @@ def main():
         '<div class="header-bottom-line" style="height:1px;background:rgba(0,0,0,0.06);margin:0 16px;max-width:1600px;margin-left:auto;margin-right:auto;"></div>',
         unsafe_allow_html=True,
     )
-    if _mobile_mode_enabled():
-        _adv = st.toggle(
-            "Advanced table filters",
-            value=bool(st.session_state.get("mobile_advanced_grid", False)),
-            key="mobile_advanced_grid_toggle",
-            help="Enable full grid filters on mobile (heavier, but closer to desktop behavior).",
-        )
-        st.session_state["mobile_advanced_grid"] = bool(_adv)
+    # No mobile toggles: keep behavior consistent across devices.
     # In-page search: highlight matches (query from header_search_query)
     _search_q = (st.session_state.get("header_search_query") or "").strip()
     if _search_q:
