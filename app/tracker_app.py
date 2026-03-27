@@ -121,6 +121,37 @@ KUWAIT_KITCHEN_FACILITY_GIDS = [
 ]
 UAE_KITCHEN_SHEET_ID = "1H9M4QoAz71LJlGMzIiLzy7FtIACtrCUF2pJ5Gr3eXIg"
 UAE_KITCHEN_WORKSHEET_GID = 0
+UAE_KITCHEN_FACILITY_GIDS = [
+    1339914631,
+    190735693,
+    585677775,
+    1359039456,
+    1097068287,
+    580811154,
+    2116849928,
+    1791734492,
+    152450119,
+    473484753,
+    335341419,
+    1141013645,
+    2022030288,
+    101319004,
+    1189999475,
+    887716464,
+    915019099,
+    766465559,
+    528919076,
+    1527607352,
+    42129892,
+    2143219525,
+    121061187,
+    498147837,
+    2108732207,
+    603226289,
+    181577452,
+    1503331412,
+    515258982,
+]
 # Stored in SQLite under separate sources so KSA tabs are unchanged.
 GSOURCE_KITCHEN_KW = "gsheet_kw"
 GSOURCE_KITCHEN_AE = "gsheet_ae"
@@ -2771,15 +2802,11 @@ def _fetch_gsheet_worksheet_by_gid(sheet_id: str, worksheet_gid: int, credential
 
 def _regional_kitchen_target_gids(region: str) -> list[int] | None:
     """Optional gid filter per region; None means load all worksheets from workbook."""
-    if region != "Kuwait":
-        return None
     secrets = getattr(st, "secrets", None) or {}
-    raw = (
-        secrets.get("KUWAIT_KITCHEN_FACILITY_GIDS")
-        or secrets.get("kuwait_kitchen_facility_gids")
-        or os.environ.get("KUWAIT_KITCHEN_FACILITY_GIDS", "")
-    )
-    if raw:
+
+    def _parse_gid_list(raw) -> list[int]:
+        if not raw:
+            return []
         out = []
         for token in str(raw).replace(";", ",").split(","):
             token = token.strip()
@@ -2789,9 +2816,25 @@ def _regional_kitchen_target_gids(region: str) -> list[int] | None:
                 out.append(int(token))
             except Exception:
                 continue
-        if out:
-            return out
-    return list(KUWAIT_KITCHEN_FACILITY_GIDS)
+        return out
+
+    if region == "Kuwait":
+        raw = (
+            secrets.get("KUWAIT_KITCHEN_FACILITY_GIDS")
+            or secrets.get("kuwait_kitchen_facility_gids")
+            or os.environ.get("KUWAIT_KITCHEN_FACILITY_GIDS", "")
+        )
+        parsed = _parse_gid_list(raw)
+        return parsed if parsed else list(KUWAIT_KITCHEN_FACILITY_GIDS)
+    if region == "UAE":
+        raw = (
+            secrets.get("UAE_KITCHEN_FACILITY_GIDS")
+            or secrets.get("uae_kitchen_facility_gids")
+            or os.environ.get("UAE_KITCHEN_FACILITY_GIDS", "")
+        )
+        parsed = _parse_gid_list(raw)
+        return parsed if parsed else list(UAE_KITCHEN_FACILITY_GIDS)
+    return None
 
 
 def _fetch_regional_workbook_data(region: str, sheet_id: str, credentials_path: str) -> dict[str, list[dict]]:
@@ -2834,6 +2877,54 @@ def _fetch_regional_workbook_data(region: str, sheet_id: str, credentials_path: 
     return out
 
 
+def _regional_preview_hidden_tab_names_lower() -> set[str]:
+    """Tab titles to hide from regional facility pickers (legacy combined-tab names)."""
+    return {
+        (TAB_ID_KITCHEN_KW or "").strip().lower(),
+        (TAB_ID_KITCHEN_AE or "").strip().lower(),
+        "standard master kitchen",
+        "ksa master kitchen data",
+    }
+
+
+def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
+    """Fetch Kuwait facility sheets and persist under gsheet_kw. Returns True on success."""
+    sid, _, _, gsource = _regional_kitchen_workbook_settings("Kuwait")
+    creds_path = _get_google_credentials_path()
+    if not creds_path or not sid:
+        return False
+    try:
+        data = _fetch_regional_workbook_data("Kuwait", sid, creds_path) or {}
+        with get_conn() as c:
+            c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
+        for ws_title, ws_rows in data.items():
+            if not ws_rows:
+                continue
+            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+        set_last_refresh(gsource)
+        return True
+    except Exception as e:
+        if not silent:
+            st.warning(f"Could not refresh Kuwait sheet: {type(e).__name__}: {e}")
+        return False
+
+
+def _load_kuwait_dashboard_rows() -> list[dict]:
+    """All Kuwait facility-sheet rows from gsheet_kw, tagged with Account Country = Kuwait for dashboard filters."""
+    hidden = _regional_preview_hidden_tab_names_lower()
+    out: list[dict] = []
+    for tab_id in list_tab_ids_for_source(GSOURCE_KITCHEN_KW):
+        if (tab_id or "").strip().lower() in hidden:
+            continue
+        for r in list_generic_tab(tab_id, source=GSOURCE_KITCHEN_KW) or []:
+            if not isinstance(r, dict) or _is_empty_record(r):
+                continue
+            row = dict(r)
+            row["Account Country"] = "Kuwait"
+            out.append(row)
+    return out
+
+
 def _refresh_regional_kitchen_workbooks() -> None:
     """Load Kuwait/UAE preview workbooks (all worksheets) into SQLite by source. Non-fatal on error."""
     creds_path = _get_google_credentials_path()
@@ -2868,7 +2959,10 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
 
     now_sec = time.time()
     last_run = st.session_state.get(f"regional_auto_refresh_{gsource}") or 0
-    if _source_refresh_is_stale(gsource, 15) and (now_sec - last_run) >= 900:
+    # Kuwait preview: always read latest facility sheets from Google Sheets on each page load.
+    if region == "Kuwait":
+        _refresh_kuwait_workbook_from_sheets(silent=False)
+    elif _source_refresh_is_stale(gsource, 15) and (now_sec - last_run) >= 900:
         st.session_state[f"regional_auto_refresh_{gsource}"] = now_sec
         creds = _get_google_credentials_path()
         if creds and sid:
@@ -2885,12 +2979,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
             except Exception as e:
                 st.warning(f"Could not refresh {region} sheet: {type(e).__name__}: {e}")
 
-    _legacy_hidden = {
-        (TAB_ID_KITCHEN_KW or "").strip().lower(),
-        (TAB_ID_KITCHEN_AE or "").strip().lower(),
-        "standard master kitchen",
-        "ksa master kitchen data",
-    }
+    _legacy_hidden = _regional_preview_hidden_tab_names_lower()
     source_options = [
         t
         for t in list_tab_ids_for_source(gsource)
@@ -2946,10 +3035,6 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
         _single_tab_id = source_ids.get(_labels_to_use[0], _labels_to_use[0])
         _single_rows = list_generic_tab(_single_tab_id, source=gsource) or []
         _single_rows = [r for r in _single_rows if not _is_empty_record(r)]
-        _single_rows = _apply_facility_name_filter_ui(
-            _single_rows,
-            key_suffix=f"{gsource}_single_{_single_tab_id}",
-        )
         _render_generic_tab(
             _single_tab_id,
             key_suffix=f"preview_{gsource}_{_single_tab_id}",
@@ -2958,6 +3043,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
             allow_download=can_export,
             hide_account_country=True,
             rows_override=_single_rows,
+            drop_facility_name_column=(region == "Kuwait"),
         )
         return
     combined_rows = []
@@ -2970,13 +3056,6 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     if not combined_rows:
         st.info("No rows in the selected sheets yet.")
         return
-    combined_rows = _apply_facility_name_filter_ui(
-        combined_rows,
-        key_suffix=f"{gsource}_combined",
-    )
-    if not combined_rows:
-        st.info("No rows match the selected Facility Name filter.")
-        return
     st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
     _render_generic_tab(
         f"{region} Combined",
@@ -2986,6 +3065,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
         allow_download=can_export,
         hide_account_country=True,
         rows_override=combined_rows,
+        drop_facility_name_column=(region == "Kuwait"),
     )
 
 
@@ -3254,32 +3334,13 @@ def _get_facility_column(keys: list) -> str | None:
     return None
 
 
-def _apply_facility_name_filter_ui(rows: list[dict], *, key_suffix: str, label: str = "Facility Name") -> list[dict]:
-    """Render facility-name filter and return filtered rows."""
-    if not rows:
-        return rows
-    keys = list(rows[0].keys()) if isinstance(rows[0], dict) else []
-    facility_col = _get_facility_column(keys)
-    if not facility_col:
-        return rows
-    facility_values = sorted({
-        str((r or {}).get(facility_col, "")).strip()
-        for r in rows
-        if isinstance(r, dict)
-    })
-    facility_values = [v for v in facility_values if v]
-    if not facility_values:
-        return rows
-    picked = st.multiselect(
-        f"**{label}**",
-        options=facility_values,
-        key=f"facility_name_filter_{key_suffix}",
-        placeholder="All facilities",
-    )
-    if not picked:
-        return rows
-    picked_set = {str(v).strip() for v in picked}
-    return [r for r in rows if str((r or {}).get(facility_col, "")).strip() in picked_set]
+def _is_facility_name_aggrid_column(col: str | None) -> bool:
+    """True for sheet column 'Facility Name' — suppress AgGrid filter UI (set filter / floating row)."""
+    if col is None:
+        return False
+    s = re.sub(r"\s+", " ", str(col).strip()).lower()
+    s = s.replace("_", " ")
+    return s in ("facility name", "facilityname")
 
 
 def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -3406,8 +3467,17 @@ def _status_get_row_style_js(status_col_name: str):
     """ % col_key)
 
 
-def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, allow_download=False, hide_account_country=False, rows_override=None):
-    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column."""
+def _render_generic_tab(
+    tab_id,
+    key_suffix="",
+    is_developer=False,
+    source=None,
+    allow_download=False,
+    hide_account_country=False,
+    rows_override=None,
+    drop_facility_name_column=False,
+):
+    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column. drop_facility_name_column: remove Facility Name column (Kuwait tab — avoids redundant filter UI)."""
     rows = rows_override if rows_override is not None else (list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id))
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if rows_override is None and not rows and tab_id == "Kitchens":
@@ -3439,7 +3509,11 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
     # Master Kitchens list (or single-facility Master Kitchens view): hide Account Country and Sheet columns from display
     if tab_id == "Master Kitchens list" or hide_account_country:
         cols = [c for c in cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
-    rows_shown = rows
+    if drop_facility_name_column:
+        cols = [c for c in cols if not _is_facility_name_aggrid_column(c)]
+        rows_shown = [{k: v for k, v in (r or {}).items() if not _is_facility_name_aggrid_column(k)} for r in rows]
+    else:
+        rows_shown = rows
     if _use_compact_tables():
         _flt = st.container()
         with _flt:
@@ -3526,6 +3600,9 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         )
         _max_set_filter_values = 500
         for col in df_display.columns:
+            if _is_facility_name_aggrid_column(col):
+                gb.configure_column(col, filter=False, floatingFilter=False, suppressHeaderFilterButton=True)
+                continue
             if pd.api.types.is_numeric_dtype(df_display[col]):
                 gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
             elif pd.api.types.is_datetime64_any_dtype(df_display[col]):
@@ -3559,9 +3636,14 @@ def _render_generic_tab(tab_id, key_suffix="", is_developer=False, source=None, 
         _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
         go["columnDefs"] = _column_defs
         for cdef in _column_defs:
-            cdef["filter"] = True
-            cdef["floatingFilter"] = True
-            cdef["suppressHeaderFilterButton"] = False
+            if _is_facility_name_aggrid_column(cdef.get("field")):
+                cdef["filter"] = False
+                cdef["floatingFilter"] = False
+                cdef["suppressHeaderFilterButton"] = True
+            else:
+                cdef["filter"] = True
+                cdef["floatingFilter"] = True
+                cdef["suppressHeaderFilterButton"] = False
             if cdef.get("type") == []:
                 cdef.pop("type", None)
         if status_col and JsCode:
@@ -4868,6 +4950,9 @@ def main():
                         )
                         _max_set_combined = 500
                         for col in df_combined.columns:
+                            if _is_facility_name_aggrid_column(col):
+                                gb.configure_column(col, filter=False, floatingFilter=False, suppressHeaderFilterButton=True)
+                                continue
                             if pd.api.types.is_numeric_dtype(df_combined[col]):
                                 gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
                             elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
@@ -4900,9 +4985,14 @@ def main():
                         _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
                         go["columnDefs"] = _col_defs
                         for cdef in _col_defs:
-                            cdef["filter"] = True
-                            cdef["floatingFilter"] = True
-                            cdef["suppressHeaderFilterButton"] = False
+                            if _is_facility_name_aggrid_column(cdef.get("field")):
+                                cdef["filter"] = False
+                                cdef["floatingFilter"] = False
+                                cdef["suppressHeaderFilterButton"] = True
+                            else:
+                                cdef["filter"] = True
+                                cdef["floatingFilter"] = True
+                                cdef["suppressHeaderFilterButton"] = False
                             if cdef.get("type") == []:
                                 cdef.pop("type", None)
                         if status_col_combined and JsCode:
@@ -4985,6 +5075,9 @@ def main():
                     )
                     _max_set_master = 500
                     for col in display_df.columns:
+                        if _is_facility_name_aggrid_column(col):
+                            gb.configure_column(col, filter=False, floatingFilter=False, suppressHeaderFilterButton=True)
+                            continue
                         if pd.api.types.is_numeric_dtype(display_df[col]):
                             gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
                         elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
@@ -5017,9 +5110,14 @@ def main():
                     _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
                     go["columnDefs"] = _col_defs_m
                     for cdef in _col_defs_m:
-                        cdef["filter"] = True
-                        cdef["floatingFilter"] = True
-                        cdef["suppressHeaderFilterButton"] = False
+                        if _is_facility_name_aggrid_column(cdef.get("field")):
+                            cdef["filter"] = False
+                            cdef["floatingFilter"] = False
+                            cdef["suppressHeaderFilterButton"] = True
+                        else:
+                            cdef["filter"] = True
+                            cdef["floatingFilter"] = True
+                            cdef["suppressHeaderFilterButton"] = False
                         if cdef.get("type") == []:
                             cdef.pop("type", None)
                     if status_col_ag and JsCode:
@@ -5148,6 +5246,11 @@ def main():
         else:
             # Always use GSheet for Dashboard so regular users see data (session data_source may default to salesforce)
             rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
+        # Kuwait facility sheets (preview users): refresh from Sheets; load rows after KSA normalization (Kuwait must not pass _ensure_account_country_in_kitchens)
+        _kuwait_dashboard_rows: list[dict] = []
+        if bool(st.session_state.get("preview_only_mode")):
+            _refresh_kuwait_workbook_from_sheets(silent=True)
+            _kuwait_dashboard_rows = _load_kuwait_dashboard_rows()
         today_str = date.today().isoformat()
         if snapshot_mod and rows_kitchens:
             if not snapshot_mod.snapshot_exists_for_date(today_str):
@@ -5157,6 +5260,8 @@ def main():
                     pass
         # Ensure Account Country for filtering (Kitchens / Master list may use County or other keys)
         rows_kitchens = _ensure_account_country_in_kitchens(rows_kitchens)
+        if _kuwait_dashboard_rows:
+            rows_kitchens = (rows_kitchens or []) + _kuwait_dashboard_rows
         # Enrich with go-live / is_live: facility CSV (data/sa_bh_facility_go_live.csv) + optional BigQuery
         bq_go_live = _fetch_bigquery_go_live()
         csv_go_live = _fetch_facility_go_live_csv()

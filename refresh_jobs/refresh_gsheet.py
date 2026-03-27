@@ -25,8 +25,61 @@ DEFAULT_SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
 # Preview regional kitchen masters (same DB sources as app.tracker_app)
 KUWAIT_KITCHEN_SHEET_ID = "1N_Ar-KoFWGTHjbz-p_r1y8VeWGLNI4ZQUAbKZpAI99o"
 KUWAIT_KITCHEN_WORKSHEET_GID = 1841714979
+# Must match app/tracker_app.py — facility worksheets only
+KUWAIT_KITCHEN_FACILITY_GIDS = [
+    1238868875,
+    1841714979,
+    882958805,
+    957808050,
+    907327211,
+    1936874701,
+    477755898,
+    968021133,
+    1395349722,
+    1364857082,
+    1997767336,
+    553716236,
+    294895439,
+    145680163,
+    646323112,
+    1007765601,
+    1459899749,
+    488170085,
+    521341533,
+]
 UAE_KITCHEN_SHEET_ID = "1H9M4QoAz71LJlGMzIiLzy7FtIACtrCUF2pJ5Gr3eXIg"
 UAE_KITCHEN_WORKSHEET_GID = 0
+UAE_KITCHEN_FACILITY_GIDS = [
+    1339914631,
+    190735693,
+    585677775,
+    1359039456,
+    1097068287,
+    580811154,
+    2116849928,
+    1791734492,
+    152450119,
+    473484753,
+    335341419,
+    1141013645,
+    2022030288,
+    101319004,
+    1189999475,
+    887716464,
+    915019099,
+    766465559,
+    528919076,
+    1527607352,
+    42129892,
+    2143219525,
+    121061187,
+    498147837,
+    2108732207,
+    603226289,
+    181577452,
+    1503331412,
+    515258982,
+]
 TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
 TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
 GSOURCE_KITCHEN_KW = "gsheet_kw"
@@ -97,6 +150,33 @@ def fetch_sheet(sheet_id: str, credentials_path: str) -> dict:
             r = list(row) + [""] * (len(headers) - len(row))
             data.append(dict(zip(headers, r[: len(headers)])))
         out[ws.title] = data
+    return out
+
+
+def fetch_workbook_tabs_by_gids(sheet_id: str, gids: list[int], credentials_path: str) -> dict:
+    """Fetch only the listed worksheet gids; returns {worksheet_title: list of dicts}. Same as app regional load."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(sheet_id)
+    out: dict = {}
+    for gid in gids:
+        ws = spreadsheet.get_worksheet_by_id(int(gid))
+        if ws is None:
+            continue
+        rows = ws.get_all_values()
+        if not rows:
+            continue
+        headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
+        data = []
+        for row in rows[1:]:
+            r = list(row) + [""] * (len(headers) - len(row))
+            data.append(dict(zip(headers, r[: len(headers)])))
+        title = str(ws.title).strip() or f"gid_{gid}"
+        out[title] = data
     return out
 
 
@@ -184,29 +264,48 @@ def main() -> int:
 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         c.execute("INSERT OR REPLACE INTO refresh_metadata (source, refreshed_at) VALUES (?, ?)", ("gsheet", now))
-        regional = [
+        def _parse_gids_env(key: str, default_list: list[int]) -> list[int]:
+            raw = os.environ.get(key, "").strip()
+            if not raw:
+                return list(default_list)
+            out = []
+            for token in raw.replace(";", ",").split(","):
+                token = token.strip()
+                if not token:
+                    continue
+                try:
+                    out.append(int(token))
+                except ValueError:
+                    continue
+            return out if out else list(default_list)
+
+        regional_multi = [
             (
                 os.environ.get("KUWAIT_KITCHEN_SHEET_ID", "").strip() or KUWAIT_KITCHEN_SHEET_ID,
-                int(os.environ.get("KUWAIT_KITCHEN_WORKSHEET_GID", KUWAIT_KITCHEN_WORKSHEET_GID)),
-                TAB_ID_KITCHEN_KW,
+                _parse_gids_env("KUWAIT_KITCHEN_FACILITY_GIDS", KUWAIT_KITCHEN_FACILITY_GIDS),
                 GSOURCE_KITCHEN_KW,
             ),
             (
                 os.environ.get("UAE_KITCHEN_SHEET_ID", "").strip() or UAE_KITCHEN_SHEET_ID,
-                int(os.environ.get("UAE_KITCHEN_WORKSHEET_GID", UAE_KITCHEN_WORKSHEET_GID)),
-                TAB_ID_KITCHEN_AE,
+                _parse_gids_env("UAE_KITCHEN_FACILITY_GIDS", UAE_KITCHEN_FACILITY_GIDS),
                 GSOURCE_KITCHEN_AE,
             ),
         ]
-        for sid, gid, tab_id, gsrc in regional:
+        for sid, gids, gsrc in regional_multi:
             try:
-                reg_rows = fetch_worksheet_by_gid(sid, gid, creds_path)
-                save_generic_tab(c, tab_id, reg_rows, source=gsrc)
+                c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsrc,))
+                reg_data = fetch_workbook_tabs_by_gids(sid, gids, creds_path)
+                nrows = 0
+                for ws_title, reg_rows in reg_data.items():
+                    if not reg_rows:
+                        continue
+                    save_generic_tab(c, ws_title, reg_rows, source=gsrc)
+                    nrows += len(reg_rows)
                 c.execute(
                     "INSERT OR REPLACE INTO refresh_metadata (source, refreshed_at) VALUES (?, ?)",
                     (gsrc, now),
                 )
-                logger.info("Regional %s: %s rows", gsrc, len(reg_rows))
+                logger.info("Regional %s: %s sheets, %s rows", gsrc, len(reg_data), nrows)
             except Exception as e:
                 logger.warning("Regional sheet %s skipped: %s", gsrc, e)
     # conn context manager commits on exit
