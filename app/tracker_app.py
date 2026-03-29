@@ -3230,6 +3230,16 @@ _COUNTRY_FROM_PREFIX = {
 # Any other prefix (sa, ksa, north, south, etc.) → Saudi Arabia via .get(prefix, "Saudi Arabia")
 
 
+def _raw_country_means_bahrain(val: str) -> bool:
+    """True if country/county text is Bahrain: BH, BHR, Bahrain, or anything starting with BH (e.g. BH - Site)."""
+    v = (val or "").strip().lower()
+    if not v:
+        return False
+    if v in ("bh", "bhr", "bahrain"):
+        return True
+    return v.startswith("bh")
+
+
 def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
     """Ensure each row has 'Account Country'; derive from existing country field or Account name. For SF Kitchen Data."""
     if not rows:
@@ -3246,13 +3256,12 @@ def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
         if h in keys_lower:
             account_name_key = keys_lower[h]
             break
-    # Merge all with Saudi Arabia except Bahrain (North, South, SA, Last, etc. → Saudi Arabia; only BH → Bahrain)
+    # Merge all with Saudi Arabia except Bahrain (North, South, SA, Last, etc. → Saudi Arabia; BH* → Bahrain)
     def _normalize_country_value(val: str) -> str:
         v = (val or "").strip()
         if not v:
             return v
-        v_lower = v.lower()
-        if v_lower in ("bh", "bhr", "bahrain"):
+        if _raw_country_means_bahrain(v):
             return "Bahrain"
         return "Saudi Arabia"
     out = []
@@ -3264,7 +3273,10 @@ def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
             name = str(row.get(account_name_key, "") or "").strip()
             if " - " in name:
                 prefix = name.split(" - ")[0].strip().lower()
-                row["Account Country"] = _COUNTRY_FROM_PREFIX.get(prefix, "Saudi Arabia")
+                if _raw_country_means_bahrain(prefix):
+                    row["Account Country"] = "Bahrain"
+                else:
+                    row["Account Country"] = _COUNTRY_FROM_PREFIX.get(prefix, "Saudi Arabia")
             else:
                 raw = row.get("Account Country", "") or ""
                 row["Account Country"] = _normalize_country_value(str(raw)) if raw else ""
@@ -5312,10 +5324,12 @@ def main():
         has_go_live = bool(go_live_rows)
 
         def _country_label(raw: str) -> str:
-            """Normalize labels so UAE/Kuwait regional sheets and KSA exports group in one filter bucket."""
+            """Normalize labels so UAE/Kuwait/BH… regional and KSA exports group in one filter bucket."""
             s = (raw or "").strip()
             if not s:
                 return ""
+            if _raw_country_means_bahrain(s):
+                return "Bahrain"
             low = s.lower().replace(".", "").replace(" ", "")
             if low in ("uae", "ae", "unitedarabemirates"):
                 return "UAE"
