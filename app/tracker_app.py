@@ -5349,6 +5349,11 @@ def main():
                     return _country_label(str(v).strip())
             return ""
 
+        def _dashboard_row_country(r):
+            """Country for dashboard filters and bucketing. Empty fields are common on KSA sheets — treat as Saudi Arabia (Kuwait/UAE rows set Account Country)."""
+            c = _country(r)
+            return c if c else "Saudi Arabia"
+
         def _facility_select_options(sel_country: str, rows_subset: list) -> list[str]:
             """Facility dropdown: same tab names as Kitchen Master for that country, union any row-derived names."""
             row_facs = {_dashboard_facility_from_row(r) for r in rows_subset}
@@ -5363,14 +5368,12 @@ def main():
             return opts if opts else ["(No facility)"]
 
         # —— Country, Facility, and Live status filters (drive all dashboard data) ——
-        _from_rows = {(_country(r) or "(No country)") for r in rows_kitchens}
+        _from_rows = {_dashboard_row_country(r) for r in rows_kitchens}
         _extras = sorted(
-            {c for c in _from_rows if c not in set(DASHBOARD_COUNTRY_FILTER_CORE) and c not in ("(No country)", "")},
+            {c for c in _from_rows if c not in set(DASHBOARD_COUNTRY_FILTER_CORE)},
             key=str.casefold,
         )
         unique_countries = list(DASHBOARD_COUNTRY_FILTER_CORE) + _extras
-        if "(No country)" in _from_rows:
-            unique_countries.append("(No country)")
         n_filter_cols = 3 if has_go_live else 2
         selected_live = "All"
         if _compact_layout_enabled():
@@ -5378,10 +5381,10 @@ def main():
                 "Country",
                 options=["All"] + unique_countries,
                 key="dashboard_country",
-                help="Filter all dashboard metrics and tables by country.",
+                help="Filter all dashboard metrics and tables by country. Rows with no country in the sheet count as Saudi Arabia.",
             )
             if selected_country and selected_country != "All":
-                rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
+                rows_for_facilities = [r for r in rows_kitchens if _dashboard_row_country(r) == selected_country]
             else:
                 rows_for_facilities = rows_kitchens
             facility_set = _facility_select_options(selected_country or "All", rows_for_facilities)
@@ -5405,12 +5408,12 @@ def main():
                     "Country",
                     options=["All"] + unique_countries,
                     key="dashboard_country",
-                    help="Filter all dashboard metrics and tables by country.",
+                    help="Filter all dashboard metrics and tables by country. Rows with no country in the sheet count as Saudi Arabia.",
                 )
             with filter_cols[1]:
                 # Facilities depend on selected country
                 if selected_country and selected_country != "All":
-                    rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
+                    rows_for_facilities = [r for r in rows_kitchens if _dashboard_row_country(r) == selected_country]
                 else:
                     rows_for_facilities = rows_kitchens
                 facility_set = _facility_select_options(selected_country or "All", rows_for_facilities)
@@ -5430,7 +5433,7 @@ def main():
                     )
         # Apply filters
         if selected_country and selected_country != "All":
-            rows_kitchens = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
+            rows_kitchens = [r for r in rows_kitchens if _dashboard_row_country(r) == selected_country]
         if selected_facility and selected_facility != "All":
             rows_kitchens = [
                 r for r in rows_kitchens
