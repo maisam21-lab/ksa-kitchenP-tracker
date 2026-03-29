@@ -3240,6 +3240,10 @@ def _raw_country_means_bahrain(val: str) -> bool:
     return v.startswith("bh")
 
 
+# Dashboard Country dropdown: always show KSA + Bahrain + regional pilots (even when row data has no kitchens there yet).
+DASHBOARD_COUNTRY_FILTER_CORE = ("Saudi Arabia", "Bahrain", "Kuwait", "UAE")
+
+
 def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
     """Ensure each row has 'Account Country'; derive from existing country field or Account name. For SF Kitchen Data."""
     if not rows:
@@ -5359,9 +5363,14 @@ def main():
             return opts if opts else ["(No facility)"]
 
         # —— Country, Facility, and Live status filters (drive all dashboard data) ——
-        unique_countries = sorted({(_country(r) or "(No country)") for r in rows_kitchens})
-        if not unique_countries:
-            unique_countries = ["(No country)"]
+        _from_rows = {(_country(r) or "(No country)") for r in rows_kitchens}
+        _extras = sorted(
+            {c for c in _from_rows if c not in set(DASHBOARD_COUNTRY_FILTER_CORE) and c not in ("(No country)", "")},
+            key=str.casefold,
+        )
+        unique_countries = list(DASHBOARD_COUNTRY_FILTER_CORE) + _extras
+        if "(No country)" in _from_rows:
+            unique_countries.append("(No country)")
         n_filter_cols = 3 if has_go_live else 2
         selected_live = "All"
         if _compact_layout_enabled():
