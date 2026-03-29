@@ -3240,6 +3240,50 @@ def _raw_country_means_bahrain(val: str) -> bool:
     return v.startswith("bh")
 
 
+# Kitchen id / name columns (SF labels and API names) — used when Country/County are blank.
+_KITCHEN_NUMBER_NAME_KEYS = (
+    "Kitchen Number",
+    "Kitchen_Number_ID_18__c",
+    "Name",
+    "Kitchen Number Name",
+    "Kitchen_Number__c.Name",
+)
+
+
+def _kitchen_number_name_blob(row: dict) -> str:
+    """Single string of kitchen identifiers for country inference."""
+    parts: list[str] = []
+    for k in _KITCHEN_NUMBER_NAME_KEYS:
+        v = row.get(k)
+        if v is not None and str(v).strip():
+            parts.append(str(v).strip())
+    return " ".join(parts)
+
+
+def _country_from_kitchen_number_or_name(text: str) -> str | None:
+    """Infer country from kitchen number / name when sheet country fields are empty.
+
+    UAE / KWT (or Kuwait) / BH (whole token) / KSA / SA (whole token — avoids matching *USA*).
+    """
+    if not text or not str(text).strip():
+        return None
+    s = str(text).strip()
+    u = s.upper()
+    if "UAE" in u:
+        return "UAE"
+    if "KWT" in u or "KUWAIT" in u:
+        return "Kuwait"
+    if "KSA" in u:
+        return "Saudi Arabia"
+    if "BAHRAIN" in u or "BHR" in u:
+        return "Bahrain"
+    if re.search(r"\bBH\b", s, re.I):
+        return "Bahrain"
+    if re.search(r"\bSA\b", s, re.I):
+        return "Saudi Arabia"
+    return None
+
+
 # Dashboard Country dropdown: always show KSA + Bahrain + regional pilots (even when row data has no kitchens there yet).
 DASHBOARD_COUNTRY_FILTER_CORE = ("Saudi Arabia", "Bahrain", "Kuwait", "UAE")
 
@@ -3287,6 +3331,11 @@ def _ensure_account_country_in_kitchens(rows: list[dict]) -> list[dict]:
         else:
             raw = row.get("Account Country", "") or ""
             row["Account Country"] = _normalize_country_value(str(raw)) if raw else ""
+        ac = (row.get("Account Country") or "").strip()
+        if not ac:
+            inferred = _country_from_kitchen_number_or_name(_kitchen_number_name_blob(row))
+            if inferred:
+                row["Account Country"] = inferred
         out.append(row)
     return out
 
@@ -5350,9 +5399,14 @@ def main():
             return ""
 
         def _dashboard_row_country(r):
-            """Country for dashboard filters and bucketing. Empty fields are common on KSA sheets — treat as Saudi Arabia (Kuwait/UAE rows set Account Country)."""
+            """Country for dashboard: sheet columns first; else infer from kitchen number/name (SA/KSA, BH, KWT, UAE); else Saudi Arabia."""
             c = _country(r)
-            return c if c else "Saudi Arabia"
+            if c:
+                return c
+            inferred = _country_from_kitchen_number_or_name(_kitchen_number_name_blob(r))
+            if inferred:
+                return _country_label(inferred)
+            return "Saudi Arabia"
 
         def _facility_select_options(sel_country: str, rows_subset: list) -> list[str]:
             """Facility dropdown: same tab names as Kitchen Master for that country, union any row-derived names."""
@@ -5381,7 +5435,7 @@ def main():
                 "Country",
                 options=["All"] + unique_countries,
                 key="dashboard_country",
-                help="Filter all dashboard metrics and tables by country. Rows with no country in the sheet count as Saudi Arabia.",
+                help="Filter by country. If Country/County are blank, the app uses kitchen number/name (e.g. UAE, KWT, BH, SA/KSA). Otherwise defaults to Saudi Arabia.",
             )
             if selected_country and selected_country != "All":
                 rows_for_facilities = [r for r in rows_kitchens if _dashboard_row_country(r) == selected_country]
@@ -5408,7 +5462,7 @@ def main():
                     "Country",
                     options=["All"] + unique_countries,
                     key="dashboard_country",
-                    help="Filter all dashboard metrics and tables by country. Rows with no country in the sheet count as Saudi Arabia.",
+                    help="Filter by country. If Country/County are blank, the app uses kitchen number/name (e.g. UAE, KWT, BH, SA/KSA). Otherwise defaults to Saudi Arabia.",
                 )
             with filter_cols[1]:
                 # Facilities depend on selected country
