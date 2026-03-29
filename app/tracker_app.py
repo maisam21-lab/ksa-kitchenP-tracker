@@ -1820,70 +1820,6 @@ def _can_user_export(current_user: str) -> bool:
     return u in export_norm or local in export_norm
 
 
-def _preview_only_ids_from_secrets() -> set[str]:
-    """Users allowed to see in-progress preview features (AE/Kuwait integration, etc.)."""
-    def _nonempty(v):
-        if v is None:
-            return False
-        if isinstance(v, str):
-            return bool(v.strip())
-        if isinstance(v, (list, dict)):
-            return len(v) > 0
-        return True
-
-    def _secrets_preview_raw():
-        keys = ("PREVIEW_ONLY_IDS", "preview_only_ids")
-        try:
-            sec = getattr(st, "secrets", None)
-            if sec:
-                for k in keys:
-                    v = sec.get(k)
-                    if _nonempty(v):
-                        return v
-                # Support nested TOML tables, e.g. [preview] PREVIEW_ONLY_IDS = "..."
-                for obj in sec.values():
-                    if isinstance(obj, dict):
-                        for k in keys:
-                            v = obj.get(k)
-                            if _nonempty(v):
-                                return v
-        except Exception:
-            pass
-        return None
-
-    try:
-        raw = (
-            _secrets_preview_raw()
-            or os.environ.get("PREVIEW_ONLY_IDS", "")
-        )
-    except Exception:
-        raw = os.environ.get("PREVIEW_ONLY_IDS", "")
-    out: set[str] = set()
-    if isinstance(raw, list):
-        for item in raw:
-            s = (str(item).strip() or "").lower()
-            if s:
-                out.add(s)
-    else:
-        for part in re.split(r"[,\n;\s]+", str(raw or "")):
-            s = (part or "").strip().lower()
-            if s:
-                out.add(s)
-    return out
-
-
-def _is_preview_user(current_user: str) -> bool:
-    """True for users explicitly listed in PREVIEW_ONLY_IDS."""
-    u = (current_user or "").strip().lower()
-    if not u:
-        return False
-    allow = _preview_only_ids_from_secrets()
-    if not allow:
-        return False
-    local = u.split("@", 1)[0] if "@" in u else u
-    return u in allow or local in allow
-
-
 def _render_export_button(rows: list[dict], file_stem: str, key: str):
     """Render CSV download button when rows exist."""
     if rows is None:
@@ -2874,6 +2810,9 @@ def _fetch_regional_workbook_data(region: str, sheet_id: str, credentials_path: 
             r = list(row) + [""] * (len(headers) - len(row))
             ws_data.append(dict(zip(headers, r[: len(headers)])))
         out[str(ws.title).strip() or f"gid_{gid}"] = ws_data
+    # Stale GID lists (e.g. after workbook rebuild) yield no tabs — load every worksheet instead.
+    if not out:
+        return _fetch_online_sheet(sheet_id, credentials_path) or {}
     return out
 
 
@@ -2895,6 +2834,13 @@ def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
         return False
     try:
         data = _fetch_regional_workbook_data("Kuwait", sid, creds_path) or {}
+        if not any(ws_rows for ws_rows in data.values()):
+            if not silent:
+                st.warning(
+                    "No worksheet rows loaded for Kuwait. Share the workbook with the service account (Viewer) "
+                    "and check KUWAIT_KITCHEN_SHEET_ID / facility GIDs in secrets."
+                )
+            return False
         with get_conn() as c:
             c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
         for ws_title, ws_rows in data.items():
@@ -2925,6 +2871,52 @@ def _load_kuwait_dashboard_rows() -> list[dict]:
     return out
 
 
+def _refresh_uae_workbook_from_sheets(*, silent: bool = True) -> bool:
+    """Fetch UAE facility sheets and persist under gsheet_ae. Returns True on success."""
+    sid, _, _, gsource = _regional_kitchen_workbook_settings("UAE")
+    creds_path = _get_google_credentials_path()
+    if not creds_path or not sid:
+        return False
+    try:
+        data = _fetch_regional_workbook_data("UAE", sid, creds_path) or {}
+        if not any(ws_rows for ws_rows in data.values()):
+            if not silent:
+                st.warning(
+                    "No worksheet rows loaded for UAE. Share the workbook with the service account (Viewer) "
+                    "and check UAE_KITCHEN_SHEET_ID / facility GIDs in secrets. "
+                    "If the workbook was recreated, GIDs may be outdated — the app will load all tabs when none match."
+                )
+            return False
+        with get_conn() as c:
+            c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
+        for ws_title, ws_rows in data.items():
+            if not ws_rows:
+                continue
+            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+        set_last_refresh(gsource)
+        return True
+    except Exception as e:
+        if not silent:
+            st.warning(f"Could not refresh UAE sheet: {type(e).__name__}: {e}")
+        return False
+
+
+def _load_uae_dashboard_rows() -> list[dict]:
+    """All UAE facility-sheet rows from gsheet_ae, tagged with Account Country = UAE for dashboard filters."""
+    hidden = _regional_preview_hidden_tab_names_lower()
+    out: list[dict] = []
+    for tab_id in list_tab_ids_for_source(GSOURCE_KITCHEN_AE):
+        if (tab_id or "").strip().lower() in hidden:
+            continue
+        for r in list_generic_tab(tab_id, source=GSOURCE_KITCHEN_AE) or []:
+            if not isinstance(r, dict) or _is_empty_record(r):
+                continue
+            row = dict(r)
+            row["Account Country"] = "UAE"
+            out.append(row)
+    return out
+
+
 def _refresh_regional_kitchen_workbooks() -> None:
     """Load Kuwait/UAE preview workbooks (all worksheets) into SQLite by source. Non-fatal on error."""
     creds_path = _get_google_credentials_path()
@@ -2936,6 +2928,8 @@ def _refresh_regional_kitchen_workbooks() -> None:
             continue
         try:
             data = _fetch_regional_workbook_data(region, sid, creds_path) or {}
+            if not any(ws_rows for ws_rows in data.values()):
+                continue
             with get_conn() as c:
                 c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
             for ws_title, ws_rows in data.items():
@@ -2948,36 +2942,17 @@ def _refresh_regional_kitchen_workbooks() -> None:
 
 
 def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is_developer: bool) -> None:
-    """Kitchen Master Data view for Kuwait/UAE preview workbooks (PREVIEW_ONLY_IDS only)."""
+    """Kitchen Master Data view for Kuwait/UAE regional workbooks (Google Sheets)."""
     sid, gid, _legacy_tab_id, gsource = _regional_kitchen_workbook_settings(region)
     docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid and gid is not None else (f"https://docs.google.com/spreadsheets/d/{sid}/edit" if sid else "")
     st.caption(
-        f"**Preview — {region} kitchen master** — [Open workbook]({docs}). "
-        "Refreshes with the main KSA Google Sheet job or automatically when data is older than 15 minutes."
+        f"**{region} kitchen master** — [Open workbook]({docs}). "
+        "Data is refreshed from Google Sheets when you open this page."
     )
-    import time
-
-    now_sec = time.time()
-    last_run = st.session_state.get(f"regional_auto_refresh_{gsource}") or 0
-    # Kuwait preview: always read latest facility sheets from Google Sheets on each page load.
     if region == "Kuwait":
         _refresh_kuwait_workbook_from_sheets(silent=False)
-    elif _source_refresh_is_stale(gsource, 15) and (now_sec - last_run) >= 900:
-        st.session_state[f"regional_auto_refresh_{gsource}"] = now_sec
-        creds = _get_google_credentials_path()
-        if creds and sid:
-            try:
-                data = _fetch_regional_workbook_data(region, sid, creds) or {}
-                with get_conn() as c:
-                    c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
-                for ws_title, ws_rows in data.items():
-                    if not ws_rows:
-                        continue
-                    save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
-                set_last_refresh(gsource)
-                _rerun()
-            except Exception as e:
-                st.warning(f"Could not refresh {region} sheet: {type(e).__name__}: {e}")
+    elif region == "UAE":
+        _refresh_uae_workbook_from_sheets(silent=False)
 
     _legacy_hidden = _regional_preview_hidden_tab_names_lower()
     source_options = [
@@ -4619,7 +4594,6 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
-    st.session_state["preview_only_mode"] = _is_preview_user(current_user)
 
     # Hide the built-in dataframe Download control for non-export users (must run AFTER can_export is computed).
     if not can_export:
@@ -4700,60 +4674,65 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         _show_refresh_btn = _is_developer() or user_role == "super_user"
-        preview_mode_km = bool(st.session_state.get("preview_only_mode"))
-        _pkreg = ""
-        if preview_mode_km:
-            if st.session_state.get("preview_kitchen_region") == "KSA":
-                st.session_state.pop("preview_kitchen_region", None)
-            st.caption(
-                "Preview: open **Kuwait** or **UAE** regional workbooks. "
-                "Default is **KSA master kitchen data** (same as other users)."
+        if st.session_state.get("preview_kitchen_region") == "KSA":
+            st.session_state.pop("preview_kitchen_region", None)
+        st.caption(
+            "Choose **KSA** for the main master kitchen view, or **Kuwait** / **UAE** for regional facility workbooks."
+        )
+        _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
+        if _compact_layout_enabled():
+            _pick = st.selectbox(
+                "Region",
+                options=["KSA", "Kuwait", "UAE"],
+                index=(0 if _cur not in ("Kuwait", "UAE") else (1 if _cur == "Kuwait" else 2)),
+                key="km_preview_segmented",
             )
-            _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
-            if _compact_layout_enabled():
-                _pick = st.selectbox(
-                    "Preview country",
-                    options=["KSA", "Kuwait", "UAE"],
-                    index=(0 if _cur not in ("Kuwait", "UAE") else (1 if _cur == "Kuwait" else 2)),
-                    key="km_preview_segmented",
-                )
-                if _pick == "KSA":
-                    if _cur in ("Kuwait", "UAE"):
-                        st.session_state.pop("preview_kitchen_region", None)
-                        _rerun()
-                elif _pick in ("Kuwait", "UAE") and _pick != _cur:
-                    st.session_state["preview_kitchen_region"] = _pick
+            if _pick == "KSA":
+                if _cur in ("Kuwait", "UAE"):
+                    st.session_state.pop("preview_kitchen_region", None)
                     _rerun()
-            else:
-                _c_kw, _c_ae = st.columns([1, 1])
-                with _c_kw:
-                    if st.button(
-                        "Kuwait",
-                        key="km_preview_tab_kuwait",
-                        type="primary" if _cur == "Kuwait" else "secondary",
-                        use_container_width=True,
-                    ):
-                        st.session_state["preview_kitchen_region"] = "Kuwait"
-                        _rerun()
-                with _c_ae:
-                    if st.button(
-                        "UAE",
-                        key="km_preview_tab_uae",
-                        type="primary" if _cur == "UAE" else "secondary",
-                        use_container_width=True,
-                    ):
-                        st.session_state["preview_kitchen_region"] = "UAE"
-                        _rerun()
-            _fin = (st.session_state.get("preview_kitchen_region") or "").strip()
-            _pkreg = _fin if _fin in ("Kuwait", "UAE") else ""
-        _preview_regional_km = preview_mode_km and _pkreg in ("Kuwait", "UAE")
-        if _preview_regional_km:
+            elif _pick in ("Kuwait", "UAE") and _pick != _cur:
+                st.session_state["preview_kitchen_region"] = _pick
+                _rerun()
+        else:
+            _c_ksa, _c_kw, _c_ae = st.columns([1, 1, 1])
+            with _c_ksa:
+                if st.button(
+                    "KSA",
+                    key="km_region_tab_ksa",
+                    type="primary" if _cur not in ("Kuwait", "UAE") else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state.pop("preview_kitchen_region", None)
+                    _rerun()
+            with _c_kw:
+                if st.button(
+                    "Kuwait",
+                    key="km_preview_tab_kuwait",
+                    type="primary" if _cur == "Kuwait" else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["preview_kitchen_region"] = "Kuwait"
+                    _rerun()
+            with _c_ae:
+                if st.button(
+                    "UAE",
+                    key="km_preview_tab_uae",
+                    type="primary" if _cur == "UAE" else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["preview_kitchen_region"] = "UAE"
+                    _rerun()
+        _fin = (st.session_state.get("preview_kitchen_region") or "").strip()
+        _pkreg = _fin if _fin in ("Kuwait", "UAE") else ""
+        _regional_km_active = _pkreg in ("Kuwait", "UAE")
+        if _regional_km_active:
             _render_preview_regional_kitchen_master(
                 _pkreg,
                 can_export=can_export,
                 is_developer=is_developer,
             )
-        if not _preview_regional_km:
+        if not _regional_km_active:
             superset_rows, superset_meta = _get_superset_master_kitchens()
             if superset_rows is not None:
                 last_refresh = (superset_meta or {}).get("last_refresh_ts_utc")
@@ -5246,11 +5225,22 @@ def main():
         else:
             # Always use GSheet for Dashboard so regular users see data (session data_source may default to salesforce)
             rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
-        # Kuwait facility sheets (preview users): refresh from Sheets; load rows after KSA normalization (Kuwait must not pass _ensure_account_country_in_kitchens)
+        # Kuwait + UAE facility sheets: merge into dashboard for all users (Country filter).
+        # Refresh from Google Sheets when stale (15 min) to avoid fetching both workbooks every rerun.
         _kuwait_dashboard_rows: list[dict] = []
-        if bool(st.session_state.get("preview_only_mode")):
-            _refresh_kuwait_workbook_from_sheets(silent=True)
-            _kuwait_dashboard_rows = _load_kuwait_dashboard_rows()
+        _uae_dashboard_rows: list[dict] = []
+        _creds_dash = _get_google_credentials_path()
+        if _creds_dash:
+            _sid_kw, _, _, _gkw = _regional_kitchen_workbook_settings("Kuwait")
+            _sid_ae, _, _, _gae = _regional_kitchen_workbook_settings("UAE")
+            if _sid_kw and _source_refresh_is_stale(_gkw, 15):
+                _refresh_kuwait_workbook_from_sheets(silent=True)
+            if _sid_kw:
+                _kuwait_dashboard_rows = _load_kuwait_dashboard_rows()
+            if _sid_ae and _source_refresh_is_stale(_gae, 15):
+                _refresh_uae_workbook_from_sheets(silent=True)
+            if _sid_ae:
+                _uae_dashboard_rows = _load_uae_dashboard_rows()
         today_str = date.today().isoformat()
         if snapshot_mod and rows_kitchens:
             if not snapshot_mod.snapshot_exists_for_date(today_str):
@@ -5260,8 +5250,8 @@ def main():
                     pass
         # Ensure Account Country for filtering (Kitchens / Master list may use County or other keys)
         rows_kitchens = _ensure_account_country_in_kitchens(rows_kitchens)
-        if _kuwait_dashboard_rows:
-            rows_kitchens = (rows_kitchens or []) + _kuwait_dashboard_rows
+        if _kuwait_dashboard_rows or _uae_dashboard_rows:
+            rows_kitchens = (rows_kitchens or []) + _kuwait_dashboard_rows + _uae_dashboard_rows
         # Enrich with go-live / is_live: facility CSV (data/sa_bh_facility_go_live.csv) + optional BigQuery
         bq_go_live = _fetch_bigquery_go_live()
         csv_go_live = _fetch_facility_go_live_csv()
@@ -5269,12 +5259,25 @@ def main():
         if go_live_rows:
             rows_kitchens = _merge_go_live_into_kitchens(rows_kitchens, go_live_rows)
         has_go_live = bool(go_live_rows)
+
+        def _country_label(raw: str) -> str:
+            """Normalize labels so UAE/Kuwait regional sheets and KSA exports group in one filter bucket."""
+            s = (raw or "").strip()
+            if not s:
+                return ""
+            low = s.lower().replace(".", "").replace(" ", "")
+            if low in ("uae", "ae", "unitedarabemirates"):
+                return "UAE"
+            if low in ("kw", "kuwait"):
+                return "Kuwait"
+            return s
+
         def _country(r):
             """Country for a row (Account Country, County, or other country header)."""
             for k in ("Account Country", "County", "Account__r.Country__c", "Country__c", "Country", "account country", "county"):
                 v = r.get(k)
                 if v is not None and str(v).strip():
-                    return str(v).strip()
+                    return _country_label(str(v).strip())
             return ""
         def _facility(r):
             for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
