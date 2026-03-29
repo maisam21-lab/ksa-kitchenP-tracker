@@ -1908,6 +1908,34 @@ def _master_kitchens_sources() -> list[tuple[str, str]]:
     return [(tab_id, tab_id) for tab_id in _master_kitchens_other_sheet_ids()]
 
 
+def _dashboard_load_gsheet_rows_with_sheet_stamp() -> list[dict]:
+    """Load KSA master-kitchen tabs with Sheet = worksheet title (same facility names as Kitchen Master Data)."""
+    out: list[dict] = []
+    for tab_id in _master_kitchens_other_sheet_ids():
+        for r in list_generic_tab(tab_id, source="gsheet") or []:
+            if not isinstance(r, dict) or _is_empty_record(r):
+                continue
+            row = dict(r)
+            row["Sheet"] = tab_id
+            out.append(row)
+    return out
+
+
+def _dashboard_facility_from_row(row) -> str:
+    """Facility label aligned with Kitchen Master: prefer worksheet tab (Sheet), then Account / Facility columns."""
+    if not row or not isinstance(row, dict):
+        return ""
+    for k in ("Sheet", "sheet"):
+        v = row.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
+        v = row.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
 def _dashboard_load_source(source_id: str) -> list[dict]:
     """Load rows for the given dashboard source_id."""
     if source_id == "main_tracker":
@@ -2826,6 +2854,22 @@ def _regional_preview_hidden_tab_names_lower() -> set[str]:
     }
 
 
+def _dashboard_kitchen_master_tab_names_for_country(ui_country: str) -> list[str] | None:
+    """Worksheet/facility names shown in Kitchen Master for this country (Dashboard facility filter). None = derive from rows only."""
+    if not ui_country or ui_country in ("All", "(No country)"):
+        return None
+    s = (ui_country or "").strip()
+    if s == "Kuwait":
+        hidden = _regional_preview_hidden_tab_names_lower()
+        return [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_KW) if (t or "").strip().lower() not in hidden]
+    if s == "UAE":
+        hidden = _regional_preview_hidden_tab_names_lower()
+        return [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_AE) if (t or "").strip().lower() not in hidden]
+    if s in ("Saudi Arabia", "Bahrain"):
+        return list(_master_kitchens_other_sheet_ids())
+    return None
+
+
 def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
     """Fetch Kuwait facility sheets and persist under gsheet_kw. Returns True on success."""
     sid, _, _, gsource = _regional_kitchen_workbook_settings("Kuwait")
@@ -2867,6 +2911,7 @@ def _load_kuwait_dashboard_rows() -> list[dict]:
                 continue
             row = dict(r)
             row["Account Country"] = "Kuwait"
+            row["Sheet"] = tab_id
             out.append(row)
     return out
 
@@ -2913,6 +2958,7 @@ def _load_uae_dashboard_rows() -> list[dict]:
                 continue
             row = dict(r)
             row["Account Country"] = "UAE"
+            row["Sheet"] = tab_id
             out.append(row)
     return out
 
@@ -5218,13 +5264,18 @@ def main():
     # Dashboard: management view (section_options already restricts who sees the button)
     elif section == "Dashboard":
         superset_rows, superset_meta = _get_superset_master_kitchens()
-        if superset_rows is not None:
+        dashboard_from_superset = superset_rows is not None
+        if dashboard_from_superset:
             if _superset_stale_warning(superset_meta or {}):
                 st.warning("Last refresh is older than 30 minutes or last run failed.")
             rows_kitchens = superset_rows
         else:
-            # Always use GSheet for Dashboard so regular users see data (session data_source may default to salesforce)
-            rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
+            # Prefer per-facility tabs with Sheet = tab name (same as Kitchen Master); fallback to consolidated Kitchens tab.
+            _tabbed = _dashboard_load_gsheet_rows_with_sheet_stamp()
+            if _tabbed:
+                rows_kitchens = _tabbed
+            else:
+                rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
         # Kuwait + UAE facility sheets: merge into dashboard for all users (Country filter).
         # Refresh from Google Sheets when stale (15 min) to avoid fetching both workbooks every rerun.
         _kuwait_dashboard_rows: list[dict] = []
@@ -5279,12 +5330,20 @@ def main():
                 if v is not None and str(v).strip():
                     return _country_label(str(v).strip())
             return ""
-        def _facility(r):
-            for k in ("Account Name", "Account__r.Name", "facility", "Facility"):
-                v = r.get(k)
-                if v is not None and str(v).strip():
-                    return str(v).strip()
-            return ""
+
+        def _facility_select_options(sel_country: str, rows_subset: list) -> list[str]:
+            """Facility dropdown: same tab names as Kitchen Master for that country, union any row-derived names."""
+            row_facs = {_dashboard_facility_from_row(r) for r in rows_subset}
+            row_facs = {f for f in row_facs if f}
+            tabs = None
+            if sel_country and sel_country not in ("All", "(No country)") and not dashboard_from_superset:
+                tabs = _dashboard_kitchen_master_tab_names_for_country(sel_country)
+            if tabs is not None:
+                opts = sorted(set(tabs) | row_facs, key=str.casefold)
+            else:
+                opts = sorted(row_facs, key=str.casefold)
+            return opts if opts else ["(No facility)"]
+
         # —— Country, Facility, and Live status filters (drive all dashboard data) ——
         unique_countries = sorted({(_country(r) or "(No country)") for r in rows_kitchens})
         if not unique_countries:
@@ -5302,13 +5361,12 @@ def main():
                 rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
             else:
                 rows_for_facilities = rows_kitchens
-            facility_set = sorted({(_facility(r) or "(No facility)") for r in rows_for_facilities})
-            facility_set = [f for f in facility_set if f] or ["(No facility)"]
+            facility_set = _facility_select_options(selected_country or "All", rows_for_facilities)
             selected_facility = st.selectbox(
                 "Facility",
                 options=["All"] + facility_set,
                 key="dashboard_facility",
-                help="Filter by facility within the selected country.",
+                help="Facilities match Kitchen Master worksheet names for this country (tab / Sheet).",
             )
             if has_go_live:
                 selected_live = st.selectbox(
@@ -5332,15 +5390,12 @@ def main():
                     rows_for_facilities = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
                 else:
                     rows_for_facilities = rows_kitchens
-                facility_set = sorted({(_facility(r) or "(No facility)") for r in rows_for_facilities})
-                facility_set = [f for f in facility_set if f]
-                if not facility_set:
-                    facility_set = ["(No facility)"]
+                facility_set = _facility_select_options(selected_country or "All", rows_for_facilities)
                 selected_facility = st.selectbox(
                     "Facility",
                     options=["All"] + facility_set,
                     key="dashboard_facility",
-                    help="Filter by facility within the selected country.",
+                    help="Facilities match Kitchen Master worksheet names for this country (tab / Sheet).",
                 )
             if has_go_live and n_filter_cols >= 3:
                 with filter_cols[2]:
@@ -5354,7 +5409,10 @@ def main():
         if selected_country and selected_country != "All":
             rows_kitchens = [r for r in rows_kitchens if (_country(r) or "(No country)") == selected_country]
         if selected_facility and selected_facility != "All":
-            rows_kitchens = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_facility]
+            rows_kitchens = [
+                r for r in rows_kitchens
+                if (_dashboard_facility_from_row(r) or "(No facility)") == selected_facility
+            ]
         if selected_live == "Live":
             rows_kitchens = [r for r in rows_kitchens if r.get("Is Live") is True]
         elif selected_live == "Not live":
@@ -5656,7 +5714,7 @@ def main():
         # —— Facility leaderboard (where to focus: by Vacant MRR or Scheduled Churn RRL) ——
         fac_stats = {}
         for r in rows_kitchens:
-            f = _facility(r) or "(No facility)"
+            f = _dashboard_facility_from_row(r) or "(No facility)"
             if f not in fac_stats:
                 fac_stats[f] = {"vacant": 0, "churning": 0, "occupied": 0, "sold": 0, "vacant_approved_deal": 0, "vacant_mrr": 0.0, "churn_mrr": 0.0}
             s = _status_normalized(r)
@@ -5717,7 +5775,10 @@ def main():
                     # —— Inventory to sell: kitchen-level view for selected facility ——
                     if selected_facility and selected_facility != "(Select a facility)":
                         st.subheader(f"Inventory — {selected_facility}")
-                        facility_rows = [r for r in rows_kitchens if (_facility(r) or "(No facility)") == selected_facility]
+                        facility_rows = [
+                            r for r in rows_kitchens
+                            if (_dashboard_facility_from_row(r) or "(No facility)") == selected_facility
+                        ]
                         status_filter = st.multiselect("Status", ["Vacant", "Churning", "Sold", "Occupied"], default=["Vacant", "Churning"], key="inv_status")
                         if status_filter:
                             facility_rows = [r for r in facility_rows if _status_normalized(r) in status_filter]
@@ -5746,7 +5807,7 @@ def main():
                                     "Status": st_val or "—",
                                     "Floor (MRR)": floor_val,
                                     "List (MRR)": list_val,
-                                    "Facility": _facility(r) or "—",
+                                    "Facility": _dashboard_facility_from_row(r) or "—",
                                     "_has_opportunity": _row_has_opportunity_name(r),
                                 }
                                 if has_go_live:
@@ -5893,7 +5954,7 @@ def main():
                 churn_table_rows = [
                     {
                         "Kitchen": _kitchen_name(r) or "—",
-                        "Account / Facility": _facility(r) or "—",
+                        "Account / Facility": _dashboard_facility_from_row(r) or "—",
                         "Churn date": _churn_date_display(_churn_date(r)),
                         "Scheduled Churn RRL (USD)": _price_for_value(r, "Churning") or _price(r) or 0,
                         "Status": "Churning",
