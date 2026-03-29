@@ -3261,25 +3261,19 @@ def _kitchen_number_name_blob(row: dict) -> str:
 
 
 def _country_from_kitchen_number_or_name(text: str) -> str | None:
-    """Infer country from kitchen number / name when sheet country fields are empty.
-
-    UAE / KWT (or Kuwait) / BH (whole token) / KSA / SA (whole token — avoids matching *USA*).
-    """
+    """Infer country from kitchen number / name when sheet country fields are empty: SA/KSA→KSA, BH→Bahrain, KWT→Kuwait, UAE→UAE."""
     if not text or not str(text).strip():
         return None
-    s = str(text).strip()
-    u = s.upper()
+    u = str(text).strip().upper()
     if "UAE" in u:
         return "UAE"
     if "KWT" in u or "KUWAIT" in u:
         return "Kuwait"
     if "KSA" in u:
         return "Saudi Arabia"
-    if "BAHRAIN" in u or "BHR" in u:
+    if "BH" in u:
         return "Bahrain"
-    if re.search(r"\bBH\b", s, re.I):
-        return "Bahrain"
-    if re.search(r"\bSA\b", s, re.I):
+    if "SA" in u:
         return "Saudi Arabia"
     return None
 
