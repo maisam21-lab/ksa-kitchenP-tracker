@@ -155,8 +155,18 @@ UAE_KITCHEN_FACILITY_GIDS = [
 # Stored in SQLite under separate sources so KSA tabs are unchanged.
 GSOURCE_KITCHEN_KW = "gsheet_kw"
 GSOURCE_KITCHEN_AE = "gsheet_ae"
+GSOURCE_KITCHEN_BH = "gsheet_bh"
 TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
 TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
+TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
+# Bahrain facilities live in the main workbook; only these worksheets (gids) load into gsheet_bh.
+# Share sheet with service account; restrict who sees the Bahrain tab via BAHRAIN_KITCHEN_PREVIEW_IDS in secrets.
+BAHRAIN_KITCHEN_SHEET_ID = SHEET_ID
+BAHRAIN_KITCHEN_WORKSHEET_GID = 2128153042
+BAHRAIN_KITCHEN_FACILITY_GIDS = [
+    2128153042,
+    782567541,
+]
 
 # Rerun works in Streamlit 1.27+; fallback for older versions
 def _rerun():
@@ -1800,6 +1810,82 @@ def _export_allowed_ids_from_secrets() -> set[str]:
     return out
 
 
+def _secrets_get_bahrain_preview_raw():
+    """BAHRAIN_KITCHEN_PREVIEW_IDS from secrets (or nested tables); comma list or list of emails."""
+    names = (
+        "BAHRAIN_KITCHEN_PREVIEW_IDS",
+        "bahrain_kitchen_preview_ids",
+        "preview_only_IDs",
+        "preview_only_ids",
+        "PREVIEW_ONLY_IDS",
+        "BAHRAIN_PREVIEW_USER_IDS",
+        "bahrain_preview_user_ids",
+    )
+    try:
+        sec = getattr(st, "secrets", None)
+        if sec:
+            for name in names:
+                v = sec.get(name)
+                if v is not None and (not isinstance(v, str) or v.strip()):
+                    return v
+            for val in sec.values():
+                if isinstance(val, dict):
+                    for name in names:
+                        v = val.get(name)
+                        if v is not None and (not isinstance(v, str) or v.strip()):
+                            return v
+    except Exception:
+        pass
+    return (
+        os.environ.get("BAHRAIN_KITCHEN_PREVIEW_IDS", "")
+        or os.environ.get("PREVIEW_ONLY_IDS", "")
+        or os.environ.get("BAHRAIN_PREVIEW_USER_IDS", "")
+    )
+
+
+def _bahrain_preview_ids_from_secrets() -> set[str]:
+    """Emails allowed to see the Bahrain Kitchen Master tab and merged Bahrain dashboard rows."""
+    raw = _secrets_get_bahrain_preview_raw()
+    out: set[str] = set()
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            try:
+                allowed = bool(v) if not isinstance(v, str) else v.strip().lower() in ("1", "true", "yes", "y")
+            except Exception:
+                allowed = False
+            s = (str(k).strip() or "").lower()
+            if s and allowed:
+                out.add(s)
+        return out
+    if isinstance(raw, list):
+        for item in raw:
+            s = (str(item).strip() or "").lower()
+            if s:
+                out.add(s)
+    else:
+        parts = re.split(r"[,\n;\s]+", str(raw or ""))
+        for part in parts:
+            s = (part or "").strip().lower()
+            if s:
+                out.add(s)
+    return out
+
+
+def _user_can_see_bahrain_kitchen_preview(current_user: str) -> bool:
+    """Developer always; else email/local must be in BAHRAIN_KITCHEN_PREVIEW_IDS (non-empty)."""
+    if _is_developer():
+        return True
+    u = (current_user or "").strip().lower()
+    if not u:
+        return False
+    preview_set = _bahrain_preview_ids_from_secrets()
+    preview_norm = {(a or "").strip().lower() for a in preview_set if (a or "").strip()}
+    if not preview_norm:
+        return False
+    local = u.split("@", 1)[0] if "@" in u else u
+    return u in preview_norm or local in preview_norm
+
+
 def _can_user_export(current_user: str) -> bool:
     """True only when current_user matches EXPORT_ALLOWED_IDS (or alias keys: export_allowed_ids, etc.).
 
@@ -2697,7 +2783,7 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
 
 
 def _regional_kitchen_workbook_settings(region: str) -> tuple[str | None, int | None, str, str]:
-    """Return (spreadsheet_id, worksheet_gid_default, legacy_tab_id, sqlite source) for Kuwait or UAE."""
+    """Return (spreadsheet_id, worksheet_gid_default, legacy_tab_id, sqlite source) for Kuwait, UAE, or Bahrain."""
     secrets = getattr(st, "secrets", None) or {}
 
     def _as_int(v, default: int) -> int:
@@ -2728,6 +2814,17 @@ def _regional_kitchen_workbook_settings(region: str) -> tuple[str | None, int | 
             UAE_KITCHEN_WORKSHEET_GID,
         )
         return (sid or None, gid, TAB_ID_KITCHEN_AE, GSOURCE_KITCHEN_AE)
+    if region == "Bahrain":
+        sid = (
+            (secrets.get("bahrain_kitchen_sheet_id") or secrets.get("BAHRAIN_KITCHEN_SHEET_ID") or "")
+            or os.environ.get("BAHRAIN_KITCHEN_SHEET_ID", "")
+            or BAHRAIN_KITCHEN_SHEET_ID
+        ).strip()
+        gid = _as_int(
+            secrets.get("bahrain_kitchen_worksheet_gid") or secrets.get("BAHRAIN_KITCHEN_WORKSHEET_GID") or os.environ.get("BAHRAIN_KITCHEN_WORKSHEET_GID"),
+            BAHRAIN_KITCHEN_WORKSHEET_GID,
+        )
+        return (sid or None, gid, TAB_ID_KITCHEN_BH, GSOURCE_KITCHEN_BH)
     return None, None, "", ""
 
 
@@ -2798,6 +2895,14 @@ def _regional_kitchen_target_gids(region: str) -> list[int] | None:
         )
         parsed = _parse_gid_list(raw)
         return parsed if parsed else list(UAE_KITCHEN_FACILITY_GIDS)
+    if region == "Bahrain":
+        raw = (
+            secrets.get("BAHRAIN_KITCHEN_FACILITY_GIDS")
+            or secrets.get("bahrain_kitchen_facility_gids")
+            or os.environ.get("BAHRAIN_KITCHEN_FACILITY_GIDS", "")
+        )
+        parsed = _parse_gid_list(raw)
+        return parsed if parsed else list(BAHRAIN_KITCHEN_FACILITY_GIDS)
     return None
 
 
@@ -2849,12 +2954,13 @@ def _regional_preview_hidden_tab_names_lower() -> set[str]:
     return {
         (TAB_ID_KITCHEN_KW or "").strip().lower(),
         (TAB_ID_KITCHEN_AE or "").strip().lower(),
+        (TAB_ID_KITCHEN_BH or "").strip().lower(),
         "standard master kitchen",
         "ksa master kitchen data",
     }
 
 
-def _dashboard_kitchen_master_tab_names_for_country(ui_country: str) -> list[str] | None:
+def _dashboard_kitchen_master_tab_names_for_country(ui_country: str, *, current_user: str | None = None) -> list[str] | None:
     """Worksheet/facility names shown in Kitchen Master for this country (Dashboard facility filter). None = derive from rows only."""
     if not ui_country or ui_country in ("All", "(No country)"):
         return None
@@ -2865,7 +2971,14 @@ def _dashboard_kitchen_master_tab_names_for_country(ui_country: str) -> list[str
     if s == "UAE":
         hidden = _regional_preview_hidden_tab_names_lower()
         return [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_AE) if (t or "").strip().lower() not in hidden]
-    if s in ("Saudi Arabia", "Bahrain"):
+    if s == "Bahrain":
+        if _user_can_see_bahrain_kitchen_preview(current_user or ""):
+            hidden = _regional_preview_hidden_tab_names_lower()
+            bh_tabs = [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_BH) if (t or "").strip().lower() not in hidden]
+            if bh_tabs:
+                return bh_tabs
+        return list(_master_kitchens_other_sheet_ids())
+    if s == "Saudi Arabia":
         return list(_master_kitchens_other_sheet_ids())
     return None
 
@@ -2963,12 +3076,58 @@ def _load_uae_dashboard_rows() -> list[dict]:
     return out
 
 
+def _refresh_bahrain_workbook_from_sheets(*, silent: bool = True) -> bool:
+    """Fetch Bahrain facility sheets (by gid) and persist under gsheet_bh. Returns True on success."""
+    sid, _, _, gsource = _regional_kitchen_workbook_settings("Bahrain")
+    creds_path = _get_google_credentials_path()
+    if not creds_path or not sid:
+        return False
+    try:
+        data = _fetch_regional_workbook_data("Bahrain", sid, creds_path) or {}
+        if not any(ws_rows for ws_rows in data.values()):
+            if not silent:
+                st.warning(
+                    "No worksheet rows loaded for Bahrain. Share the workbook with the service account (Viewer) "
+                    "and check BAHRAIN_KITCHEN_SHEET_ID / BAHRAIN_KITCHEN_FACILITY_GIDS in secrets."
+                )
+            return False
+        with get_conn() as c:
+            c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
+        for ws_title, ws_rows in data.items():
+            if not ws_rows:
+                continue
+            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+        set_last_refresh(gsource)
+        return True
+    except Exception as e:
+        if not silent:
+            st.warning(f"Could not refresh Bahrain sheet: {type(e).__name__}: {e}")
+        return False
+
+
+def _load_bahrain_dashboard_rows() -> list[dict]:
+    """Bahrain facility-sheet rows from gsheet_bh, tagged with Account Country = Bahrain."""
+    hidden = _regional_preview_hidden_tab_names_lower()
+    out: list[dict] = []
+    for tab_id in list_tab_ids_for_source(GSOURCE_KITCHEN_BH):
+        if (tab_id or "").strip().lower() in hidden:
+            continue
+        for r in list_generic_tab(tab_id, source=GSOURCE_KITCHEN_BH) or []:
+            if not isinstance(r, dict) or _is_empty_record(r):
+                continue
+            row = dict(r)
+            row["Account Country"] = "Bahrain"
+            row["Sheet"] = tab_id
+            out.append(row)
+    return out
+
+
 def _refresh_regional_kitchen_workbooks() -> None:
-    """Load Kuwait/UAE preview workbooks (all worksheets) into SQLite by source. Non-fatal on error."""
+    """Load Kuwait/UAE/Bahrain preview workbooks into SQLite by source. Non-fatal on error."""
     creds_path = _get_google_credentials_path()
     if not creds_path:
         return
-    for region in ("Kuwait", "UAE"):
+    for region in ("Kuwait", "UAE", "Bahrain"):
         sid, _gid, _legacy_tab_id, gsource = _regional_kitchen_workbook_settings(region)
         if not sid:
             continue
@@ -2988,7 +3147,7 @@ def _refresh_regional_kitchen_workbooks() -> None:
 
 
 def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is_developer: bool) -> None:
-    """Kitchen Master Data view for Kuwait/UAE regional workbooks (Google Sheets)."""
+    """Kitchen Master Data view for Kuwait/UAE/Bahrain regional workbooks (Google Sheets)."""
     sid, gid, _legacy_tab_id, gsource = _regional_kitchen_workbook_settings(region)
     docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid and gid is not None else (f"https://docs.google.com/spreadsheets/d/{sid}/edit" if sid else "")
     st.caption(
@@ -2999,6 +3158,8 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
         _refresh_kuwait_workbook_from_sheets(silent=False)
     elif region == "UAE":
         _refresh_uae_workbook_from_sheets(silent=False)
+    elif region == "Bahrain":
+        _refresh_bahrain_workbook_from_sheets(silent=False)
 
     _legacy_hidden = _regional_preview_hidden_tab_names_lower()
     source_options = [
@@ -3204,7 +3365,7 @@ def _refresh_from_online_sheet():
                 c.execute("INSERT OR REPLACE INTO gsheet_tab_order (tab_index, tab_id) VALUES (?, ?)", (i, tid))
     _refresh_regional_kitchen_workbooks()
     base_msg = "Loaded: " + "; ".join(loaded) if loaded else "No data in sheet."
-    return True, base_msg + " (Kuwait/UAE preview sheets refreshed if configured.)"
+    return True, base_msg + " (Kuwait/UAE/Bahrain preview sheets refreshed if configured.)"
 
 
 # When a row has any of these (Account.Country__c, Account__r.Country__c, Country__c, Country, County),
@@ -4781,31 +4942,51 @@ def main():
         _show_refresh_btn = _is_developer() or user_role == "super_user"
         if st.session_state.get("preview_kitchen_region") == "KSA":
             st.session_state.pop("preview_kitchen_region", None)
+        _bh_preview = _user_can_see_bahrain_kitchen_preview(current_user or "")
+        if st.session_state.get("preview_kitchen_region") == "Bahrain" and not _bh_preview:
+            st.session_state.pop("preview_kitchen_region", None)
+        _cap_bh = " / **Bahrain** (preview testers)" if _bh_preview else ""
         st.caption(
-            "Choose **KSA** for the main master kitchen view, or **Kuwait** / **UAE** for regional facility workbooks."
+            f"Choose **KSA** for the main master kitchen view, or **Kuwait** / **UAE**{_cap_bh} for regional facility workbooks."
         )
         _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
+        _regional_opts = ["KSA", "Kuwait", "UAE"]
+        if _bh_preview:
+            _regional_opts.append("Bahrain")
+
+        def _km_region_select_index(cur: str) -> int:
+            if cur == "Kuwait" and "Kuwait" in _regional_opts:
+                return _regional_opts.index("Kuwait")
+            if cur == "UAE" and "UAE" in _regional_opts:
+                return _regional_opts.index("UAE")
+            if cur == "Bahrain" and "Bahrain" in _regional_opts:
+                return _regional_opts.index("Bahrain")
+            return 0
+
         if _compact_layout_enabled():
             _pick = st.selectbox(
                 "Region",
-                options=["KSA", "Kuwait", "UAE"],
-                index=(0 if _cur not in ("Kuwait", "UAE") else (1 if _cur == "Kuwait" else 2)),
+                options=_regional_opts,
+                index=_km_region_select_index(_cur),
                 key="km_preview_segmented",
             )
             if _pick == "KSA":
-                if _cur in ("Kuwait", "UAE"):
+                if _cur in ("Kuwait", "UAE", "Bahrain"):
                     st.session_state.pop("preview_kitchen_region", None)
                     _rerun()
-            elif _pick in ("Kuwait", "UAE") and _pick != _cur:
+            elif _pick in ("Kuwait", "UAE", "Bahrain") and _pick != _cur:
                 st.session_state["preview_kitchen_region"] = _pick
                 _rerun()
         else:
-            _c_ksa, _c_kw, _c_ae = st.columns([1, 1, 1])
+            if _bh_preview:
+                _c_ksa, _c_kw, _c_ae, _c_bh = st.columns([1, 1, 1, 1])
+            else:
+                _c_ksa, _c_kw, _c_ae = st.columns([1, 1, 1])
             with _c_ksa:
                 if st.button(
                     "KSA",
                     key="km_region_tab_ksa",
-                    type="primary" if _cur not in ("Kuwait", "UAE") else "secondary",
+                    type="primary" if _cur not in ("Kuwait", "UAE", "Bahrain") else "secondary",
                     use_container_width=True,
                 ):
                     st.session_state.pop("preview_kitchen_region", None)
@@ -4828,9 +5009,19 @@ def main():
                 ):
                     st.session_state["preview_kitchen_region"] = "UAE"
                     _rerun()
+            if _bh_preview:
+                with _c_bh:
+                    if st.button(
+                        "Bahrain",
+                        key="km_preview_tab_bahrain",
+                        type="primary" if _cur == "Bahrain" else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["preview_kitchen_region"] = "Bahrain"
+                        _rerun()
         _fin = (st.session_state.get("preview_kitchen_region") or "").strip()
-        _pkreg = _fin if _fin in ("Kuwait", "UAE") else ""
-        _regional_km_active = _pkreg in ("Kuwait", "UAE")
+        _pkreg = _fin if _fin in ("Kuwait", "UAE", "Bahrain") else ""
+        _regional_km_active = _pkreg in ("Kuwait", "UAE", "Bahrain")
         if _regional_km_active:
             _render_preview_regional_kitchen_master(
                 _pkreg,
@@ -5335,14 +5526,16 @@ def main():
                 rows_kitchens = _tabbed
             else:
                 rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
-        # Kuwait + UAE facility sheets: merge into dashboard for all users (Country filter).
+        # Kuwait + UAE facility sheets: merge into dashboard for all users. Bahrain facility sheets: preview allowlist only.
         # Refresh from Google Sheets when stale (15 min) to avoid fetching both workbooks every rerun.
         _kuwait_dashboard_rows: list[dict] = []
         _uae_dashboard_rows: list[dict] = []
+        _bahrain_dashboard_rows: list[dict] = []
         _creds_dash = _get_google_credentials_path()
         if _creds_dash:
             _sid_kw, _, _, _gkw = _regional_kitchen_workbook_settings("Kuwait")
             _sid_ae, _, _, _gae = _regional_kitchen_workbook_settings("UAE")
+            _sid_bh, _, _, _gbh = _regional_kitchen_workbook_settings("Bahrain")
             if _sid_kw and _source_refresh_is_stale(_gkw, 15):
                 _refresh_kuwait_workbook_from_sheets(silent=True)
             if _sid_kw:
@@ -5351,6 +5544,10 @@ def main():
                 _refresh_uae_workbook_from_sheets(silent=True)
             if _sid_ae:
                 _uae_dashboard_rows = _load_uae_dashboard_rows()
+            if _sid_bh and _user_can_see_bahrain_kitchen_preview(current_user or ""):
+                if _source_refresh_is_stale(_gbh, 15):
+                    _refresh_bahrain_workbook_from_sheets(silent=True)
+                _bahrain_dashboard_rows = _load_bahrain_dashboard_rows()
         today_str = date.today().isoformat()
         if snapshot_mod and rows_kitchens:
             if not snapshot_mod.snapshot_exists_for_date(today_str):
@@ -5360,8 +5557,8 @@ def main():
                     pass
         # Ensure Account Country for filtering (Kitchens / Master list may use County or other keys)
         rows_kitchens = _ensure_account_country_in_kitchens(rows_kitchens)
-        if _kuwait_dashboard_rows or _uae_dashboard_rows:
-            rows_kitchens = (rows_kitchens or []) + _kuwait_dashboard_rows + _uae_dashboard_rows
+        if _kuwait_dashboard_rows or _uae_dashboard_rows or _bahrain_dashboard_rows:
+            rows_kitchens = (rows_kitchens or []) + _kuwait_dashboard_rows + _uae_dashboard_rows + _bahrain_dashboard_rows
         # Enrich with go-live / is_live: facility CSV (data/sa_bh_facility_go_live.csv) + optional BigQuery
         bq_go_live = _fetch_bigquery_go_live()
         csv_go_live = _fetch_facility_go_live_csv()
@@ -5408,7 +5605,7 @@ def main():
             row_facs = {f for f in row_facs if f}
             tabs = None
             if sel_country and sel_country not in ("All", "(No country)") and not dashboard_from_superset:
-                tabs = _dashboard_kitchen_master_tab_names_for_country(sel_country)
+                tabs = _dashboard_kitchen_master_tab_names_for_country(sel_country, current_user=current_user)
             if tabs is not None:
                 opts = sorted(set(tabs) | row_facs, key=str.casefold)
             else:

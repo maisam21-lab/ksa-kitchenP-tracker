@@ -80,10 +80,17 @@ UAE_KITCHEN_FACILITY_GIDS = [
     1503331412,
     515258982,
 ]
+# Bahrain facility tabs in the main KSA workbook (same DEFAULT_SHEET_ID)
+BAHRAIN_KITCHEN_FACILITY_GIDS = [
+    2128153042,
+    782567541,
+]
 TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
 TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
+TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
 GSOURCE_KITCHEN_KW = "gsheet_kw"
 GSOURCE_KITCHEN_AE = "gsheet_ae"
+GSOURCE_KITCHEN_BH = "gsheet_bh"
 MAIN_TRACKER_TAB_ID = "Tracker"
 KITCHEN_TRACKER_SHEET_ALIASES = ["Kitchen Tracker", "Smart Tracker", "Tracker", "KitchenTracker", "KSA Kitchen Tracker"]
 SHEET_TAB_IDS = [
@@ -289,6 +296,11 @@ def main() -> int:
                 os.environ.get("UAE_KITCHEN_SHEET_ID", "").strip() or UAE_KITCHEN_SHEET_ID,
                 _parse_gids_env("UAE_KITCHEN_FACILITY_GIDS", UAE_KITCHEN_FACILITY_GIDS),
                 GSOURCE_KITCHEN_AE,
+            ),
+            (
+                os.environ.get("BAHRAIN_KITCHEN_SHEET_ID", "").strip() or DEFAULT_SHEET_ID,
+                _parse_gids_env("BAHRAIN_KITCHEN_FACILITY_GIDS", BAHRAIN_KITCHEN_FACILITY_GIDS),
+                GSOURCE_KITCHEN_BH,
             ),
         ]
         for sid, gids, gsrc in regional_multi:
