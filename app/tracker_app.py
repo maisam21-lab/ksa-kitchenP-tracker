@@ -98,6 +98,7 @@ SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
 # Preview-only regional kitchen master workbooks (same service account as KSA; share Viewer with SA).
 KUWAIT_KITCHEN_SHEET_ID = "1N_Ar-KoFWGTHjbz-p_r1y8VeWGLNI4ZQUAbKZpAI99o"
 KUWAIT_KITCHEN_WORKSHEET_GID = 1841714979
+# New facility tab missing? Add its worksheet gid via secrets/env KUWAIT_KITCHEN_EXTRA_FACILITY_GIDS (comma list; gid is in the sheet URL ?gid=...).
 KUWAIT_KITCHEN_FACILITY_GIDS = [
     1238868875,
     1841714979,
@@ -2886,7 +2887,20 @@ def _regional_kitchen_target_gids(region: str) -> list[int] | None:
             or os.environ.get("KUWAIT_KITCHEN_FACILITY_GIDS", "")
         )
         parsed = _parse_gid_list(raw)
-        return parsed if parsed else list(KUWAIT_KITCHEN_FACILITY_GIDS)
+        base = list(parsed) if parsed else list(KUWAIT_KITCHEN_FACILITY_GIDS)
+        extra_raw = (
+            secrets.get("KUWAIT_KITCHEN_EXTRA_FACILITY_GIDS")
+            or secrets.get("kuwait_kitchen_extra_facility_gids")
+            or os.environ.get("KUWAIT_KITCHEN_EXTRA_FACILITY_GIDS", "")
+        )
+        extra = _parse_gid_list(extra_raw)
+        seen: set[int] = set()
+        merged: list[int] = []
+        for g in base + extra:
+            if g not in seen:
+                seen.add(g)
+                merged.append(g)
+        return merged
     if region == "UAE":
         raw = (
             secrets.get("UAE_KITCHEN_FACILITY_GIDS")
@@ -3152,14 +3166,18 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid and gid is not None else (f"https://docs.google.com/spreadsheets/d/{sid}/edit" if sid else "")
     st.caption(
         f"**{region} kitchen master** — [Open workbook]({docs}). "
-        "Data is refreshed from Google Sheets when you open this page."
+        "Auto-refresh every 15 min."
     )
-    if region == "Kuwait":
-        _refresh_kuwait_workbook_from_sheets(silent=False)
-    elif region == "UAE":
-        _refresh_uae_workbook_from_sheets(silent=False)
-    elif region == "Bahrain":
-        _refresh_bahrain_workbook_from_sheets(silent=False)
+    # Avoid blocking every rerun: refresh only if stale/missing, or when user explicitly clicks refresh.
+    _has_any_loaded_tabs = bool(list_tab_ids_for_source(gsource))
+    _needs_refresh = _source_refresh_is_stale(gsource, 15) or not _has_any_loaded_tabs
+    if _needs_refresh:
+        if region == "Kuwait":
+            _refresh_kuwait_workbook_from_sheets(silent=False)
+        elif region == "UAE":
+            _refresh_uae_workbook_from_sheets(silent=False)
+        elif region == "Bahrain":
+            _refresh_bahrain_workbook_from_sheets(silent=False)
 
     _legacy_hidden = _regional_preview_hidden_tab_names_lower()
     source_options = [
@@ -3226,6 +3244,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
             hide_account_country=True,
             rows_override=_single_rows,
             drop_facility_name_column=(region == "Kuwait"),
+            regional_display=region if region in ("Kuwait", "UAE") else None,
         )
         return
     combined_rows = []
@@ -3248,6 +3267,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
         hide_account_country=True,
         rows_override=combined_rows,
         drop_facility_name_column=(region == "Kuwait"),
+        regional_display=region if region in ("Kuwait", "UAE") else None,
     )
 
 
@@ -3708,6 +3728,101 @@ def _status_get_row_style_js(status_col_name: str):
     """ % col_key)
 
 
+def _kitchen_master_context_suffix_for_brand() -> str:
+    """Plain-text suffix for browser title + header (Kitchen Master facility selection)."""
+    try:
+        section = (st.session_state.get("section_radio") or "").strip()
+    except Exception:
+        return ""
+    if section != "Kitchen Master Data":
+        return ""
+    reg = (st.session_state.get("preview_kitchen_region") or "").strip()
+    if reg in ("Kuwait", "UAE", "Bahrain"):
+        gmap = {"Kuwait": GSOURCE_KITCHEN_KW, "UAE": GSOURCE_KITCHEN_AE, "Bahrain": GSOURCE_KITCHEN_BH}
+        gsrc = gmap[reg]
+        sel = st.session_state.get(f"regional_sheets_selection_{gsrc}")
+        if isinstance(sel, list) and sel:
+            labs = [str(s).strip() for s in sel if str(s).strip()]
+            if len(labs) == 1:
+                return f" · {labs[0]}"
+            if len(labs) == 2:
+                return f" · {labs[0]} · {labs[1]}"
+            if len(labs) > 2:
+                return f" · {len(labs)} facilities"
+        return f" · {reg}"
+    sel = st.session_state.get("master_sheets_selection")
+    if isinstance(sel, list) and sel:
+        labs = [str(s).strip() for s in sel if str(s).strip()]
+        if len(labs) == 1:
+            return f" · {labs[0]}"
+        if len(labs) == 2:
+            return f" · {labs[0]} · {labs[1]}"
+        if len(labs) > 2:
+            return f" · {len(labs)} facilities"
+    return ""
+
+
+def _page_title_with_kitchen_context() -> str:
+    base = "KSA Kitchens Tracker"
+    suf = _kitchen_master_context_suffix_for_brand()
+    t = base + suf
+    return t if len(t) <= 100 else (t[:97] + "...")
+
+
+def _kuwait_regional_hidden_column(name: str) -> bool:
+    n = (name or "").strip().lower()
+    alnum = re.sub(r"[^a-z0-9]", "", n)
+    if n == "_col9" or alnum == "col9":
+        return True
+    if alnum in ("salescomments", "amcsmcomments"):
+        return True
+    if "comment" in n and "sales" in n:
+        return True
+    if "comment" in n and ("am" in n or "csm" in n):
+        return True
+    return False
+
+
+def _uae_regional_hidden_column(name: str, series) -> bool:
+    n = (name or "").strip()
+    if re.search(r"comment", n, re.I):
+        return True
+    if not re.match(r"^_col\d+$", n, re.I):
+        return False
+    try:
+        ser = series.dropna().astype(str).str.strip()
+    except Exception:
+        return False
+    ser = ser[ser != ""]
+    if len(ser) == 0:
+        return True
+    sample = ser.head(min(120, len(ser)))
+
+    def _numlike(x: str) -> bool:
+        t = x.replace(",", "").replace("%", "").strip()
+        return bool(re.match(r"^-?\d+\.?\d*$", t))
+
+    num_ct = sum(1 for x in sample if _numlike(str(x)))
+    return (num_ct / len(sample)) < 0.45
+
+
+def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[dict]) -> tuple[list[str], list[dict]]:
+    """Drop comment / junk columns for Kuwait/UAE regional Kitchen Master views."""
+    if region not in ("Kuwait", "UAE") or not rows:
+        return cols, rows
+    tdf = pd.DataFrame(rows)
+    drop: set[str] = set()
+    for c in list(tdf.columns):
+        cn = str(c)
+        if region == "Kuwait" and _kuwait_regional_hidden_column(cn):
+            drop.add(c)
+        elif region == "UAE" and c in tdf.columns and _uae_regional_hidden_column(cn, tdf[c]):
+            drop.add(c)
+    cols2 = [c for c in cols if c not in drop]
+    rows2 = [{k: v for k, v in (r or {}).items() if k not in drop} for r in rows]
+    return cols2, rows2
+
+
 def _render_generic_tab(
     tab_id,
     key_suffix="",
@@ -3717,8 +3832,9 @@ def _render_generic_tab(
     hide_account_country=False,
     rows_override=None,
     drop_facility_name_column=False,
+    regional_display: str | None = None,
 ):
-    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column. drop_facility_name_column: remove Facility Name column (Kuwait tab — avoids redundant filter UI)."""
+    """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column. drop_facility_name_column: remove Facility Name column (Kuwait tab — avoids redundant filter UI). regional_display: Kuwait/UAE — hide comment columns for regional inventory view."""
     rows = rows_override if rows_override is not None else (list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id))
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if rows_override is None and not rows and tab_id == "Kitchens":
@@ -3755,6 +3871,8 @@ def _render_generic_tab(
         rows_shown = [{k: v for k, v in (r or {}).items() if not _is_facility_name_aggrid_column(k)} for r in rows]
     else:
         rows_shown = rows
+    if regional_display in ("Kuwait", "UAE"):
+        cols, rows_shown = _filter_regional_inventory_columns(regional_display, cols, rows_shown)
     if _use_compact_tables():
         _flt = st.container()
         with _flt:
@@ -3872,6 +3990,8 @@ def _render_generic_tab(
         go["defaultColDef"]["minWidth"] = 140
         go["defaultColDef"]["suppressHeaderMenuButton"] = False
         go["defaultColDef"]["suppressHeaderFilterButton"] = False
+        go["defaultColDef"]["wrapHeaderText"] = True
+        go["defaultColDef"]["autoHeaderHeight"] = True
         if "floatingFiltersHeight" in go:
             del go["floatingFiltersHeight"]
         _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
@@ -3938,7 +4058,7 @@ def _render_generic_tab(
 
 
 def main():
-    st.set_page_config(page_title="KSA Kitchens Tracker", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title=_page_title_with_kitchen_context(), layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
     if _signed_out_gate_active():
@@ -4296,8 +4416,13 @@ def main():
         font-weight: 700 !important;
         margin: 0 !important;
         letter-spacing: -0.025em !important;
-        line-height: 1 !important;
-        display: inline !important;
+        line-height: 1.2 !important;
+        display: inline-block !important;
+        max-width: min(58vw, 720px) !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        vertical-align: middle !important;
         background: transparent !important;
         padding: 0 !important;
         border-radius: 0 !important;
@@ -4649,10 +4774,11 @@ def main():
                 else:
                     st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
             with c_main:
+                _hdr_full = "KSA Kitchens Tracker" + _kitchen_master_context_suffix_for_brand()
                 st.markdown(
                     f'<div class="header-brand-status">'
                     f'<div class="header-title-block">'
-                    f'<h1 class="header-brand-title" style="font-size:1.35rem;margin-bottom:2px;">KSA Kitchens Tracker</h1>'
+                    f'<h1 class="header-brand-title" style="font-size:1.35rem;margin-bottom:2px;" title="{html.escape(_hdr_full, quote=True)}">{html.escape(_hdr_full)}</h1>'
                     f'<div class="header-status-row">'
                     f'<span class="header-status-pill {status_class}">'
                     f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
@@ -4680,11 +4806,12 @@ def main():
                     else:
                         st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
                 with l2:
+                    _hdr_full = "KSA Kitchens Tracker" + _kitchen_master_context_suffix_for_brand()
                     st.markdown(
                         f'<div class="header-brand-status">'
                         f'<div class="header-divider"></div>'
                         f'<div class="header-title-block">'
-                        f'<h1 class="header-brand-title">KSA Kitchens Tracker</h1>'
+                        f'<h1 class="header-brand-title" title="{html.escape(_hdr_full, quote=True)}">{html.escape(_hdr_full)}</h1>'
                         f'<div class="header-status-row">'
                         f'<span class="header-status-pill {status_class}">'
                         f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
@@ -5255,6 +5382,8 @@ def main():
                         go["defaultColDef"]["minWidth"] = 140
                         go["defaultColDef"]["suppressHeaderMenuButton"] = False
                         go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                        go["defaultColDef"]["wrapHeaderText"] = True
+                        go["defaultColDef"]["autoHeaderHeight"] = True
                         if "floatingFiltersHeight" in go:
                             del go["floatingFiltersHeight"]
                         _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
@@ -5380,6 +5509,8 @@ def main():
                     go["defaultColDef"]["minWidth"] = 140
                     go["defaultColDef"]["suppressHeaderMenuButton"] = False
                     go["defaultColDef"]["suppressHeaderFilterButton"] = False
+                    go["defaultColDef"]["wrapHeaderText"] = True
+                    go["defaultColDef"]["autoHeaderHeight"] = True
                     if "floatingFiltersHeight" in go:
                         del go["floatingFiltersHeight"]
                     _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
@@ -5688,12 +5819,6 @@ def main():
             rows_kitchens = [r for r in rows_kitchens if r.get("Is Live") is True]
         elif selected_live == "Not live":
             rows_kitchens = [r for r in rows_kitchens if r.get("Is Live") is False]
-        cap = f"Showing data for **{selected_country or 'All'}** · **{selected_facility or 'All'}** facilities ({len(rows_kitchens):,} kitchens)."
-        if has_go_live:
-            n_live = sum(1 for r in rows_kitchens if r.get("Is Live") is True)
-            n_not = sum(1 for r in rows_kitchens if r.get("Is Live") is False)
-            cap += f" **{n_live}** live, **{n_not}** not live (go-live from facility list / BigQuery)."
-        st.caption(cap)
         st.divider()
         def _s(r):
             v = None

@@ -286,10 +286,21 @@ def main() -> int:
                     continue
             return out if out else list(default_list)
 
+        def _kuwait_gids_merged() -> list[int]:
+            base = _parse_gids_env("KUWAIT_KITCHEN_FACILITY_GIDS", KUWAIT_KITCHEN_FACILITY_GIDS)
+            extra = _parse_gids_env("KUWAIT_KITCHEN_EXTRA_FACILITY_GIDS", [])
+            seen: set[int] = set()
+            out: list[int] = []
+            for g in base + extra:
+                if g not in seen:
+                    seen.add(g)
+                    out.append(g)
+            return out
+
         regional_multi = [
             (
                 os.environ.get("KUWAIT_KITCHEN_SHEET_ID", "").strip() or KUWAIT_KITCHEN_SHEET_ID,
-                _parse_gids_env("KUWAIT_KITCHEN_FACILITY_GIDS", KUWAIT_KITCHEN_FACILITY_GIDS),
+                _kuwait_gids_merged(),
                 GSOURCE_KITCHEN_KW,
             ),
             (
