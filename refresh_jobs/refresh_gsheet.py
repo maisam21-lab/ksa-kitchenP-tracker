@@ -175,17 +175,23 @@ def fetch_workbook_tabs_by_gids(sheet_id: str, gids: list[int], credentials_path
         ws = spreadsheet.get_worksheet_by_id(int(gid))
         if ws is None:
             continue
+        title = str(ws.title).strip() or f"gid_{gid}"
         rows = ws.get_all_values()
         if not rows:
+            out[title] = []
             continue
         headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
         data = []
         for row in rows[1:]:
             r = list(row) + [""] * (len(headers) - len(row))
             data.append(dict(zip(headers, r[: len(headers)])))
-        title = str(ws.title).strip() or f"gid_{gid}"
         out[title] = data
     return out
+
+
+def _regional_rows_for_sqlite(rows: list) -> list:
+    """Store at least one row so empty worksheets still get a tab id in generic_tab_data."""
+    return rows if rows else [{}]
 
 
 def fetch_worksheet_by_gid(sheet_id: str, worksheet_gid: int, credentials_path: str) -> list[dict]:
@@ -287,8 +293,33 @@ def main() -> int:
                     continue
             return out if out else list(default_list)
 
+        def _env_kw_facility_gids_only() -> list[int]:
+            raw = os.environ.get("KUWAIT_KITCHEN_FACILITY_GIDS", "").strip()
+            if not raw:
+                return []
+            out = []
+            for token in raw.replace(";", ",").split(","):
+                token = token.strip()
+                if not token:
+                    continue
+                try:
+                    out.append(int(token))
+                except ValueError:
+                    continue
+            return out
+
         def _kuwait_gids_merged() -> list[int]:
-            base = _parse_gids_env("KUWAIT_KITCHEN_FACILITY_GIDS", KUWAIT_KITCHEN_FACILITY_GIDS)
+            code = list(KUWAIT_KITCHEN_FACILITY_GIDS)
+            env_kw = _env_kw_facility_gids_only()
+            if not env_kw:
+                base = code
+            else:
+                seen_kw: set[int] = set()
+                base = []
+                for g in code + env_kw:
+                    if g not in seen_kw:
+                        seen_kw.add(g)
+                        base.append(g)
             extra = _parse_gids_env("KUWAIT_KITCHEN_EXTRA_FACILITY_GIDS", [])
             seen: set[int] = set()
             out: list[int] = []
@@ -321,10 +352,9 @@ def main() -> int:
                 reg_data = fetch_workbook_tabs_by_gids(sid, gids, creds_path)
                 nrows = 0
                 for ws_title, reg_rows in reg_data.items():
-                    if not reg_rows:
-                        continue
-                    save_generic_tab(c, ws_title, reg_rows, source=gsrc)
-                    nrows += len(reg_rows)
+                    to_save = _regional_rows_for_sqlite(reg_rows or [])
+                    save_generic_tab(c, ws_title, to_save, source=gsrc)
+                    nrows += len(reg_rows or [])
                 c.execute(
                     "INSERT OR REPLACE INTO refresh_metadata (source, refreshed_at) VALUES (?, ?)",
                     (gsrc, now),

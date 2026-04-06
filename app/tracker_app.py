@@ -2185,6 +2185,11 @@ def save_generic_tab(tab_id, rows, source: str):
             )
 
 
+def _regional_sheet_rows_for_sqlite(ws_rows: list[dict]) -> list[dict]:
+    """Persist at least one row so empty worksheets still appear in facility/tab pickers."""
+    return ws_rows if ws_rows else [{}]
+
+
 def _get_google_credentials_path():
     """Resolve credentials for Google Sheets API.
 
@@ -2889,18 +2894,28 @@ def _regional_kitchen_target_gids(region: str) -> list[int] | None:
             or os.environ.get("KUWAIT_KITCHEN_FACILITY_GIDS", "")
         )
         parsed = _parse_gid_list(raw)
-        base = list(parsed) if parsed else list(KUWAIT_KITCHEN_FACILITY_GIDS)
+        # Union with in-code defaults so new facilities ship without editing Streamlit secrets.
+        code_gids = list(KUWAIT_KITCHEN_FACILITY_GIDS)
+        if not parsed:
+            base = code_gids
+        else:
+            seen: set[int] = set()
+            base = []
+            for g in code_gids + parsed:
+                if g not in seen:
+                    seen.add(g)
+                    base.append(g)
         extra_raw = (
             secrets.get("KUWAIT_KITCHEN_EXTRA_FACILITY_GIDS")
             or secrets.get("kuwait_kitchen_extra_facility_gids")
             or os.environ.get("KUWAIT_KITCHEN_EXTRA_FACILITY_GIDS", "")
         )
         extra = _parse_gid_list(extra_raw)
-        seen: set[int] = set()
+        merge_seen: set[int] = set()
         merged: list[int] = []
         for g in base + extra:
-            if g not in seen:
-                seen.add(g)
+            if g not in merge_seen:
+                merge_seen.add(g)
                 merged.append(g)
         return merged
     if region == "UAE":
@@ -2950,15 +2965,17 @@ def _fetch_regional_workbook_data(region: str, sheet_id: str, credentials_path: 
         ws = spreadsheet.get_worksheet_by_id(int(gid))
         if ws is None:
             continue
+        title = str(ws.title).strip() or f"gid_{gid}"
         rows = ws.get_all_values()
         if not rows:
+            out[title] = []
             continue
         headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
         ws_data = []
         for row in rows[1:]:
             r = list(row) + [""] * (len(headers) - len(row))
             ws_data.append(dict(zip(headers, r[: len(headers)])))
-        out[str(ws.title).strip() or f"gid_{gid}"] = ws_data
+        out[title] = ws_data
     # Stale GID lists (e.g. after workbook rebuild) yield no tabs — load every worksheet instead.
     if not out:
         return _fetch_online_sheet(sheet_id, credentials_path) or {}
@@ -3007,19 +3024,21 @@ def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
         return False
     try:
         data = _fetch_regional_workbook_data("Kuwait", sid, creds_path) or {}
-        if not any(ws_rows for ws_rows in data.values()):
+        if not data:
             if not silent:
                 st.warning(
-                    "No worksheet rows loaded for Kuwait. Share the workbook with the service account (Viewer) "
+                    "No worksheets loaded for Kuwait. Share the workbook with the service account (Viewer) "
                     "and check KUWAIT_KITCHEN_SHEET_ID / facility GIDs in secrets."
                 )
             return False
         with get_conn() as c:
             c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
         for ws_title, ws_rows in data.items():
-            if not ws_rows:
-                continue
-            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+            save_generic_tab(
+                str(ws_title).strip() or ws_title,
+                _regional_sheet_rows_for_sqlite(ws_rows or []),
+                source=gsource,
+            )
         set_last_refresh(gsource)
         return True
     except Exception as e:
@@ -3053,10 +3072,10 @@ def _refresh_uae_workbook_from_sheets(*, silent: bool = True) -> bool:
         return False
     try:
         data = _fetch_regional_workbook_data("UAE", sid, creds_path) or {}
-        if not any(ws_rows for ws_rows in data.values()):
+        if not data:
             if not silent:
                 st.warning(
-                    "No worksheet rows loaded for UAE. Share the workbook with the service account (Viewer) "
+                    "No worksheets loaded for UAE. Share the workbook with the service account (Viewer) "
                     "and check UAE_KITCHEN_SHEET_ID / facility GIDs in secrets. "
                     "If the workbook was recreated, GIDs may be outdated — the app will load all tabs when none match."
                 )
@@ -3064,9 +3083,11 @@ def _refresh_uae_workbook_from_sheets(*, silent: bool = True) -> bool:
         with get_conn() as c:
             c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
         for ws_title, ws_rows in data.items():
-            if not ws_rows:
-                continue
-            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+            save_generic_tab(
+                str(ws_title).strip() or ws_title,
+                _regional_sheet_rows_for_sqlite(ws_rows or []),
+                source=gsource,
+            )
         set_last_refresh(gsource)
         return True
     except Exception as e:
@@ -3100,19 +3121,21 @@ def _refresh_bahrain_workbook_from_sheets(*, silent: bool = True) -> bool:
         return False
     try:
         data = _fetch_regional_workbook_data("Bahrain", sid, creds_path) or {}
-        if not any(ws_rows for ws_rows in data.values()):
+        if not data:
             if not silent:
                 st.warning(
-                    "No worksheet rows loaded for Bahrain. Share the workbook with the service account (Viewer) "
+                    "No worksheets loaded for Bahrain. Share the workbook with the service account (Viewer) "
                     "and check BAHRAIN_KITCHEN_SHEET_ID / BAHRAIN_KITCHEN_FACILITY_GIDS in secrets."
                 )
             return False
         with get_conn() as c:
             c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
         for ws_title, ws_rows in data.items():
-            if not ws_rows:
-                continue
-            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+            save_generic_tab(
+                str(ws_title).strip() or ws_title,
+                _regional_sheet_rows_for_sqlite(ws_rows or []),
+                source=gsource,
+            )
         set_last_refresh(gsource)
         return True
     except Exception as e:
@@ -3149,14 +3172,16 @@ def _refresh_regional_kitchen_workbooks() -> None:
             continue
         try:
             data = _fetch_regional_workbook_data(region, sid, creds_path) or {}
-            if not any(ws_rows for ws_rows in data.values()):
+            if not data:
                 continue
             with get_conn() as c:
                 c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
             for ws_title, ws_rows in data.items():
-                if not ws_rows:
-                    continue
-                save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+                save_generic_tab(
+                    str(ws_title).strip() or ws_title,
+                    _regional_sheet_rows_for_sqlite(ws_rows or []),
+                    source=gsource,
+                )
             set_last_refresh(gsource)
         except Exception:
             continue
@@ -3199,14 +3224,21 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
                 if creds:
                     try:
                         data = _fetch_regional_workbook_data(region, sid, creds) or {}
+                        if not data:
+                            st.warning(
+                                f"No worksheets loaded for {region}. Check sheet ID, facility GIDs, and service account access."
+                            )
+                            return
                         with get_conn() as c:
                             c.execute("DELETE FROM generic_tab_data WHERE source = ?", (gsource,))
                         _loaded_rows = 0
                         _loaded_tabs = 0
                         for ws_title, ws_rows in data.items():
-                            if not ws_rows:
-                                continue
-                            save_generic_tab(str(ws_title).strip() or ws_title, ws_rows or [], source=gsource)
+                            save_generic_tab(
+                                str(ws_title).strip() or ws_title,
+                                _regional_sheet_rows_for_sqlite(ws_rows or []),
+                                source=gsource,
+                            )
                             _loaded_tabs += 1
                             _loaded_rows += len(ws_rows or [])
                         set_last_refresh(gsource)
