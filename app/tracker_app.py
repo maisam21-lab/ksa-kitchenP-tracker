@@ -3729,47 +3729,6 @@ def _status_get_row_style_js(status_col_name: str):
     """ % col_key)
 
 
-def _kitchen_master_context_suffix_for_brand() -> str:
-    """Plain-text suffix for browser title + header (Kitchen Master facility selection)."""
-    try:
-        section = (st.session_state.get("section_radio") or "").strip()
-    except Exception:
-        return ""
-    if section != "Kitchen Master Data":
-        return ""
-    reg = (st.session_state.get("preview_kitchen_region") or "").strip()
-    if reg in ("Kuwait", "UAE", "Bahrain"):
-        gmap = {"Kuwait": GSOURCE_KITCHEN_KW, "UAE": GSOURCE_KITCHEN_AE, "Bahrain": GSOURCE_KITCHEN_BH}
-        gsrc = gmap[reg]
-        sel = st.session_state.get(f"regional_sheets_selection_{gsrc}")
-        if isinstance(sel, list) and sel:
-            labs = [str(s).strip() for s in sel if str(s).strip()]
-            if len(labs) == 1:
-                return f" · {labs[0]}"
-            if len(labs) == 2:
-                return f" · {labs[0]} · {labs[1]}"
-            if len(labs) > 2:
-                return f" · {len(labs)} facilities"
-        return f" · {reg}"
-    sel = st.session_state.get("master_sheets_selection")
-    if isinstance(sel, list) and sel:
-        labs = [str(s).strip() for s in sel if str(s).strip()]
-        if len(labs) == 1:
-            return f" · {labs[0]}"
-        if len(labs) == 2:
-            return f" · {labs[0]} · {labs[1]}"
-        if len(labs) > 2:
-            return f" · {len(labs)} facilities"
-    return ""
-
-
-def _page_title_with_kitchen_context() -> str:
-    base = APP_DISPLAY_TITLE
-    suf = _kitchen_master_context_suffix_for_brand()
-    t = base + suf
-    return t if len(t) <= 100 else (t[:97] + "...")
-
-
 def _kuwait_regional_hidden_column(name: str) -> bool:
     n = (name or "").strip().lower()
     alnum = re.sub(r"[^a-z0-9]", "", n)
@@ -4060,7 +4019,7 @@ def _render_generic_tab(
 
 
 def main():
-    st.set_page_config(page_title=_page_title_with_kitchen_context(), layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title=APP_DISPLAY_TITLE, layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
     if _signed_out_gate_active():
@@ -4788,7 +4747,7 @@ def main():
                 else:
                     st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
             with c_main:
-                _hdr_full = APP_DISPLAY_TITLE + _kitchen_master_context_suffix_for_brand()
+                _hdr_full = APP_DISPLAY_TITLE
                 st.markdown(
                     f'<div class="header-brand-status">'
                     f'<div class="header-title-block">'
@@ -4820,7 +4779,7 @@ def main():
                     else:
                         st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
                 with l2:
-                    _hdr_full = APP_DISPLAY_TITLE + _kitchen_master_context_suffix_for_brand()
+                    _hdr_full = APP_DISPLAY_TITLE
                     st.markdown(
                         f'<div class="header-brand-status">'
                         f'<div class="header-divider"></div>'
