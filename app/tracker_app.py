@@ -1,5 +1,5 @@
 """
-KSA Kitchens Tracker — web app. Run: streamlit run app/tracker_app.py
+Kitchens Tracker — web app. Run: streamlit run app/tracker_app.py
 All sheet tabs in tool form: view, filter, add/edit, export. Single source of truth.
 Accepts CSV or Excel (.xlsx) uploads. Can refresh directly from the online Google Sheet.
 """
@@ -180,6 +180,7 @@ APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 DB_PATH = APP_DIR / "data" / "tracker.db"
 STATIC_DIR = APP_DIR / "static"
+APP_DISPLAY_TITLE = "Kitchens Tracker"
 
 
 def _logo_path():
@@ -3763,7 +3764,7 @@ def _kitchen_master_context_suffix_for_brand() -> str:
 
 
 def _page_title_with_kitchen_context() -> str:
-    base = "KSA Kitchens Tracker"
+    base = APP_DISPLAY_TITLE
     suf = _kitchen_master_context_suffix_for_brand()
     t = base + suf
     return t if len(t) <= 100 else (t[:97] + "...")
@@ -4243,7 +4244,7 @@ def main():
         .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"] { height: auto !important; min-height: 44px !important; }
         .header-top-bar + div [data-testid="stVerticalBlock"] { height: auto !important; }
         .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child { min-width: 0 !important; }
-        .header-brand-title { font-size: 0.9375rem !important; }
+        .header-brand-title { font-size: 1.125rem !important; }
         .header-status-pill { font-size: 0.75rem !important; }
         .header-divider { margin: 0 8px !important; }
     }
@@ -4412,7 +4413,7 @@ def main():
     .header-status-row { display: flex !important; align-items: center !important; gap: 12px !important; flex-wrap: nowrap !important; margin: 0 !important; }
     .header-brand-title {
         color: #0f172a !important;
-        font-size: 1.375rem !important;
+        font-size: 1.75rem !important;
         font-weight: 700 !important;
         margin: 0 !important;
         letter-spacing: -0.025em !important;
@@ -4774,11 +4775,11 @@ def main():
                 else:
                     st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
             with c_main:
-                _hdr_full = "KSA Kitchens Tracker" + _kitchen_master_context_suffix_for_brand()
+                _hdr_full = APP_DISPLAY_TITLE + _kitchen_master_context_suffix_for_brand()
                 st.markdown(
                     f'<div class="header-brand-status">'
                     f'<div class="header-title-block">'
-                    f'<h1 class="header-brand-title" style="font-size:1.35rem;margin-bottom:2px;" title="{html.escape(_hdr_full, quote=True)}">{html.escape(_hdr_full)}</h1>'
+                    f'<h1 class="header-brand-title" style="font-size:1.6rem;margin-bottom:2px;" title="{html.escape(_hdr_full, quote=True)}">{html.escape(_hdr_full)}</h1>'
                     f'<div class="header-status-row">'
                     f'<span class="header-status-pill {status_class}">'
                     f'<span class="header-status-dot"></span> {status_label.replace(" ", " ")}</span>'
@@ -4806,7 +4807,7 @@ def main():
                     else:
                         st.markdown('<div class="header-logo-box">K</div>', unsafe_allow_html=True)
                 with l2:
-                    _hdr_full = "KSA Kitchens Tracker" + _kitchen_master_context_suffix_for_brand()
+                    _hdr_full = APP_DISPLAY_TITLE + _kitchen_master_context_suffix_for_brand()
                     st.markdown(
                         f'<div class="header-brand-status">'
                         f'<div class="header-divider"></div>'
