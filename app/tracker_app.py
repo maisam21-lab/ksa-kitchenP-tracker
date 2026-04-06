@@ -3993,6 +3993,7 @@ def _render_generic_tab(
         go["defaultColDef"]["suppressHeaderFilterButton"] = False
         go["defaultColDef"]["wrapHeaderText"] = True
         go["defaultColDef"]["autoHeaderHeight"] = True
+        go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
         if "floatingFiltersHeight" in go:
             del go["floatingFiltersHeight"]
         _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
@@ -4180,6 +4181,18 @@ def main():
     .ag-toolbar [title*="Download"],
     .ag-toolbar button[title*="CSV"],
     [class*="ag-"] [title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+    /* Left-align all sheet grids (KSA / Kuwait / UAE / Bahrain — same as Excel-style sheets) */
+    .ag-root .ag-cell,
+    .ag-root .ag-group-value,
+    .ag-root .ag-cell-wrapper { text-align: left !important; justify-content: flex-start !important; }
+    .ag-root .ag-right-aligned-cell { text-align: left !important; }
+    .ag-root .ag-header-cell,
+    .ag-root .ag-header-cell-label,
+    .ag-root .ag-header-cell-text { text-align: left !important; justify-content: flex-start !important; }
+    .ag-root .ag-floating-filter input,
+    .ag-root .ag-floating-filter-body input { text-align: left !important; }
+    [data-testid="stDataFrame"] [role="gridcell"],
+    [data-testid="stDataFrame"] [role="columnheader"] { text-align: left !important; }
     /* Mobile Safari fallback for fullscreen button on dataframe toolbar:
        if native fullscreen fails, JS toggles this class on the table wrapper. */
     .mobile-fullscreen-fallback {
@@ -5385,6 +5398,7 @@ def main():
                         go["defaultColDef"]["suppressHeaderFilterButton"] = False
                         go["defaultColDef"]["wrapHeaderText"] = True
                         go["defaultColDef"]["autoHeaderHeight"] = True
+                        go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
                         if "floatingFiltersHeight" in go:
                             del go["floatingFiltersHeight"]
                         _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
@@ -5512,6 +5526,7 @@ def main():
                     go["defaultColDef"]["suppressHeaderFilterButton"] = False
                     go["defaultColDef"]["wrapHeaderText"] = True
                     go["defaultColDef"]["autoHeaderHeight"] = True
+                    go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
                     if "floatingFiltersHeight" in go:
                         del go["floatingFiltersHeight"]
                     _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
