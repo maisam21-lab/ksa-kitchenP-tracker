@@ -3902,7 +3902,8 @@ def _filter_empty_records(rows: list) -> list:
     return [r for r in rows if isinstance(r, dict) and not _is_empty_record(r)]
 
 
-# Hide rows with no Type, no Floor price, no List price, and a non-standard normalized status (sheet junk).
+# Hide incomplete kitchen rows: no Type + no Floor + no List with odd or missing status; and sparse
+# "No status" rows (e.g. dark-red UI) with almost no filled cells or empty Sold rate / occupancy % columns.
 _STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
     {"Vacant", "Churning", "Occupied", "Sold", "No status"}
 )
@@ -3964,7 +3965,7 @@ def _is_odd_kitchen_status_normalized(norm: str) -> bool:
 
 
 def _should_hide_junk_kitchen_row(r: dict) -> bool:
-    """True when Type + Floor + List are all missing and status is not Vacant/Churning/Occupied/Sold/No status."""
+    """True when Type + Floor + List are all missing and status is odd OR 'No status' (incomplete junk)."""
     if not isinstance(r, dict):
         return False
     tk = _find_kitchen_column_key(r, _KITCHEN_TYPE_COL_KEYS)
@@ -3977,14 +3978,75 @@ def _should_hide_junk_kitchen_row(r: dict) -> bool:
         and _is_missing_price_for_junk_filter(r.get(fk))
         and _is_missing_price_for_junk_filter(r.get(lk))
     ):
-        return _is_odd_kitchen_status_normalized(_status_normalized_from_row(r))
+        norm = _status_normalized_from_row(r)
+        return _is_odd_kitchen_status_normalized(norm) or norm == "No status"
     return False
+
+
+def _meaningful_kitchen_cell_count(r: dict) -> int:
+    """Non-empty values excluding internal / sheet label columns."""
+    if not isinstance(r, dict):
+        return 0
+    skip = {"_has_opportunity", "Sheet"}
+    n = 0
+    for k, v in r.items():
+        if k in skip:
+            continue
+        if not _cell_is_empty_for_empty_row_check(v):
+            n += 1
+    return n
+
+
+def _sold_rate_metric_columns_all_empty(r: dict) -> bool:
+    """True when the sheet has Sold rate / %-style columns and every one is empty (UAE-style sparse junk)."""
+    if not isinstance(r, dict):
+        return False
+    matched: list[str] = []
+    for k in r:
+        if k in ("_has_opportunity", "Sheet"):
+            continue
+        ks = str(k).lower()
+        if "sold" in ks and "rate" in ks:
+            matched.append(k)
+            continue
+        if "occupancy" in ks and "%" in ks:
+            matched.append(k)
+            continue
+        if any(x in ks for x in ("ops occupancy", "occupancy %", "occupancy%")):
+            matched.append(k)
+    if not matched:
+        return False
+    for k in matched:
+        if not _cell_is_empty_for_empty_row_check(r.get(k)):
+            return False
+    return True
+
+
+def _should_hide_no_status_sparse_kitchen_row(r: dict) -> bool:
+    """Hide 'No status' rows that are mostly empty (red row styling) or missing Sold rate / % KPIs when those columns exist."""
+    if not isinstance(r, dict):
+        return False
+    if _status_normalized_from_row(r) != "No status":
+        return False
+    n_keys = len([k for k in r if k not in ("_has_opportunity", "Sheet")])
+    if n_keys < 5:
+        return False
+    mc = _meaningful_kitchen_cell_count(r)
+    if mc <= 2:
+        return True
+    if mc <= 4 and _sold_rate_metric_columns_all_empty(r):
+        return True
+    return False
+
+
+def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
+    return _should_hide_junk_kitchen_row(r) or _should_hide_no_status_sparse_kitchen_row(r)
 
 
 def _filter_junk_kitchen_records(rows: list) -> list:
     if not rows:
         return rows
-    return [r for r in rows if isinstance(r, dict) and not _should_hide_junk_kitchen_row(r)]
+    return [r for r in rows if isinstance(r, dict) and not _should_hide_incomplete_kitchen_row(r)]
 
 
 def _status_row_class_rules_and_css(status_col_name: str):
