@@ -3902,6 +3902,91 @@ def _filter_empty_records(rows: list) -> list:
     return [r for r in rows if isinstance(r, dict) and not _is_empty_record(r)]
 
 
+# Hide rows with no Type, no Floor price, no List price, and a non-standard normalized status (sheet junk).
+_STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
+    {"Vacant", "Churning", "Occupied", "Sold", "No status"}
+)
+_KITCHEN_TYPE_COL_KEYS = ("Type", "Kitchen Type", "Type__c")
+_KITCHEN_FLOOR_PRICE_KEYS = ("Floor Price", "Floor_Price__c")
+_KITCHEN_LIST_PRICE_KEYS = ("List Price", "Sell_Price__c", "List_Price__c")
+
+
+def _find_kitchen_column_key(r: dict, candidates: tuple[str, ...]) -> str | None:
+    if not r:
+        return None
+    for c in candidates:
+        if c in r:
+            return c
+    norm_map = {re.sub(r"[\s_]+", "", str(k).lower()): k for k in r}
+    for c in candidates:
+        needle = re.sub(r"[\s_]+", "", c.lower())
+        if needle in norm_map:
+            return norm_map[needle]
+    return None
+
+
+def _is_missing_kitchen_type_for_junk_filter(v) -> bool:
+    if v is None:
+        return True
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "none", "n/a", "na", "—", "-"):
+        return True
+    return False
+
+
+def _is_missing_price_for_junk_filter(v) -> bool:
+    """Blank, NaN, non-numeric, or zero = no price for junk-row rule."""
+    if v is None:
+        return True
+    if isinstance(v, str) and not str(v).strip():
+        return True
+    try:
+        if pd.isna(v):
+            return True
+    except Exception:
+        pass
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return True
+    if not math.isfinite(f):
+        return True
+    if abs(f) < 1e-12:
+        return True
+    return False
+
+
+def _is_odd_kitchen_status_normalized(norm: str) -> bool:
+    n = (norm or "").strip()
+    if not n:
+        return False
+    return n not in _STANDARD_KITCHEN_STATUS_NORMALIZED
+
+
+def _should_hide_junk_kitchen_row(r: dict) -> bool:
+    """True when Type + Floor + List are all missing and status is not Vacant/Churning/Occupied/Sold/No status."""
+    if not isinstance(r, dict):
+        return False
+    tk = _find_kitchen_column_key(r, _KITCHEN_TYPE_COL_KEYS)
+    fk = _find_kitchen_column_key(r, _KITCHEN_FLOOR_PRICE_KEYS)
+    lk = _find_kitchen_column_key(r, _KITCHEN_LIST_PRICE_KEYS)
+    if tk is None or fk is None or lk is None:
+        return False
+    if (
+        _is_missing_kitchen_type_for_junk_filter(r.get(tk))
+        and _is_missing_price_for_junk_filter(r.get(fk))
+        and _is_missing_price_for_junk_filter(r.get(lk))
+    ):
+        return _is_odd_kitchen_status_normalized(_status_normalized_from_row(r))
+    return False
+
+
+def _filter_junk_kitchen_records(rows: list) -> list:
+    if not rows:
+        return rows
+    return [r for r in rows if isinstance(r, dict) and not _should_hide_junk_kitchen_row(r)]
+
+
 def _status_row_class_rules_and_css(status_col_name: str):
     """Return (rowClassRules dict, custom_css str) for AgGrid status color coding. status_col_name is the exact dataframe column name (e.g. 'Status' or 'status__c')."""
     # JS-safe column key for data[] access
@@ -4197,6 +4282,7 @@ def _render_generic_tab(
         rows_shown = rows
     if regional_display in ("Kuwait", "UAE"):
         cols, rows_shown = _filter_regional_inventory_columns(regional_display, cols, rows_shown)
+    rows_shown = _filter_junk_kitchen_records(rows_shown)
     _compact_tables = _use_compact_tables()
     if _compact_tables:
         _flt = st.container()
@@ -5555,6 +5641,7 @@ def main():
                         for r in sheet_rows:
                             combined_rows.append({"Sheet": label, **r})
                     combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
+                    combined_rows = _filter_junk_kitchen_records(combined_rows)
                     if not combined_rows:
                         st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                     else:
@@ -5564,7 +5651,7 @@ def main():
                             _df_temp = pd.DataFrame(combined_rows)
                             cols_combined = sorted(_df_temp.columns.tolist())
                         cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
-                        rows_shown = _filter_empty_records(combined_rows)
+                        rows_shown = combined_rows
                         _row_count_placeholder_combined = st.empty()
                         st.divider()
                         df_combined = pd.DataFrame(rows_shown)
@@ -5597,6 +5684,7 @@ def main():
                 # No filter bar: single table like Excel sheet (filter via column filters below)
                 use_facility_tabs = False
                 rows_filtered = _filter_empty_records([r for r in (rows or []) if isinstance(r, dict)])
+                rows_filtered = _filter_junk_kitchen_records(rows_filtered)
                 rows_display = rows_filtered  # used for table; updated by column filters when applied
                 st.markdown("---")
                 if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
