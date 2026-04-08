@@ -1432,6 +1432,17 @@ def _table_height_px(default: int = 700) -> int:
     return default
 
 
+def _kitchen_master_viewport_height_px(n_rows: int) -> int:
+    """Ag Grid / dataframe height from row count — avoids a fixed ~700px box with only a few rows (large empty band)."""
+    cap = max(320, int(_table_height_px()))
+    n = max(0, int(n_rows))
+    # Floating filters + toolbar + header row
+    overhead = 150
+    per_row = 40
+    h = overhead + max(1, min(n, 800)) * per_row
+    return max(220, min(cap, h))
+
+
 def _secrets_or_env_str(*names: str) -> str:
     """Read a string from ``st.secrets`` (Streamlit Cloud) and/or ``os.environ``.
 
@@ -5010,6 +5021,7 @@ def _render_master_table_aggrid_or_df(
             st.info("No rows to show in this view.")
         return
     df = _prepare_kitchen_master_dataframe_for_display(df, rows_shown)
+    _viewport_h = _kitchen_master_viewport_height_px(len(df.index))
     _cc = {"_has_opportunity": None}
     try:
         _cc.update(_streamlit_number_column_config_for_df(df))
@@ -5030,7 +5042,7 @@ def _render_master_table_aggrid_or_df(
                     gridOptions=go,
                     use_container_width=True,
                     fit_columns_on_grid_load=False,
-                    height=max(420, int(_table_height_px())),
+                    height=_viewport_h,
                     theme="streamlit",
                     show_toolbar=True,
                     show_search=True,
@@ -5079,7 +5091,7 @@ def _render_master_table_aggrid_or_df(
             _df,
             use_container_width=True,
             hide_index=True,
-            height=_table_height_px(),
+            height=_viewport_h,
             column_config=_cc,
         )
     except Exception:
@@ -5087,7 +5099,7 @@ def _render_master_table_aggrid_or_df(
             df,
             use_container_width=True,
             hide_index=True,
-            height=_table_height_px(),
+            height=_viewport_h,
             column_config=_cc,
         )
     if rows_shown:
@@ -5213,7 +5225,6 @@ def _render_generic_tab(
             ]
     rows_shown = _filter_empty_records(rows_shown)
     _row_count_placeholder = st.empty()
-    st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
     df_display = pd.DataFrame(rows_shown)[display_cols] if display_cols and rows_shown else pd.DataFrame(rows_shown)
@@ -6530,7 +6541,6 @@ def main():
                         cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                         rows_shown = combined_rows
                         _row_count_placeholder_combined = st.empty()
-                        st.divider()
                         df_combined = pd.DataFrame(rows_shown)
                         _disp_cols = [c for c in df_combined.columns if c in cols_combined]
                         if _disp_cols:
