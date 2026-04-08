@@ -1520,18 +1520,17 @@ def _kitchen_master_plain_tables() -> bool:
 def _kitchen_master_use_aggrid() -> bool:
     """When True, Kitchen Master uses streamlit-aggrid (Excel-like column filters + rowClassRules).
 
-    **Default is False** — native ``st.dataframe`` plus Styler/HTML so the table stays visible on Streamlit Cloud,
-    where the embedded Ag Grid iframe often renders blank or ``No results`` for some browsers/sessions.
-    Set ``KITCHEN_MASTER_AGGRID=1`` (or ``true``/``yes``/``on``) in **Secrets** or env to use the interactive grid
-    when it works reliably in your environment.
+    **Default is True** (same as earlier releases): sheet-like grid with status row colors via ``rowClassRules``.
+    Set ``KITCHEN_MASTER_AGGRID=0`` (or ``false``/``no``/``off``) in **Secrets** or env to use native
+    ``st.dataframe`` + Styler/HTML instead if the embedded iframe is blank on your deployment.
     """
     v = (
         _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
-        or "0"
+        or "1"
     ).strip().lower()
-    if v in ("1", "true", "yes", "on"):
-        return True
-    return False
+    if v in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
