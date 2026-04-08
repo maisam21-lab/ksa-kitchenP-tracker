@@ -171,6 +171,9 @@ _GSHEET_FAMILY_REFRESH_SOURCES: tuple[str, ...] = (
 TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
 TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
 TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
+# Main nav: **KSA** is the Master Kitchen area (replaces legacy label "Kitchen Master Data").
+SECTION_KSA = "KSA"
+_LEGACY_SECTION_KITCHEN_MASTER = "Kitchen Master Data"
 # Users who may open Kitchen Master regional views (Kuwait / UAE / Bahrain), not only KSA.
 # Union with PREVIEW_ONLY_IDS / BAHRAIN_KITCHEN_PREVIEW_IDS in Streamlit secrets or env.
 PREVIEW_ONLY_IDS = (
@@ -7011,13 +7014,13 @@ def main():
         or user_role == "manager_viewer"
         or _preview_regional
     ):
-        section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
+        section_options = [SECTION_KSA, "Dashboard", "Discussions"]
     else:
-        section_options = ["Kitchen Master Data", "Discussions"]
+        section_options = [SECTION_KSA, "Discussions"]
     # Ensure Admin never appears (defensive)
     section_options = [s for s in section_options if s != "Admin / Data Health"]
     if not section_options:
-        section_options = ["Kitchen Master Data", "Discussions"]
+        section_options = [SECTION_KSA, "Discussions"]
     # Website-style layout: section navigation as tabs
     if "section_radio" not in st.session_state:
         st.session_state["section_radio"] = section_options[0]
@@ -7026,6 +7029,9 @@ def main():
     if section not in section_options:
         section = section_options[0]
         st.session_state["section_radio"] = section
+    if section == _LEGACY_SECTION_KITCHEN_MASTER:
+        section = SECTION_KSA
+        st.session_state["section_radio"] = SECTION_KSA
 
     # Tab row: desktop buttons; compact mode uses a single segmented control.
     if _compact_layout_enabled():
@@ -7053,24 +7059,32 @@ def main():
                     _rerun()
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
-    if section == "Kitchen Master Data":
+    if section == SECTION_KSA:
         st.session_state.pop("preview_kitchen_region", None)
         # PREVIEW_ONLY_IDS / super_user / manager_viewer: KSA master + optional Kuwait / UAE / Bahrain workbooks.
         if _user_sees_dashboard_all_countries(current_user, user_role):
-            _tab_ksa, _tab_kw, _tab_ae, _tab_bh = st.tabs(
-                ["Saudi Arabia (KSA)", "Kuwait", "UAE", "Bahrain"]
+            st.caption(
+                "Choose **KSA** for the main Master Kitchen view, or **Kuwait / UAE / Bahrain** "
+                "(preview testers) for regional/facility workbooks."
             )
-            with _tab_ksa:
+            _km_region = st.segmented_control(
+                "Market",
+                options=["KSA", "Kuwait", "UAE", "Bahrain"],
+                default="KSA",
+                key="kitchen_master_region_segment",
+                label_visibility="collapsed",
+            )
+            if _km_region == "KSA" or _km_region is None:
                 _render_kitchen_master_ksa_main(can_export=can_export, is_developer=is_developer)
-            with _tab_kw:
+            elif _km_region == "Kuwait":
                 _render_preview_regional_kitchen_master(
                     "Kuwait", can_export=can_export, is_developer=is_developer
                 )
-            with _tab_ae:
+            elif _km_region == "UAE":
                 _render_preview_regional_kitchen_master(
                     "UAE", can_export=can_export, is_developer=is_developer
                 )
-            with _tab_bh:
+            else:
                 _render_preview_regional_kitchen_master(
                     "Bahrain", can_export=can_export, is_developer=is_developer
                 )
@@ -7564,7 +7578,7 @@ def main():
             if n_churn_missing:
                 missing_parts.append(f"{n_churn_missing} Scheduled Churn")
             if missing_parts:
-                st.caption(f"**Data quality:** {', '.join(missing_parts)} kitchen(s) have no List price (included as $0). Review in Kitchen Master Data or source sheet.")
+                st.caption(f"**Data quality:** {', '.join(missing_parts)} kitchen(s) have no List price (included as $0). Review in **{SECTION_KSA}** or the source sheet.")
             with st.expander("Value — data quality (QA)", expanded=False):
                 st.markdown(
                     f"- **Vacant:** {len(vacant_rows) - n_vacant_missing} of {len(vacant_rows)} have List price; **{n_vacant_missing}** missing."
