@@ -1534,6 +1534,89 @@ def _kitchen_master_use_aggrid() -> bool:
     return True
 
 
+def _aggrid_enterprise_license_key() -> str | None:
+    """Paid AG Grid Enterprise key (removes the evaluation watermark). Optional if trial mode is on."""
+    for name in ("AG_GRID_LICENSE_KEY", "ag_grid_license_key", "AGGRID_LICENSE_KEY"):
+        try:
+            sec = getattr(st, "secrets", None)
+            if sec:
+                v = sec.get(name)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+        except Exception:
+            pass
+    try:
+        v = (os.environ.get("AG_GRID_LICENSE_KEY") or os.environ.get("AGGRID_LICENSE_KEY") or "").strip()
+        return v or None
+    except Exception:
+        return None
+
+
+def _aggrid_use_enterprise_modules() -> bool:
+    """Load AG Grid Enterprise in the iframe (Set Filter = checkbox value lists).
+
+    streamlit-aggrid ships Enterprise; **without** ``AG_GRID_LICENSE_KEY`` AG Grid runs in evaluation mode
+    (watermark) but Set Filter still works — same as many local “no licence” setups.
+
+    Set ``AG_GRID_ENTERPRISE_TRIAL=0`` (secrets/env) to use **Community** filters only + optional Streamlit multiselect.
+    """
+    if _aggrid_enterprise_license_key():
+        return True
+    v = (_secrets_or_env_str("AG_GRID_ENTERPRISE_TRIAL", "ag_grid_enterprise_trial") or "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def _kitchen_master_streamlit_value_list_filters() -> bool:
+    """When True, show multiselect value lists above the grid (Status). Off when Enterprise modules load (trial or licensed)."""
+    if _aggrid_use_enterprise_modules():
+        return False
+    v = (_secrets_or_env_str("KITCHEN_MASTER_VALUE_FILTERS", "kitchen_master_value_filters") or "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def _apply_streamlit_status_value_filter(
+    df_ag: pd.DataFrame,
+    rows_shown: list | None,
+    *,
+    status_col: str | None,
+    grid_key: str,
+) -> tuple[pd.DataFrame, list | None]:
+    """Excel-style value list for Status: pick which distinct cell values to keep (Community Ag Grid cannot show Set Filter)."""
+    if df_ag is None or df_ag.empty or not status_col:
+        return df_ag, rows_shown
+    sc = str(status_col)
+    if sc not in df_ag.columns:
+        return df_ag, rows_shown
+
+    def _lab(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return "(blank)"
+        s = str(v).strip()
+        return "(blank)" if s == "" else s
+
+    labels = df_ag[sc].map(_lab)
+    uniques = sorted(set(labels.tolist()))
+    if len(uniques) <= 1 or len(uniques) > 250:
+        return df_ag, rows_shown
+
+    sel = st.multiselect(
+        f"{sc} — show rows with",
+        options=uniques,
+        default=uniques,
+        key=f"{grid_key}_st_status_value_pick",
+        help="Choose which values to keep. Or leave Enterprise trial on (default) for checkbox lists inside the grid; set AG_GRID_ENTERPRISE_TRIAL=0 for Community-only.",
+    )
+    if not sel:
+        st.warning("Select at least one value above, or reset the widget.")
+        return df_ag.iloc[0:0].copy(), []
+    m = labels.isin(sel)
+    out_df = df_ag.loc[m].reset_index(drop=True)
+    out_rows = rows_shown
+    if rows_shown is not None and len(rows_shown) == len(m):
+        out_rows = [r for r, ok in zip(rows_shown, m.tolist()) if ok]
+    return out_df, out_rows
+
+
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
     """Apply row status colors in non-AgGrid paths (mobile/tablet fallback)."""
     if df is None or df.empty or not status_col:
@@ -2130,6 +2213,17 @@ def _export_allowed_ids_from_secrets() -> set[str]:
     return out
 
 
+def _secrets_preview_value_nonempty(v) -> bool:
+    """True if this secret value should be used (skip empty list/dict/string so a later key like PREVIEW_ONLY_IDS is read)."""
+    if v is None:
+        return False
+    if isinstance(v, str):
+        return bool(v.strip())
+    if isinstance(v, (list, tuple, dict, set)):
+        return len(v) > 0
+    return True
+
+
 def _secrets_get_bahrain_preview_raw():
     """BAHRAIN_KITCHEN_PREVIEW_IDS from secrets (or nested tables); comma list or list of emails."""
     names = (
@@ -2146,47 +2240,139 @@ def _secrets_get_bahrain_preview_raw():
         if sec:
             for name in names:
                 v = sec.get(name)
-                if v is not None and (not isinstance(v, str) or v.strip()):
+                if _secrets_preview_value_nonempty(v):
                     return v
             for val in sec.values():
                 if isinstance(val, dict):
                     for name in names:
                         v = val.get(name)
-                        if v is not None and (not isinstance(v, str) or v.strip()):
+                        if _secrets_preview_value_nonempty(v):
                             return v
     except Exception:
         pass
-    return (
+    env = (
         os.environ.get("BAHRAIN_KITCHEN_PREVIEW_IDS", "")
         or os.environ.get("PREVIEW_ONLY_IDS", "")
         or os.environ.get("BAHRAIN_PREVIEW_USER_IDS", "")
     )
+    return env if env.strip() else ""
 
 
-def _bahrain_preview_ids_from_secrets() -> set[str]:
-    """Emails allowed for Kitchen Master regional previews (Kuwait, UAE, Bahrain). Merges PREVIEW_ONLY_IDS + secrets."""
-    raw = _secrets_get_bahrain_preview_raw()
-    out: set[str] = set()
+def _merge_ids_from_preview_raw_into(out: set[str], raw) -> None:
+    """Parse one secrets blob (dict / list / string) into ``out``."""
+    if raw is None:
+        return
     if isinstance(raw, dict):
+        _list_keys = frozenset(
+            {
+                "emails",
+                "ids",
+                "users",
+                "list",
+                "items",
+                "preview_only_ids",
+                "preview_only_ids_list",
+            }
+        )
+
+        def _value_allows_entry(v) -> bool:
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)):
+                return v != 0
+            if isinstance(v, str):
+                t = v.strip().lower()
+                return bool(t) and t not in ("0", "false", "no", "n", "off", "disabled")
+            return bool(v)
+
         for k, v in raw.items():
-            try:
-                allowed = bool(v) if not isinstance(v, str) else v.strip().lower() in ("1", "true", "yes", "y")
-            except Exception:
-                allowed = False
-            s = (str(k).strip() or "").lower()
-            if s and allowed:
-                out.add(s)
+            lk = str(k).strip().lower()
+            if lk in _list_keys or lk.endswith("_ids") or lk.endswith("_emails"):
+                if isinstance(v, (list, tuple)):
+                    for item in v:
+                        s = (str(item).strip() or "").lower()
+                        if s:
+                            out.add(s)
+                    continue
+            if isinstance(v, (list, tuple)):
+                strip_items = [(str(item).strip() or "").lower() for item in v if str(item).strip()]
+                if strip_items and all("@" in x for x in strip_items):
+                    for s in strip_items:
+                        out.add(s)
+                continue
+            sk = str(k).strip()
+            if not sk:
+                continue
+            if "@" in sk and _value_allows_entry(v):
+                out.add(sk.lower())
+                continue
+            if isinstance(v, str) and "@" in v.strip() and _value_allows_entry(v):
+                out.add(v.strip().lower())
     elif isinstance(raw, list):
         for item in raw:
             s = (str(item).strip() or "").lower()
             if s:
                 out.add(s)
     else:
-        parts = re.split(r"[,\n;\s]+", str(raw or ""))
-        for part in parts:
+        for part in re.split(r"[,\n;\s]+", str(raw or "")):
             s = (part or "").strip().lower()
             if s:
                 out.add(s)
+
+
+def _iter_all_bahrain_preview_secret_blobs():
+    """Yield every non-empty PREVIEW / BAHRAIN preview blob (top-level + nested TOML tables) — not only the first key."""
+    names = (
+        "BAHRAIN_KITCHEN_PREVIEW_IDS",
+        "bahrain_kitchen_preview_ids",
+        "preview_only_IDs",
+        "preview_only_ids",
+        "PREVIEW_ONLY_IDS",
+        "BAHRAIN_PREVIEW_USER_IDS",
+        "bahrain_preview_user_ids",
+    )
+    try:
+        sec = getattr(st, "secrets", None)
+        if sec:
+            for name in names:
+                v = sec.get(name)
+                if _secrets_preview_value_nonempty(v):
+                    yield v
+            for val in sec.values():
+                if isinstance(val, dict):
+                    for name in names:
+                        v = val.get(name)
+                        if _secrets_preview_value_nonempty(v):
+                            yield v
+    except Exception:
+        pass
+    env = (
+        os.environ.get("BAHRAIN_KITCHEN_PREVIEW_IDS", "")
+        or os.environ.get("PREVIEW_ONLY_IDS", "")
+        or os.environ.get("BAHRAIN_PREVIEW_USER_IDS", "")
+    )
+    if env.strip():
+        yield env.strip()
+
+
+def _email_set_with_local_parts(ids: set[str]) -> set[str]:
+    """For each ``user@domain`` entry, also allow matching the local part alone (helps SSO / display quirks)."""
+    out: set[str] = set()
+    for x in ids or ():
+        s = (x or "").strip().lower()
+        if not s:
+            continue
+        out.add(s)
+        if "@" in s:
+            out.add(s.split("@", 1)[0])
+    return out
+
+
+def _bahrain_preview_ids_from_secrets() -> set[str]:
+    """Emails allowed for Kitchen Master regional previews (Kuwait, UAE, Bahrain). Merges all PREVIEW_* secrets + built-in tuple."""
+    out: set[str] = set()
+    for blob in _iter_all_bahrain_preview_secret_blobs():
+        _merge_ids_from_preview_raw_into(out, blob)
     for part in re.split(r"[,\n;\s]+", str(PREVIEW_ONLY_IDS or "").strip()):
         s = (part or "").strip().lower()
         if s:
@@ -2201,12 +2387,47 @@ def _user_can_see_bahrain_kitchen_preview(current_user: str) -> bool:
     u = (current_user or "").strip().lower()
     if not u:
         return False
-    preview_set = _bahrain_preview_ids_from_secrets()
-    preview_norm = {(a or "").strip().lower() for a in preview_set if (a or "").strip()}
+    preview_norm = _email_set_with_local_parts(_bahrain_preview_ids_from_secrets())
     if not preview_norm:
         return False
     local = u.split("@", 1)[0] if "@" in u else u
     return u in preview_norm or local in preview_norm
+
+
+def _email_has_dashboard_country_allowlist(current_user: str) -> bool:
+    """True if email is on DEVELOPER_IDS or SUPER_USER_* secrets — same grants as RBAC, for when session role lags DB/secrets."""
+    u = (current_user or "").strip().lower()
+    if not u:
+        return False
+    local = u.split("@", 1)[0] if "@" in u else u
+    try:
+        dev_exp = _email_set_with_local_parts(set(_developer_ids_merged_list()))
+        if u in dev_exp or local in dev_exp:
+            return True
+        sup_exp = _email_set_with_local_parts(set(_get_super_user_emails()))
+        if u in sup_exp or local in sup_exp:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _user_sees_dashboard_all_countries(current_user: str | None, user_role: str | None) -> bool:
+    """Dashboard: show all country filter options (Saudi Arabia, Bahrain, Kuwait, UAE), merge Bahrain rows, regional facility tabs.
+
+    - Emails in ``PREVIEW_ONLY_IDS`` / ``BAHRAIN_KITCHEN_PREVIEW_IDS`` (Streamlit secrets or env) and the built-in
+      ``PREVIEW_ONLY_IDS`` tuple — same set as :func:`_user_can_see_bahrain_kitchen_preview`.
+    - ``super_user`` and ``manager_viewer`` always (they already have Dashboard access).
+    - ``DEVELOPER_IDS`` / ``SUPER_USER_EMAILS`` match even if :func:`auth.get_user_role` returned associate (defense in depth).
+    """
+    if _is_developer():
+        return True
+    if _email_has_dashboard_country_allowlist(current_user or ""):
+        return True
+    if _user_can_see_bahrain_kitchen_preview(current_user or ""):
+        return True
+    r = (user_role or "").strip().lower()
+    return r in ("super_user", "manager_viewer")
 
 
 def _can_user_export(current_user: str) -> bool:
@@ -3323,23 +3544,26 @@ def _regional_preview_hidden_tab_names_lower() -> set[str]:
     }
 
 
-def _dashboard_kitchen_master_tab_names_for_country(ui_country: str, *, current_user: str | None = None) -> list[str] | None:
+def _dashboard_kitchen_master_tab_names_for_country(
+    ui_country: str, *, current_user: str | None = None, user_role: str | None = None
+) -> list[str] | None:
     """Worksheet/facility names shown in Kitchen Master for this country (Dashboard facility filter). None = derive from rows only."""
     if not ui_country or ui_country in ("All", "(No country)"):
         return None
     s = (ui_country or "").strip()
+    _reg = _user_sees_dashboard_all_countries(current_user, user_role)
     if s == "Kuwait":
-        if not _user_can_see_bahrain_kitchen_preview(current_user or ""):
+        if not _reg:
             return None
         hidden = _regional_preview_hidden_tab_names_lower()
         return [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_KW) if (t or "").strip().lower() not in hidden]
     if s == "UAE":
-        if not _user_can_see_bahrain_kitchen_preview(current_user or ""):
+        if not _reg:
             return None
         hidden = _regional_preview_hidden_tab_names_lower()
         return [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_AE) if (t or "").strip().lower() not in hidden]
     if s == "Bahrain":
-        if _user_can_see_bahrain_kitchen_preview(current_user or ""):
+        if _reg:
             hidden = _regional_preview_hidden_tab_names_lower()
             bh_tabs = [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_BH) if (t or "").strip().lower() not in hidden]
             if bh_tabs:
@@ -5072,16 +5296,22 @@ def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[
     return cols2, rows2
 
 
-def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, dict, bool]:
+def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, dict, bool, str | None]:
     """Build grid options + optional custom CSS for row colors.
 
     Row colors use a Python-computed ``km_row_cls`` column plus simple ``rowClassRules`` (reliable on Streamlit Cloud).
     ``km_row_cls`` and ``_has_opportunity`` are omitted from column defs but remain in row data. JsCode/getRowStyle is not used.
     For modest row counts, ``domLayout: autoHeight`` removes the large empty band inside the grid.
-    Returns ``(grid_options, custom_css_dict, use_auto_height)``.
+
+    With Enterprise modules (default **trial** without a key, or with ``AG_GRID_LICENSE_KEY``), text columns use **Set Filter**
+    (checkbox list of distinct values). With ``AG_GRID_ENTERPRISE_TRIAL=0``, uses Community **text** filters only.
+
+    Returns ``(grid_options, custom_css_dict, use_auto_height, enterprise_license_or_none)``.
     """
     if not GridOptionsBuilder:
-        return {}, {}, False
+        return {}, {}, False, None
+    _ent_lic = _aggrid_enterprise_license_key()
+    _use_set = _aggrid_use_enterprise_modules()
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(
         filter=True,
@@ -5100,8 +5330,27 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
             gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
         elif pd.api.types.is_datetime64_any_dtype(df[col]):
             gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+        elif _use_set:
+            gb.configure_column(
+                col,
+                filter="agSetColumnFilter",
+                floatingFilter=True,
+                filterParams={
+                    "excelMode": "windows",
+                    "buttons": ["reset", "apply"],
+                },
+            )
         else:
-            gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
+            gb.configure_column(
+                col,
+                filter="agTextColumnFilter",
+                floatingFilter=True,
+                filterParams={
+                    "filterOptions": ["contains", "notContains", "equals", "notEqual", "startsWith", "endsWith"],
+                    "buttons": ["apply", "reset"],
+                    "maxNumConditions": 2,
+                },
+            )
     _n = len(df.index)
     _auto_h = _n <= 100
     gb.configure_grid_options(
@@ -5134,7 +5383,36 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
             cdef["floatingFilter"] = False
             cdef["suppressHeaderFilterButton"] = True
         else:
-            cdef["filter"] = True
+            # Preserve explicit filter types from GridOptionsBuilder (agSetColumnFilter / agTextColumnFilter / …).
+            # Overwriting with ``True`` breaks column filters and removes the value list UI for Set Filter.
+            _ft = cdef.get("filter")
+            if not isinstance(_ft, str):
+                if _fn and _fn in df.columns:
+                    if pd.api.types.is_numeric_dtype(df[_fn]):
+                        cdef["filter"] = "agNumberColumnFilter"
+                    elif pd.api.types.is_datetime64_any_dtype(df[_fn]):
+                        cdef["filter"] = "agDateColumnFilter"
+                    elif _use_set:
+                        cdef["filter"] = "agSetColumnFilter"
+                        cdef["filterParams"] = {
+                            "excelMode": "windows",
+                            "buttons": ["reset", "apply"],
+                        }
+                    else:
+                        cdef["filter"] = "agTextColumnFilter"
+                        cdef["filterParams"] = {
+                            "filterOptions": ["contains", "notContains", "equals", "notEqual", "startsWith", "endsWith"],
+                            "buttons": ["apply", "reset"],
+                            "maxNumConditions": 2,
+                        }
+                else:
+                    cdef["filter"] = "agTextColumnFilter" if not _use_set else "agSetColumnFilter"
+                    if not _use_set and isinstance(cdef.get("filter"), str) and cdef["filter"] == "agTextColumnFilter":
+                        cdef["filterParams"] = {
+                            "filterOptions": ["contains", "notContains", "equals", "notEqual", "startsWith", "endsWith"],
+                            "buttons": ["apply", "reset"],
+                            "maxNumConditions": 2,
+                        }
             cdef["floatingFilter"] = True
             cdef["suppressHeaderFilterButton"] = False
         if cdef.get("type") == []:
@@ -5143,7 +5421,7 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
     if "km_row_cls" in df.columns:
         go["rowClassRules"] = _aggrid_kitchen_master_row_class_rules_simple()
         custom_css = _aggrid_kitchen_master_status_custom_css()
-    return go, custom_css, _auto_h
+    return go, custom_css, _auto_h, _ent_lic
 
 
 def _render_master_table_aggrid_or_df(
@@ -5193,11 +5471,20 @@ def _render_master_table_aggrid_or_df(
             else:
                 df_ag["_has_opportunity"] = False
         df_ag["km_row_cls"] = _compute_km_row_cls_series(df_ag, status_col)
+    if want_grid and _kitchen_master_streamlit_value_list_filters():
+        df_ag, rows_shown = _apply_streamlit_status_value_filter(
+            df_ag, rows_shown, status_col=status_col, grid_key=grid_key
+        )
+        _n_rows = len(df_ag.index)
+        if df_ag.empty:
+            st.info("No rows match the Status filter above. Select more values in the multiselect.")
+            return
     if want_grid:
         try:
-            go, ag_custom_css, _use_ag_auto_height = _build_aggrid_community_grid_options(df_ag, status_col)
+            go, ag_custom_css, _use_ag_auto_height, _ag_lic = _build_aggrid_community_grid_options(df_ag, status_col)
         except Exception:
             go = None
+            _ag_lic = None
         if go:
             _ag_iframe_h = _kitchen_master_aggrid_iframe_height_px(_n_rows, auto_height_layout=_use_ag_auto_height)
             _kwargs = dict(
@@ -5209,7 +5496,8 @@ def _render_master_table_aggrid_or_df(
                 # Quick search persists client-side and has caused blank / "No rows" grids; column filters stay on.
                 show_search=False,
                 show_download_button=False,
-                enable_enterprise_modules=False,
+                enable_enterprise_modules=_aggrid_use_enterprise_modules(),
+                license_key=_ag_lic,
                 allow_unsafe_jscode=False,
                 key=grid_key,
                 # Fewer moving parts on first paint vs filtered/sorted round-trips from an empty client grid.
@@ -6420,8 +6708,15 @@ def main():
             except Exception:
                 st.write("Export allowlist size: —")
 
-    # Product shape: section navigation by role (Admin tab removed)
-    if _is_developer() or user_role == "super_user" or user_role == "manager_viewer":
+    # Product shape: section navigation by role (Admin tab removed).
+    # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
+    _preview_regional = _user_can_see_bahrain_kitchen_preview(current_user or "")
+    if (
+        _is_developer()
+        or user_role == "super_user"
+        or user_role == "manager_viewer"
+        or _preview_regional
+    ):
         section_options = ["Kitchen Master Data", "Dashboard", "Discussions"]
     else:
         section_options = ["Kitchen Master Data", "Discussions"]
@@ -6466,6 +6761,23 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
         st.session_state.pop("preview_kitchen_region", None)
+        # PREVIEW_ONLY_IDS / super_user / manager_viewer: KSA master + optional Kuwait / UAE / Bahrain workbooks.
+        if _user_sees_dashboard_all_countries(current_user, user_role):
+            _km_markets = ["Saudi Arabia (KSA)", "Kuwait", "UAE", "Bahrain"]
+            _km_pick = st.radio(
+                "Kitchen master market",
+                options=_km_markets,
+                horizontal=True,
+                key="kitchen_master_market_region",
+                help="Saudi Arabia uses the main master sheet (Superset / BigQuery / Google Sheet). Other markets use the regional kitchen workbooks.",
+            )
+            if _km_pick != "Saudi Arabia (KSA)":
+                _km_region = {"Kuwait": "Kuwait", "UAE": "UAE", "Bahrain": "Bahrain"}.get(_km_pick)
+                if _km_region:
+                    _render_preview_regional_kitchen_master(
+                        _km_region, can_export=can_export, is_developer=is_developer
+                    )
+                    st.stop()
         superset_rows, superset_meta = _get_superset_master_kitchens()
         if superset_rows is not None:
             last_refresh = (superset_meta or {}).get("last_refresh_ts_utc")
@@ -6756,7 +7068,7 @@ def main():
                         except Exception:
                             pass
 
-# Dashboard: management view (section_options already restricts who sees the button)
+    # Dashboard: management view (section_options already restricts who sees the button)
     elif section == "Dashboard":
         superset_rows, superset_meta = _get_superset_master_kitchens()
         dashboard_from_superset = superset_rows is not None
@@ -6771,7 +7083,8 @@ def main():
                 rows_kitchens = _tabbed
             else:
                 rows_kitchens = list_generic_tab("Kitchens", source="gsheet") or list_generic_tab("Master Kitchens list", source="gsheet") or []
-        # Kuwait + UAE facility sheets: merge into dashboard for all users. Bahrain facility sheets: preview allowlist only.
+        # Kuwait + UAE facility sheets: merge for all Dashboard users. Bahrain merge + country filter extras when
+        # ``_user_sees_dashboard_all_countries`` (PREVIEW_ONLY_IDS / secrets, developer, or super_user / manager_viewer).
         # Refresh from Google Sheets when stale (15 min) to avoid fetching both workbooks every rerun.
         _kuwait_dashboard_rows: list[dict] = []
         _uae_dashboard_rows: list[dict] = []
@@ -6789,7 +7102,7 @@ def main():
                 _refresh_uae_workbook_from_sheets(silent=True)
             if _sid_ae:
                 _uae_dashboard_rows = _load_uae_dashboard_rows()
-            if _sid_bh and _user_can_see_bahrain_kitchen_preview(current_user or ""):
+            if _sid_bh and _user_sees_dashboard_all_countries(current_user, user_role):
                 if _source_refresh_is_stale(_gbh, 15):
                     _refresh_bahrain_workbook_from_sheets(silent=True)
                 _bahrain_dashboard_rows = _load_bahrain_dashboard_rows()
@@ -6845,16 +7158,40 @@ def main():
             return "Saudi Arabia"
 
         def _facility_select_options(sel_country: str, rows_subset: list) -> list[str]:
-            """Facility dropdown: same tab names as Kitchen Master for that country, union any row-derived names."""
+            """Facility dropdown: same tab names as Kitchen Master for that country, union any row-derived names.
+
+            When Country is **All**, list every KSA worksheet plus regional facility tabs (if user sees all countries),
+            not only facilities that already have rows — so empty sheets still appear like the workbook.
+            """
             row_facs = {_dashboard_facility_from_row(r) for r in rows_subset}
             row_facs = {f for f in row_facs if f}
-            tabs = None
             if sel_country and sel_country not in ("All", "(No country)") and not dashboard_from_superset:
-                tabs = _dashboard_kitchen_master_tab_names_for_country(sel_country, current_user=current_user)
-            if tabs is not None:
-                opts = sorted(set(tabs) | row_facs, key=str.casefold)
-            else:
+                tabs = _dashboard_kitchen_master_tab_names_for_country(
+                    sel_country, current_user=current_user, user_role=user_role
+                )
+                if tabs is not None:
+                    opts = sorted(set(tabs) | row_facs, key=str.casefold)
+                else:
+                    opts = sorted(row_facs, key=str.casefold)
+                return opts if opts else ["(No facility)"]
+            if dashboard_from_superset:
                 opts = sorted(row_facs, key=str.casefold)
+                return opts if opts else ["(No facility)"]
+            tab_union: set[str] = set(row_facs)
+            for t in _master_kitchens_other_sheet_ids() or []:
+                if t:
+                    tab_union.add(t)
+            if _user_sees_dashboard_all_countries(current_user, user_role):
+                hidden = _regional_preview_hidden_tab_names_lower()
+                for src_tabs in (
+                    list_tab_ids_for_source(GSOURCE_KITCHEN_KW),
+                    list_tab_ids_for_source(GSOURCE_KITCHEN_AE),
+                    list_tab_ids_for_source(GSOURCE_KITCHEN_BH),
+                ):
+                    for t in src_tabs:
+                        if (t or "").strip().lower() not in hidden:
+                            tab_union.add(t)
+            opts = sorted(tab_union, key=str.casefold)
             return opts if opts else ["(No facility)"]
 
         # —— Country, Facility, and Live status filters (drive all dashboard data) ——
@@ -6863,7 +7200,7 @@ def main():
             {c for c in _from_rows if c not in set(DASHBOARD_COUNTRY_FILTER_CORE)},
             key=str.casefold,
         )
-        _regional_preview_dash = _user_can_see_bahrain_kitchen_preview(current_user or "")
+        _regional_preview_dash = _user_sees_dashboard_all_countries(current_user, user_role)
         _core_countries = list(DASHBOARD_COUNTRY_FILTER_CORE)
         if not _regional_preview_dash:
             _core_countries = [c for c in _core_countries if c == "Saudi Arabia"]
