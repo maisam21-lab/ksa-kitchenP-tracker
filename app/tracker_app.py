@@ -174,6 +174,9 @@ TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
 # Main nav: **KSA** is the Master Kitchen area (replaces legacy label "Kitchen Master Data").
 SECTION_KSA = "KSA"
 _LEGACY_SECTION_KITCHEN_MASTER = "Kitchen Master Data"
+# Sub-nav inside **KSA** (same column+button sizing as Dashboard / Discussions tabs).
+KITCHEN_MASTER_REGION_OPTIONS: tuple[str, ...] = ("KSA", "Kuwait", "UAE", "Bahrain")
+SESSION_KEY_KITCHEN_MASTER_REGION = "kitchen_master_region_pick"
 # Users who may open Kitchen Master regional views (Kuwait / UAE / Bahrain), not only KSA.
 # Union with PREVIEW_ONLY_IDS / BAHRAIN_KITCHEN_PREVIEW_IDS in Streamlit secrets or env.
 PREVIEW_ONLY_IDS = (
@@ -1423,6 +1426,40 @@ def _mobile_mode_enabled() -> bool:
 def _compact_layout_enabled() -> bool:
     """Global compact layout mode for phones/small screens."""
     return bool(_mobile_mode_enabled())
+
+
+def _kitchen_master_region_selector_ui() -> str:
+    """KSA / Kuwait / UAE / Bahrain picker — same UX as main section tabs (full-width button row or selectbox)."""
+    if SESSION_KEY_KITCHEN_MASTER_REGION not in st.session_state:
+        st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = "KSA"
+    cur = st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION]
+    if cur not in KITCHEN_MASTER_REGION_OPTIONS:
+        cur = "KSA"
+        st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = cur
+    opts = list(KITCHEN_MASTER_REGION_OPTIONS)
+    if _compact_layout_enabled():
+        _sel = st.selectbox(
+            "Market",
+            options=opts,
+            index=opts.index(cur) if cur in opts else 0,
+            key="kitchen_master_region_mobile_selector",
+        )
+        if _sel and _sel != cur:
+            st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = _sel
+            _rerun()
+        return str(st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION])
+    r_cols = st.columns(len(opts))
+    for i, r_opt in enumerate(opts):
+        with r_cols[i]:
+            if st.button(
+                r_opt,
+                key=f"km_region_tab_{i}_{r_opt}",
+                type="primary" if cur == r_opt else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = r_opt
+                _rerun()
+    return str(st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION])
 
 
 def _use_compact_tables() -> bool:
@@ -7067,14 +7104,8 @@ def main():
                 "Choose **KSA** for the main Master Kitchen view, or **Kuwait / UAE / Bahrain** "
                 "(preview testers) for regional/facility workbooks."
             )
-            _km_region = st.segmented_control(
-                "Market",
-                options=["KSA", "Kuwait", "UAE", "Bahrain"],
-                default="KSA",
-                key="kitchen_master_region_segment",
-                label_visibility="collapsed",
-            )
-            if _km_region == "KSA" or _km_region is None:
+            _km_region = _kitchen_master_region_selector_ui()
+            if _km_region == "KSA":
                 _render_kitchen_master_ksa_main(can_export=can_export, is_developer=is_developer)
             elif _km_region == "Kuwait":
                 _render_preview_regional_kitchen_master(
