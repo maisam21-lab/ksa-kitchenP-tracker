@@ -70,6 +70,25 @@ try:
 except ImportError:
     HAS_EXCEL = False
 
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode, DataReturnMode
+
+    _HAS_AGGRI = True
+except ImportError:
+    try:
+        from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+
+        GridUpdateMode = None
+        DataReturnMode = None
+        _HAS_AGGRI = True
+    except ImportError:
+        AgGrid = None  # type: ignore[misc, assignment]
+        GridOptionsBuilder = None  # type: ignore[misc, assignment]
+        JsCode = None  # type: ignore[misc, assignment]
+        GridUpdateMode = None
+        DataReturnMode = None
+        _HAS_AGGRI = False
+
 # Online sheet: same ID as the workbook (docs.google.com/.../d/SHEET_ID/edit?gid=...)
 # Same logic as the sheet: country merge (SA/regions → Saudi Arabia, BH → Bahrain), status color coding.
 SHEET_ID = "1nFtYf5USuwCfYI_HB_U3RHckJchCSmew45itnt0RDP8"
@@ -1250,13 +1269,22 @@ def _table_height_px(default: int = 700) -> int:
 
 
 def _kitchen_master_plain_tables() -> bool:
-    """When True (default), show Kitchen Master as plain dataframes — no Pandas Styler.
+    """When True (default), native ``st.dataframe`` fallback uses plain data — no Pandas Styler.
 
-    Styler output can render as an invisible/blank grid in some Streamlit Cloud / browser setups.
-    Set env ``KITCHEN_MASTER_STYLED_ROWS=1`` to re-enable row status colors.
+    When AgGrid is on, row colors use JsCode (not Styler). Styler is only for dataframe fallback.
+    Set env ``KITCHEN_MASTER_STYLED_ROWS=1`` to use Styler on dataframe fallback.
     """
     v = (os.environ.get("KITCHEN_MASTER_STYLED_ROWS") or "").strip().lower()
     return v not in ("1", "true", "yes", "on")
+
+
+def _kitchen_master_use_aggrid() -> bool:
+    """When True (default), Kitchen Master uses streamlit-aggrid (community filters + getRowStyle colors).
+
+    Set env ``KITCHEN_MASTER_AGGRID=0`` to force native ``st.dataframe`` only.
+    """
+    v = (os.environ.get("KITCHEN_MASTER_AGGRID") or "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -3830,6 +3858,175 @@ def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[
     return cols2, rows2
 
 
+def _status_get_row_style_js(status_col_name: str):
+    """AG Grid Community getRowStyle — same rules as _style_df_status_rows (incl. Vacant + opportunity)."""
+    if not JsCode:
+        return None
+    col_key = json.dumps(status_col_name)
+    js = """
+function(params) {
+    if (!params || !params.data) { return null; }
+    var d = params.data;
+    var raw = d[__COLKEY__];
+    var s = (raw != null ? String(raw).trim().toLowerCase() : '');
+    var hasOpp = !!d['_has_opportunity'];
+    if (!s || s === 'no status' || s === 'n/a' || s === 'na' || s === '\\u2014' || s === '-' || s === 'blocked') {
+        return { backgroundColor: '#B22222', color: '#FFFFFF' };
+    }
+    if (s === 'churning') { return { backgroundColor: '#FDE68A' }; }
+    if (s === 'occupied' || s === 'sold') { return { backgroundColor: '#FEE2E2' }; }
+    var isVac = (s === 'vacant' || (s.indexOf('vacant') === 0 && s.indexOf('occupied') < 0 && s.indexOf('sold') < 0 && s.indexOf('churning') < 0));
+    if (isVac) {
+        if (hasOpp) { return { backgroundColor: '#FEE2E2' }; }
+        return { backgroundColor: '#D1FAE5' };
+    }
+    return null;
+}
+"""
+    return JsCode(js.replace("__COLKEY__", col_key))
+
+
+def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> dict:
+    """AG Grid Community only: text/number/date filters — no Enterprise (set filter) modules."""
+    if not GridOptionsBuilder:
+        return {}
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_default_column(
+        filter=True,
+        sortable=True,
+        resizable=True,
+        floatingFilter=True,
+        suppressHeaderMenuButton=False,
+        suppressHeaderFilterButton=False,
+        menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
+    )
+    for col in df.columns:
+        if _is_facility_name_aggrid_column(col):
+            gb.configure_column(col, filter=False, floatingFilter=False, suppressHeaderFilterButton=True)
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]):
+            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
+        elif pd.api.types.is_datetime64_any_dtype(df[col]):
+            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+        else:
+            gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
+    gb.configure_grid_options(domLayout="normal", suppressMenuHide=False, columnMenu="legacy")
+    gb.configure_side_bar(filters_panel=False, columns_panel=False)
+    go = gb.build()
+    go["suppressCsvExport"] = True
+    if "defaultColDef" not in go:
+        go["defaultColDef"] = {}
+    go["defaultColDef"]["filter"] = True
+    go["defaultColDef"]["floatingFilter"] = True
+    go["defaultColDef"]["minWidth"] = 140
+    go["defaultColDef"]["suppressHeaderMenuButton"] = False
+    go["defaultColDef"]["suppressHeaderFilterButton"] = False
+    go["defaultColDef"]["wrapHeaderText"] = True
+    go["defaultColDef"]["autoHeaderHeight"] = True
+    go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
+    if "floatingFiltersHeight" in go:
+        del go["floatingFiltersHeight"]
+    _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+    go["columnDefs"] = _column_defs
+    for cdef in _column_defs:
+        if _is_facility_name_aggrid_column(cdef.get("field")):
+            cdef["filter"] = False
+            cdef["floatingFilter"] = False
+            cdef["suppressHeaderFilterButton"] = True
+        else:
+            cdef["filter"] = True
+            cdef["floatingFilter"] = True
+            cdef["suppressHeaderFilterButton"] = False
+        if cdef.get("type") == []:
+            cdef.pop("type", None)
+    if status_col:
+        gs = _status_get_row_style_js(status_col)
+        if gs is not None:
+            go["getRowStyle"] = gs
+    return go
+
+
+def _render_master_table_aggrid_or_df(
+    df: pd.DataFrame,
+    rows_shown: list,
+    *,
+    grid_key: str,
+    status_col: str | None,
+    row_count_placeholder,
+    allow_download: bool,
+    export_file_stem: str,
+    export_button_key: str,
+) -> None:
+    """Kitchen Master table: AgGrid Community + JsCode row colors, or native dataframe fallback."""
+    if df is None or df.empty:
+        return
+    _cc = {"_has_opportunity": None}
+    want_grid = bool(
+        _HAS_AGGRI
+        and AgGrid
+        and GridOptionsBuilder
+        and _kitchen_master_use_aggrid()
+        and not _use_compact_tables()
+    )
+    if want_grid:
+        try:
+            go = _build_aggrid_community_grid_options(df, status_col)
+            if go:
+                _kwargs = dict(
+                    gridOptions=go,
+                    use_container_width=True,
+                    fit_columns_on_grid_load=False,
+                    height=_table_height_px(),
+                    theme="streamlit",
+                    show_toolbar=True,
+                    show_search=True,
+                    show_download_button=False,
+                    enable_enterprise_modules=False,
+                    allow_unsafe_jscode=True,
+                    key=grid_key,
+                )
+                if GridUpdateMode and DataReturnMode:
+                    _kwargs["update_mode"] = GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED
+                    _kwargs["data_return_mode"] = DataReturnMode.FILTERED_AND_SORTED
+                grid_response = AgGrid(df, **_kwargs)
+                _total = len(rows_shown) if rows_shown else 0
+                _cnt = _total
+                if grid_response and grid_response.get("data") is not None:
+                    _cnt = len(grid_response["data"])
+                if rows_shown:
+                    row_count_placeholder.caption(
+                        f"**{_cnt}** rows shown (out of **{_total}** total)"
+                    )
+                    if allow_download:
+                        _rows_to_export = (
+                            grid_response.get("data")
+                            if (grid_response and grid_response.get("data") is not None)
+                            else rows_shown
+                        )
+                        _render_export_button(_rows_to_export, export_file_stem, key=export_button_key)
+                return
+        except Exception:
+            pass
+    if not _kitchen_master_plain_tables() and status_col:
+        _df = _style_df_status_rows(df, status_col)
+    else:
+        _df = df
+    st.dataframe(
+        _df,
+        use_container_width=True,
+        hide_index=True,
+        height=_table_height_px(),
+        column_config=_cc,
+    )
+    if rows_shown:
+        _total_count = len(rows_shown)
+        row_count_placeholder.caption(
+            f"**{_total_count}** rows shown (out of **{_total_count}** total)"
+        )
+        if allow_download:
+            _render_export_button(rows_shown, export_file_stem, key=export_button_key)
+
+
 def _render_generic_tab(
     tab_id,
     key_suffix="",
@@ -3946,29 +4143,22 @@ def _render_generic_tab(
         if str(c).strip().lower() in ("status", "status__c"):
             status_col = c
             break
-    # Native Streamlit dataframe only (safe mode: no AgGrid, optional no-Styler — see _kitchen_master_plain_tables).
+    # Kitchen Master: AgGrid Community (filters + getRowStyle colors) or native dataframe fallback.
     if HAS_EXCEL and not df_display.empty:
         _df_show = _coerce_numeric_columns(df_display.copy())
-        _cc = {"_has_opportunity": None}
         if status_col:
             if "_has_opportunity" not in _df_show.columns:
                 _df_show["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-            if not _kitchen_master_plain_tables():
-                _df_show = _style_df_status_rows(_df_show, status_col)
-        st.dataframe(
+        _render_master_table_aggrid_or_df(
             _df_show,
-            use_container_width=True,
-            hide_index=True,
-            height=_table_height_px(),
-            column_config=_cc,
+            rows_shown,
+            grid_key=f"master_kitchens_grid_{key_suffix}",
+            status_col=status_col,
+            row_count_placeholder=_row_count_placeholder,
+            allow_download=allow_download,
+            export_file_stem=f"{tab_id}_filtered",
+            export_button_key=f"export_{key_suffix}_{tab_id}_master",
         )
-        if rows_shown:
-            _total_count = len(rows_shown)
-            _row_count_placeholder.caption(
-                f"**{_total_count}** rows shown (out of **{_total_count}** total)"
-            )
-            if allow_download:
-                _render_export_button(rows_shown, f"{tab_id}_filtered", key=f"export_{key_suffix}_{tab_id}_df")
     elif not HAS_EXCEL:
         st.warning("Cannot show the data grid: pandas is not available in this environment.")
     elif not rows_shown:
@@ -5276,28 +5466,16 @@ def main():
                                 status_col_combined = c
                                 break
                         if HAS_EXCEL and not df_combined.empty:
-                            if _kitchen_master_plain_tables():
-                                _df_combined_show = df_combined
-                            else:
-                                _df_combined_show = _style_df_status_rows(df_combined, status_col_combined)
-                            st.dataframe(
-                                _df_combined_show,
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={"_has_opportunity": None},
-                                height=_table_height_px(),
+                            _render_master_table_aggrid_or_df(
+                                df_combined,
+                                rows_shown,
+                                grid_key="master_kitchens_grid_combined",
+                                status_col=status_col_combined,
+                                row_count_placeholder=_row_count_placeholder_combined,
+                                allow_download=can_export,
+                                export_file_stem="master_kitchens_combined_filtered",
+                                export_button_key="export_master_kitchens_combined_master",
                             )
-                            if rows_shown:
-                                _total_combined = len(rows_shown)
-                                _row_count_placeholder_combined.caption(
-                                    f"**{_total_combined}** rows shown (out of **{_total_combined}** total)"
-                                )
-                                if can_export:
-                                    _render_export_button(
-                                        rows_shown,
-                                        "master_kitchens_combined_filtered",
-                                        key="export_master_kitchens_combined_df",
-                                    )
             if not rows and not is_other_sheet and chosen_label:
                 st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
             elif not is_other_sheet and source_id:
@@ -5329,23 +5507,16 @@ def main():
                         (c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")),
                         None,
                     )
-                    if _kitchen_master_plain_tables():
-                        _df_single_show = display_df
-                    else:
-                        _df_single_show = _style_df_status_rows(display_df, status_col_ag)
-                    st.dataframe(
-                        _df_single_show,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={"_has_opportunity": None},
-                        height=_table_height_px(),
+                    _render_master_table_aggrid_or_df(
+                        display_df,
+                        rows_display,
+                        grid_key="master_kitchens_grid_single",
+                        status_col=status_col_ag,
+                        row_count_placeholder=_row_count_placeholder_single,
+                        allow_download=can_export,
+                        export_file_stem="master_kitchens_filtered",
+                        export_button_key="export_master_kitchens_single_master",
                     )
-                    _total_single = len(rows_display) if rows_display else 0
-                    _row_count_placeholder_single.caption(
-                        f"**{_total_single}** rows shown (out of **{_total_single}** total)"
-                    )
-                    if can_export:
-                        _render_export_button(rows_display, "master_kitchens_filtered", key="export_master_kitchens_single_df")
                 if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
                     st.markdown("---")
                     st.subheader("Pivot view")
