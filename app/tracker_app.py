@@ -1520,17 +1520,17 @@ def _kitchen_master_plain_tables() -> bool:
 def _kitchen_master_use_aggrid() -> bool:
     """When True, Kitchen Master uses streamlit-aggrid (Excel-like column filters + rowClassRules).
 
-    **Default is True** (same as earlier releases): sheet-like grid with status row colors via ``rowClassRules``.
-    Set ``KITCHEN_MASTER_AGGRID=0`` (or ``false``/``no``/``off``) in **Secrets** or env to use native
-    ``st.dataframe`` + Styler/HTML instead if the embedded iframe is blank on your deployment.
+    **Default is False** — Streamlit Cloud often shows an empty Ag Grid iframe while data exists; native
+    ``st.dataframe`` + Styler/HTML keeps the table visible with status colors.
+    Set ``KITCHEN_MASTER_AGGRID=1`` (or ``true``/``yes``/``on``) in **Secrets** or env to use the grid when it works for you.
     """
     v = (
         _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
-        or "1"
+        or "0"
     ).strip().lower()
-    if v in ("0", "false", "no", "off"):
-        return False
-    return True
+    if v in ("1", "true", "yes", "on"):
+        return True
+    return False
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -5173,7 +5173,8 @@ def _render_master_table_aggrid_or_df(
         except Exception:
             pass
         try:
-            _ch = min(1024, max(140, _viewport_h + 36))
+            # Taller minimum so Cloud layouts don’t clip the HTML table (iframe height is explicit).
+            _ch = min(1200, max(360, _viewport_h + 48))
             st_components.html(
                 f'<div style="width:100%;overflow:auto;font-family:system-ui,sans-serif;font-size:13px;">{_html_sty.to_html()}</div>',
                 height=_ch,
