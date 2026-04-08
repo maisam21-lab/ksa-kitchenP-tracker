@@ -1463,6 +1463,21 @@ def _is_pandas_styler(x) -> bool:
     return type(x).__name__ == "Styler" and hasattr(x, "data")
 
 
+def _deploy_git_info() -> tuple[str, str]:
+    """(short_sha_7, full_sha) from Streamlit Community Cloud / CI env — empty locally."""
+    for key in (
+        "STREAMLIT_GIT_COMMIT_SHA",
+        "SOURCE_VERSION",
+        "VERCEL_GIT_COMMIT_SHA",
+        "GITHUB_SHA",
+        "COMMIT_REF",
+    ):
+        v = (os.environ.get(key) or "").strip()
+        if len(v) >= 7:
+            return v[:7], v
+    return "", ""
+
+
 def _kitchen_master_row_count_caption(placeholder, text: str) -> None:
     """Row count line below (or in) the grid — avoid ``st.empty()`` above the table (extra vertical gap)."""
     if placeholder is not None:
@@ -6294,6 +6309,14 @@ def main():
     if section not in section_options:
         section = section_options[0]
         st.session_state["section_radio"] = section
+
+    _d7, _dfull = _deploy_git_info()
+    if _d7:
+        st.caption(
+            f"**Build:** `{_d7}` — if UI changes from GitHub are missing, open the app on "
+            f"[Streamlit Cloud](https://share.streamlit.io/) → **⋮** → **Reboot app**, or confirm the app tracks "
+            f"`main` on the correct repo."
+        )
 
     # Tab row: desktop buttons; compact mode uses a single segmented control.
     if _compact_layout_enabled():
