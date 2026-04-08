@@ -1455,9 +1455,9 @@ def _secrets_or_env_str(*names: str) -> str:
 def _kitchen_master_plain_tables() -> bool:
     """When True, native ``st.dataframe`` skips Pandas Styler (no row colors).
 
-    **Default False** — status row colors apply on the native table (Vacant / Occupied / Churning / no status / Vacant+opp).
+    **Default False** — status row colors apply (Vacant / Occupied / Churning / no status / Vacant+opp) in Ag Grid and in the dataframe fallback.
 
-    Set ``KITCHEN_MASTER_PLAIN_TABLES=1`` in secrets or env if Styler breaks rendering on your browser.
+    Remove ``KITCHEN_MASTER_PLAIN_TABLES`` from secrets (or set ``0``) if colors disappeared. Set ``KITCHEN_MASTER_PLAIN_TABLES=1`` only if Styler breaks rendering on your browser.
     Legacy: ``KITCHEN_MASTER_STYLED_ROWS=0`` also forces plain (no colors).
     """
     plain = (
@@ -4743,11 +4743,37 @@ def _should_hide_no_status_sparse_kitchen_row(r: dict) -> bool:
 
 
 def _is_kitchen_status_column_key(k) -> bool:
-    """True if this dict key is the kitchen Status field (any common casing / __c)."""
+    """True if this dict key is the kitchen Status field (SF, GSheet, BigQuery, or report exports)."""
     if k is None:
         return False
     n = re.sub(r"[\s_]+", "", str(k).strip().lower())
-    return n in ("status", "status__c", "statusc")
+    return n in (
+        "status",
+        "status__c",
+        "statusc",
+        "kitchenstatus__c",
+        "kitchenstatus",
+        "kitchenstatusc",
+        "kitchennumberstatus__c",
+    )
+
+
+def _status_column_from_dataframe(df: pd.DataFrame) -> str | None:
+    """Resolve the Status column for Kitchen Master row colors (Ag Grid rowClassRules + Styler fallback)."""
+    if df is None or df.empty:
+        return None
+    matches: list[str] = []
+    for c in df.columns:
+        if c == "_has_opportunity":
+            continue
+        if _is_kitchen_status_column_key(c):
+            matches.append(str(c))
+    if not matches:
+        return None
+    for prefer in ("Status", "status", "Status__c", "status__c"):
+        if prefer in matches:
+            return prefer
+    return matches[0]
 
 
 def _should_hide_list_price_and_kitchen_name_only_row(r: dict) -> bool:
@@ -5191,11 +5217,7 @@ def _render_generic_tab(
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
     df_display = pd.DataFrame(rows_shown)[display_cols] if display_cols and rows_shown else pd.DataFrame(rows_shown)
-    status_col = None
-    for c in df_display.columns:
-        if str(c).strip().lower() in ("status", "status__c"):
-            status_col = c
-            break
+    status_col = _status_column_from_dataframe(df_display)
     # Kitchen Master: AgGrid Community (filters + rowClassRules colors) or native dataframe fallback.
     if HAS_EXCEL and not df_display.empty:
         _df_show = df_display.copy()
@@ -6514,11 +6536,7 @@ def main():
                         if _disp_cols:
                             df_combined = df_combined[_disp_cols]
                         df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-                        status_col_combined = None
-                        for c in df_combined.columns:
-                            if str(c).strip().lower() in ("status", "status__c"):
-                                status_col_combined = c
-                                break
+                        status_col_combined = _status_column_from_dataframe(df_combined)
                         if HAS_EXCEL and not df_combined.empty:
                             _render_master_table_aggrid_or_df(
                                 df_combined,
@@ -6556,10 +6574,7 @@ def main():
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                 _row_count_placeholder_single = st.empty()
                 if display_df is not None and not display_df.empty:
-                    status_col_ag = next(
-                        (c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")),
-                        None,
-                    )
+                    status_col_ag = _status_column_from_dataframe(display_df)
                     _render_master_table_aggrid_or_df(
                         display_df,
                         rows_display,
