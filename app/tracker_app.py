@@ -4859,6 +4859,102 @@ def _status_column_from_dataframe(df: pd.DataFrame) -> str | None:
     return matches[0]
 
 
+def _kitchen_master_row_css_class_from_values(status_val, has_opportunity: bool) -> str:
+    """Bucket for Ag Grid row coloring (must match ``_aggrid_kitchen_master_status_custom_css`` classes)."""
+    try:
+        if status_val is None or pd.isna(status_val):
+            s = ""
+        else:
+            s = str(status_val).strip().lower()
+    except Exception:
+        s = ""
+    if not s or s in ("no status", "n/a", "na", "—", "-", "blocked"):
+        return "status-no-status"
+    if s == "churning":
+        return "status-churning"
+    if s == "occupied" or s == "sold":
+        return "status-occupied"
+    is_vacant = s == "vacant" or (
+        s.startswith("vacant")
+        and "occupied" not in s
+        and "sold" not in s
+        and "churning" not in s
+    )
+    if is_vacant:
+        return "status-vacant-opp" if has_opportunity else "status-vacant"
+    return "status-no-status"
+
+
+def _compute_km_row_cls_series(df: pd.DataFrame, status_col: str | None) -> pd.Series:
+    """Per-row CSS class for Kitchen Master Ag Grid (computed in Python — reliable vs JS IIFE rowClassRules)."""
+    if df is None or df.empty:
+        return pd.Series(dtype=object)
+    n = len(df.index)
+    if not status_col or str(status_col) not in df.columns:
+        return pd.Series(["status-no-status"] * n, index=df.index)
+    if "_has_opportunity" in df.columns:
+        ho = df["_has_opportunity"].fillna(False)
+        try:
+            ho = ho.astype(bool)
+        except Exception:
+            ho = ho.map(lambda x: bool(x) if pd.notna(x) else False)
+    else:
+        ho = pd.Series([False] * n, index=df.index)
+    out: list[str] = []
+    for i in df.index:
+        row = df.loc[i]
+        try:
+            sv = row[status_col] if status_col in row.index else None
+        except Exception:
+            sv = None
+        try:
+            hop = bool(ho.loc[i]) if i in ho.index else False
+        except Exception:
+            hop = False
+        out.append(_kitchen_master_row_css_class_from_values(sv, hop))
+    return pd.Series(out, index=df.index)
+
+
+def _aggrid_kitchen_master_row_class_rules_simple() -> dict:
+    """Row class rules using precomputed ``km_row_cls`` (AG Grid simple expressions)."""
+    _cls = (
+        "status-no-status",
+        "status-vacant-opp",
+        "status-vacant",
+        "status-churning",
+        "status-occupied",
+    )
+    # Use ``==`` (simple-expression mode); ``===`` can fail depending on AG Grid / streamlit-aggrid version.
+    return {c: f"data.km_row_cls == '{c}'" for c in _cls}
+
+
+def _aggrid_kitchen_master_status_custom_css() -> dict:
+    """Selector → style dict for streamlit-aggrid (theme-aware selectors for stronger override)."""
+    _red_dark = {"background-color": "#B22222 !important", "color": "white !important"}
+    _red_cell = {"background-color": "#FEE2E2 !important"}
+    _green = {"background-color": "#D1FAE5 !important"}
+    _yellow = {"background-color": "#FDE68A !important"}
+    rows: dict[str, dict] = {
+        ".ag-row.status-no-status": dict(_red_dark),
+        ".ag-row.status-no-status .ag-cell": dict(_red_dark),
+        ".ag-row.status-vacant-opp": dict(_red_cell),
+        ".ag-row.status-vacant-opp .ag-cell": dict(_red_cell),
+        ".ag-row.status-vacant": dict(_green),
+        ".ag-row.status-vacant .ag-cell": dict(_green),
+        ".ag-row.status-churning": dict(_yellow),
+        ".ag-row.status-churning .ag-cell": dict(_yellow),
+        ".ag-row.status-occupied": dict(_red_cell),
+        ".ag-row.status-occupied .ag-cell": dict(_red_cell),
+    }
+    # Duplicate under common AG Grid theme roots so row colors win over Streamlit / Quartz defaults.
+    out: dict[str, dict] = {}
+    for sel, stl in rows.items():
+        out[sel] = stl
+        for root in (".ag-theme-streamlit", ".ag-theme-quartz", ".ag-theme-alpine", ".ag-theme-balham"):
+            out[f"{root} {sel}"] = dict(stl)
+    return out
+
+
 def _should_hide_list_price_and_kitchen_name_only_row(r: dict) -> bool:
     """Hide sparse rows where the only data is List Price + Kitchen Number Name (sheet padding / incomplete)."""
     if not isinstance(r, dict):
@@ -4922,43 +5018,6 @@ def _filter_junk_kitchen_records(rows: list) -> list:
     return [r for r in rows if isinstance(r, dict) and not _should_hide_incomplete_kitchen_row(r)]
 
 
-def _status_row_class_rules_and_css(status_col_name: str):
-    """Return (rowClassRules dict, custom_css dict) for AgGrid status color coding.
-
-    ``streamlit-aggrid`` 1.x expects ``custom_css`` as a mapping of selector → style dict; a raw CSS
-    string breaks the component and the grid iframe renders blank on Streamlit Cloud.
-    """
-    # JS-safe column key for data[] access
-    col_key = status_col_name.replace("\\", "\\\\").replace("'", "\\'")
-    # Expressions use AG Grid rowClassRules context: 'data' is the row data
-    data_ref = f"data['{col_key}']"
-    data_ref_ho = "data['_has_opportunity']"
-    row_class_rules = {
-        "status-no-status": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); return !s||s==='no status'||s==='n/a'||s==='na'||s==='—'||s==='-'||s==='blocked';}})()",
-        "status-vacant-opp": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); var v=(s==='vacant'||(s.indexOf('vacant')===0&&s.indexOf('occupied')<0&&s.indexOf('sold')<0&&s.indexOf('churning')<0)); return v&&{data_ref_ho};}})()",
-        "status-vacant": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); var v=(s==='vacant'||(s.indexOf('vacant')===0&&s.indexOf('occupied')<0&&s.indexOf('sold')<0&&s.indexOf('churning')<0)); return v&&!{data_ref_ho};}})()",
-        "status-churning": f"({data_ref}!=null?String({data_ref}).trim():'').toLowerCase()==='churning'",
-        "status-occupied": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); return s==='occupied'||s==='sold';}})()",
-    }
-    _red_dark = {"background-color": "#B22222 !important", "color": "white !important"}
-    _red_cell = {"background-color": "#FEE2E2 !important"}
-    _green = {"background-color": "#D1FAE5 !important"}
-    _yellow = {"background-color": "#FDE68A !important"}
-    custom_css = {
-        ".ag-row.status-no-status": dict(_red_dark),
-        ".ag-row.status-no-status .ag-cell": dict(_red_dark),
-        ".ag-row.status-vacant-opp": dict(_red_cell),
-        ".ag-row.status-vacant-opp .ag-cell": dict(_red_cell),
-        ".ag-row.status-vacant": dict(_green),
-        ".ag-row.status-vacant .ag-cell": dict(_green),
-        ".ag-row.status-churning": dict(_yellow),
-        ".ag-row.status-churning .ag-cell": dict(_yellow),
-        ".ag-row.status-occupied": dict(_red_cell),
-        ".ag-row.status-occupied .ag-cell": dict(_red_cell),
-    }
-    return row_class_rules, custom_css
-
-
 def _kuwait_regional_hidden_column(name: str) -> bool:
     n = (name or "").strip().lower()
     alnum = re.sub(r"[^a-z0-9]", "", n)
@@ -5016,7 +5075,8 @@ def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[
 def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, dict, bool]:
     """Build grid options + optional custom CSS for row colors.
 
-    Uses ``rowClassRules`` + ``custom_css`` (not ``getRowStyle``/JsCode) — JsCode often yields a blank grid on Streamlit Cloud.
+    Row colors use a Python-computed ``km_row_cls`` column plus simple ``rowClassRules`` (reliable on Streamlit Cloud).
+    ``km_row_cls`` and ``_has_opportunity`` are omitted from column defs but remain in row data. JsCode/getRowStyle is not used.
     For modest row counts, ``domLayout: autoHeight`` removes the large empty band inside the grid.
     Returns ``(grid_options, custom_css_dict, use_auto_height)``.
     """
@@ -5064,7 +5124,8 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
     go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
     if "floatingFiltersHeight" in go:
         del go["floatingFiltersHeight"]
-    _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
+    _hidden_fields = {"_has_opportunity", "km_row_cls"}
+    _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") not in _hidden_fields]
     go["columnDefs"] = _column_defs
     for cdef in _column_defs:
         _fn = cdef.get("field")
@@ -5079,9 +5140,9 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
         if cdef.get("type") == []:
             cdef.pop("type", None)
     custom_css: dict = {}
-    if status_col:
-        rules, custom_css = _status_row_class_rules_and_css(status_col)
-        go["rowClassRules"] = rules
+    if "km_row_cls" in df.columns:
+        go["rowClassRules"] = _aggrid_kitchen_master_row_class_rules_simple()
+        custom_css = _aggrid_kitchen_master_status_custom_css()
     return go, custom_css, _auto_h
 
 
@@ -5123,9 +5184,18 @@ def _render_master_table_aggrid_or_df(
         and _kitchen_master_use_aggrid()
         and not _use_compact_tables()
     )
+    df_ag = df
+    if status_col and str(status_col) in df.columns:
+        df_ag = df.copy()
+        if "_has_opportunity" not in df_ag.columns:
+            if rows_shown is not None and len(rows_shown) == len(df_ag.index):
+                df_ag["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
+            else:
+                df_ag["_has_opportunity"] = False
+        df_ag["km_row_cls"] = _compute_km_row_cls_series(df_ag, status_col)
     if want_grid:
         try:
-            go, ag_custom_css, _use_ag_auto_height = _build_aggrid_community_grid_options(df, status_col)
+            go, ag_custom_css, _use_ag_auto_height = _build_aggrid_community_grid_options(df_ag, status_col)
         except Exception:
             go = None
         if go:
@@ -5154,7 +5224,7 @@ def _render_master_table_aggrid_or_df(
                 _kwargs["custom_css"] = ag_custom_css
             grid_response = None
             try:
-                grid_response = AgGrid(df, **_kwargs)
+                grid_response = AgGrid(df_ag, **_kwargs)
             except Exception:
                 grid_response = None
             if grid_response is not None:
