@@ -8,6 +8,7 @@ import csv
 import html
 import io
 import json
+import math
 import os
 import re
 import sqlite3
@@ -3765,6 +3766,129 @@ def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _prettify_numeric_scalar_for_display(x):
+    """Drop trailing fractional noise (10930.0 → int, 17.3 → rounded) for table display."""
+    if x is None:
+        return x
+    try:
+        if pd.isna(x):
+            return x
+    except TypeError:
+        pass
+    try:
+        xf = float(x)
+    except (TypeError, ValueError):
+        return x
+    if not math.isfinite(xf):
+        return x
+    if abs(xf - round(xf)) < 1e-9 * max(1.0, abs(xf)):
+        return int(round(xf))
+    return round(xf, 4)
+
+
+def _prettify_numeric_columns_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Integer-like values as int; other floats to 4 dp — avoids 10930.000000 in the UI."""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    skip = {"_has_opportunity"}
+    for col in df.columns:
+        if col in skip:
+            continue
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        df[col] = df[col].map(_prettify_numeric_scalar_for_display)
+    return df
+
+
+# Normalized status labels we treat as expected kitchen lifecycle (not "odd")
+_STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
+    {"Vacant", "Churning", "Occupied", "Sold", "No status"}
+)
+
+_KITCHEN_TYPE_COL_KEYS = ("Type", "Kitchen Type", "Type__c")
+_KITCHEN_FLOOR_PRICE_KEYS = ("Floor Price", "Floor_Price__c")
+_KITCHEN_LIST_PRICE_KEYS = ("List Price", "Sell_Price__c", "List_Price__c")
+
+
+def _find_row_column_key(r: dict, candidates: tuple[str, ...]) -> str | None:
+    """First matching key on the row (exact), else case/spacing-insensitive match."""
+    if not r:
+        return None
+    for c in candidates:
+        if c in r:
+            return c
+    norm_map = {re.sub(r"[\s_]+", "", str(k).lower()): k for k in r}
+    for c in candidates:
+        needle = re.sub(r"[\s_]+", "", c.lower())
+        if needle in norm_map:
+            return norm_map[needle]
+    return None
+
+
+def _is_missing_kitchen_type_value(v) -> bool:
+    if v is None:
+        return True
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "none", "n/a", "na", "—", "-"):
+        return True
+    return False
+
+
+def _is_missing_price_value(v) -> bool:
+    """Treat blank, non-numeric, NaN, and zero as missing for junk-row detection."""
+    if v is None:
+        return True
+    if isinstance(v, str) and not str(v).strip():
+        return True
+    try:
+        if pd.isna(v):
+            return True
+    except Exception:
+        pass
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return True
+    if not math.isfinite(f):
+        return True
+    if abs(f) < 1e-12:
+        return True
+    return False
+
+
+def _is_odd_kitchen_status_normalized(norm: str) -> bool:
+    n = (norm or "").strip()
+    if not n:
+        return False
+    return n not in _STANDARD_KITCHEN_STATUS_NORMALIZED
+
+
+def _should_hide_junk_kitchen_row(r: dict) -> bool:
+    """Hide rows with no type, no floor price, no list price, and a non-standard status (data-quality junk)."""
+    if not isinstance(r, dict):
+        return False
+    tk = _find_row_column_key(r, _KITCHEN_TYPE_COL_KEYS)
+    fk = _find_row_column_key(r, _KITCHEN_FLOOR_PRICE_KEYS)
+    lk = _find_row_column_key(r, _KITCHEN_LIST_PRICE_KEYS)
+    if tk is None or fk is None or lk is None:
+        return False
+    if (
+        _is_missing_kitchen_type_value(r.get(tk))
+        and _is_missing_price_value(r.get(fk))
+        and _is_missing_price_value(r.get(lk))
+    ):
+        norm = _status_normalized_from_row(r)
+        return _is_odd_kitchen_status_normalized(norm)
+    return False
+
+
+def _filter_out_junk_kitchen_rows(rows: list) -> list:
+    if not rows:
+        return rows
+    return [r for r in rows if not _should_hide_junk_kitchen_row(r)]
+
+
 def _is_account_country_column(col_name: str) -> bool:
     """True if this column is Account Country / facility_country (any casing/spacing/dots/prefix). Hide in Master Kitchens."""
     if not col_name:
@@ -4052,6 +4176,7 @@ def _render_master_table_aggrid_or_df(
     """Kitchen Master table: AgGrid Community (rowClassRules + custom_css colors) or native dataframe fallback."""
     if df is None or df.empty:
         return
+    df = _prettify_numeric_columns_for_display(df)
     _cc = {"_has_opportunity": None}
     want_grid = bool(
         _HAS_AGGRI
@@ -4187,6 +4312,7 @@ def _render_generic_tab(
         rows_shown = rows
     if regional_display in ("Kuwait", "UAE"):
         cols, rows_shown = _filter_regional_inventory_columns(regional_display, cols, rows_shown)
+    rows_shown = _filter_out_junk_kitchen_rows(rows_shown)
     _suppress_km_status_filter = False
     _compact_tables = _use_compact_tables()
     if _compact_tables:
@@ -5552,6 +5678,7 @@ def main():
                         for r in sheet_rows:
                             combined_rows.append({"Sheet": label, **r})
                     combined_rows = [r for r in combined_rows if not _is_empty_record(r)]
+                    combined_rows = _filter_out_junk_kitchen_rows(combined_rows)
                     if not combined_rows:
                         st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                     else:
@@ -5600,6 +5727,7 @@ def main():
                 # No filter bar: single table like Excel sheet (filter via column filters below)
                 use_facility_tabs = False
                 rows_filtered = [r for r in rows if not _is_empty_record(r)]
+                rows_filtered = _filter_out_junk_kitchen_rows(rows_filtered)
                 rows_display = rows_filtered  # used for table; updated by column filters when applied
                 st.markdown("---")
                 if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
