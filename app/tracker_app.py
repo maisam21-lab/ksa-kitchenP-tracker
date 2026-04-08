@@ -4309,12 +4309,18 @@ def main():
         """, unsafe_allow_html=True)
 
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
-    # NOTE: we inject download-hide CSS later (after can_export is computed).
     st.markdown(
         """
     <style>
-    /* Keep dataframe toolbar visible (Search + Fullscreen) */
+    /* Keep dataframe toolbar visible (Search + Fullscreen); hide only built-in CSV download */
     [data-testid="stElementToolbar"] { display: flex !important; visibility: visible !important; }
+    [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+    [data-testid="stElementToolbar"] button:nth-of-type(2) { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+    [data-testid="stElementToolbar"] [aria-label*="ownload"],
+    [data-testid="stElementToolbar"] [aria-label*=" CSV"],
+    [data-testid="stElementToolbar"] [title*="ownload"],
+    [data-testid="stElementToolbar"] [title*=" CSV"],
+    [data-testid="stElementToolbar"] button[title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
     /* AgGrid toolbar: hide Download as CSV (we use our own export gating) */
     [title="Download as CSV"],
     button[title="Download as CSV"],
@@ -5130,21 +5136,6 @@ def main():
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
 
-    # Hide the built-in dataframe Download control for non-export users (must run AFTER can_export is computed).
-    if not can_export:
-        st.markdown(
-            """
-        <style>
-        [data-testid="stElementToolbar"] > *:nth-child(2) { display: none !important; visibility: hidden !important; }
-        [data-testid="stElementToolbar"] button:nth-of-type(2) { display: none !important; visibility: hidden !important; }
-        [data-testid="stElementToolbar"] [aria-label*="ownload"],
-        [data-testid="stElementToolbar"] [aria-label*=" CSV"],
-        [data-testid="stElementToolbar"] [title*="ownload"],
-        [data-testid="stElementToolbar"] [title*=" CSV"] { display: none !important; visibility: hidden !important; }
-        </style>
-            """,
-            unsafe_allow_html=True,
-        )
     # Developer-only diagnostics (collapsed) to confirm export gating without exposing to normal users.
     if _is_developer():
         with st.sidebar.expander("Diagnostics (developer)", expanded=False):
