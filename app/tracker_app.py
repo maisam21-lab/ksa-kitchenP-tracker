@@ -21,6 +21,7 @@ from pathlib import Path
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as st_components
 
 try:
     from app import auth
@@ -5091,12 +5092,7 @@ def _render_master_table_aggrid_or_df(
                 )
                 if ag_custom_css and str(ag_custom_css).strip():
                     _kwargs["custom_css"] = str(ag_custom_css)
-                if GridUpdateMode and DataReturnMode:
-                    try:
-                        _kwargs["update_mode"] = GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED
-                        _kwargs["data_return_mode"] = DataReturnMode.FILTERED_AND_SORTED
-                    except Exception:
-                        pass
+                # Do not set GridUpdateMode/DataReturnMode — deprecated in st_aggrid and can raise, forcing silent fallback to dataframe (no row colors).
                 grid_response = AgGrid(df, **_kwargs)
                 _total = len(rows_shown) if rows_shown else 0
                 _cnt = _total
@@ -5122,30 +5118,58 @@ def _render_master_table_aggrid_or_df(
         except Exception:
             pass
     if not _kitchen_master_plain_tables() and status_col:
-        _df = _style_df_status_rows(df, status_col)
+        _df_show = _style_df_status_rows(df, status_col)
     else:
-        _df = df
-    # Streamlit applies ``column_config`` (NumberColumn, etc.) after Styler and often strips row
-    # background colors. For Styler, only hide the helper column; keep full ``_cc`` for plain DataFrame.
-    _df_cc = _cc
-    if _is_pandas_styler(_df):
-        _df_cc = {"_has_opportunity": None}
-    try:
-        st.dataframe(
-            _df,
-            use_container_width=True,
-            hide_index=True,
-            height=_viewport_h,
-            column_config=_df_cc,
-        )
-    except Exception:
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            height=_viewport_h,
-            column_config=_cc,
-        )
+        _df_show = df
+    # Pandas Styler: ``st.dataframe`` often drops row background colors in recent Streamlit; embed HTML instead.
+    if _is_pandas_styler(_df_show):
+        _html_sty = _df_show
+        try:
+            if hasattr(_df_show, "data") and "_has_opportunity" in _df_show.data.columns:
+                _html_sty = _df_show.hide(axis="columns", subset=["_has_opportunity"])
+        except Exception:
+            pass
+        try:
+            _ch = min(1024, max(140, _viewport_h + 36))
+            st_components.html(
+                f'<div style="width:100%;overflow:auto;font-family:system-ui,sans-serif;font-size:13px;">{_html_sty.to_html()}</div>',
+                height=_ch,
+                scrolling=True,
+            )
+        except Exception:
+            try:
+                st.dataframe(
+                    _df_show,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=_viewport_h,
+                    column_config={"_has_opportunity": None},
+                )
+            except Exception:
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=_viewport_h,
+                    column_config=_cc,
+                )
+    else:
+        try:
+            st.dataframe(
+                _df_show,
+                use_container_width=True,
+                hide_index=True,
+                height=_viewport_h,
+                column_config=_cc,
+            )
+        except Exception:
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                height=_viewport_h,
+                column_config=_cc,
+            )
     if rows_shown:
         _total_count = len(rows_shown)
         _kitchen_master_row_count_caption(
@@ -5468,7 +5492,14 @@ def main():
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
     /* Hide Streamlit default header (teal bar with page title and link icon) */
-    header[data-testid="stHeader"] { display: none !important; }
+    header[data-testid="stHeader"] { display: none !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; border: none !important; overflow: hidden !important; }
+    /* Streamlit 1.30+: remove dead vertical gap reserved for toolbar / decoration when header is hidden */
+    div[data-testid="stToolbar"] { display: none !important; height: 0 !important; }
+    div[data-testid="stDecoration"] { display: none !important; height: 0 !important; }
+    [data-testid="stMain"] { padding-top: 0 !important; }
+    [data-testid="stMain"] > div { padding-top: 0 !important; margin-top: 0 !important; }
+    .stMainBlockContainer { padding-top: 0 !important; }
+    .stMain .block-container { padding-top: 0.5rem !important; }
     /* ========== Header: Tailwind-style single row (px-6 py-3, border-gray-100, shadow-sm) ========== */
     .header-top-bar + div {
         display: flex !important;
