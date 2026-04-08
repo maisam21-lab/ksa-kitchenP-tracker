@@ -3376,7 +3376,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     if not _show_combined:
         _single_tab_id = source_ids.get(_labels_to_use[0], _labels_to_use[0])
         _single_rows = list_generic_tab(_single_tab_id, source=gsource) or []
-        _single_rows = [r for r in _single_rows if not _is_empty_record(r)]
+        _single_rows = _filter_empty_records([r for r in _single_rows if isinstance(r, dict)])
         _render_generic_tab(
             _single_tab_id,
             key_suffix=f"preview_{gsource}_{_single_tab_id}",
@@ -3395,7 +3395,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
         sheet_rows = list_generic_tab(tab_id, source=gsource) or []
         for r in sheet_rows:
             combined_rows.append({"Sheet": label, **r})
-    combined_rows = [r for r in combined_rows if not _is_empty_record(r)]
+    combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
     if not combined_rows:
         st.info("No rows in the selected sheets yet.")
         return
@@ -3801,94 +3801,6 @@ def _prettify_numeric_columns_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# Normalized status labels we treat as expected kitchen lifecycle (not "odd")
-_STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
-    {"Vacant", "Churning", "Occupied", "Sold", "No status"}
-)
-
-_KITCHEN_TYPE_COL_KEYS = ("Type", "Kitchen Type", "Type__c")
-_KITCHEN_FLOOR_PRICE_KEYS = ("Floor Price", "Floor_Price__c")
-_KITCHEN_LIST_PRICE_KEYS = ("List Price", "Sell_Price__c", "List_Price__c")
-
-
-def _find_row_column_key(r: dict, candidates: tuple[str, ...]) -> str | None:
-    """First matching key on the row (exact), else case/spacing-insensitive match."""
-    if not r:
-        return None
-    for c in candidates:
-        if c in r:
-            return c
-    norm_map = {re.sub(r"[\s_]+", "", str(k).lower()): k for k in r}
-    for c in candidates:
-        needle = re.sub(r"[\s_]+", "", c.lower())
-        if needle in norm_map:
-            return norm_map[needle]
-    return None
-
-
-def _is_missing_kitchen_type_value(v) -> bool:
-    if v is None:
-        return True
-    s = str(v).strip()
-    if not s or s.lower() in ("nan", "none", "n/a", "na", "—", "-"):
-        return True
-    return False
-
-
-def _is_missing_price_value(v) -> bool:
-    """Treat blank, non-numeric, NaN, and zero as missing for junk-row detection."""
-    if v is None:
-        return True
-    if isinstance(v, str) and not str(v).strip():
-        return True
-    try:
-        if pd.isna(v):
-            return True
-    except Exception:
-        pass
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return True
-    if not math.isfinite(f):
-        return True
-    if abs(f) < 1e-12:
-        return True
-    return False
-
-
-def _is_odd_kitchen_status_normalized(norm: str) -> bool:
-    n = (norm or "").strip()
-    if not n:
-        return False
-    return n not in _STANDARD_KITCHEN_STATUS_NORMALIZED
-
-
-def _should_hide_junk_kitchen_row(r: dict) -> bool:
-    """Hide rows with no type, no floor price, no list price, and a non-standard status (data-quality junk)."""
-    if not isinstance(r, dict):
-        return False
-    tk = _find_row_column_key(r, _KITCHEN_TYPE_COL_KEYS)
-    fk = _find_row_column_key(r, _KITCHEN_FLOOR_PRICE_KEYS)
-    lk = _find_row_column_key(r, _KITCHEN_LIST_PRICE_KEYS)
-    if tk is None or fk is None or lk is None:
-        return False
-    if (
-        _is_missing_kitchen_type_value(r.get(tk))
-        and _is_missing_price_value(r.get(fk))
-        and _is_missing_price_value(r.get(lk))
-    ):
-        norm = _status_normalized_from_row(r)
-        return _is_odd_kitchen_status_normalized(norm)
-    return False
-
-
-def _filter_out_junk_kitchen_rows(rows: list) -> list:
-    if not rows:
-        return rows
-    return [r for r in rows if not _should_hide_junk_kitchen_row(r)]
-
-
 def _is_account_country_column(col_name: str) -> bool:
     """True if this column is Account Country / facility_country (any casing/spacing/dots/prefix). Hide in Master Kitchens."""
     if not col_name:
@@ -3946,56 +3858,48 @@ def _normalize_status_label(val) -> str:
     return s
 
 
-def _apply_kitchen_master_status_multiselect(
-    rows_shown: list,
-    cols: list | None,
-    *,
-    key_suffix: str,
-) -> tuple[list, bool]:
-    """Checkbox-style status filter (AG Grid Community has no Excel-style Set Filter without Enterprise).
-
-    Returns ``(filtered rows, suppress_aggrid_status_column_filter)``. When the multiselect is shown,
-    the Status column's Ag Grid filter is turned off to avoid duplicating the same control.
-    """
-    if not rows_shown or not cols:
-        return rows_shown, False
-    status_key = None
-    for c in cols:
-        cn = str(c).strip().lower()
-        if cn == "status" or cn == "status__c":
-            status_key = c
-            break
-    if not status_key:
-        return rows_shown, False
-    present_list = sorted({_status_normalized_from_row(r) for r in rows_shown if isinstance(r, dict)})
-    present_list = [p for p in present_list if p != ""]
-    if not present_list:
-        return rows_shown, False
-    order = ["Vacant", "Churning", "Occupied", "Sold", "No status"]
-    opts = [x for x in order if x in present_list] + sorted([x for x in present_list if x not in order])
-    _sel = st.multiselect(
-        "Filter by status",
-        options=opts,
-        default=opts,
-        key=f"km_status_ms_{key_suffix}",
-        help="Show only kitchens whose status is in this list. Same normalization as row colors (Vacant, Occupied/Sold, Churning, no status, Vacant + opportunity).",
-    )
-    if not _sel:
-        return rows_shown, True
-    allowed = set(_sel)
-    filtered = [r for r in rows_shown if isinstance(r, dict) and _status_normalized_from_row(r) in allowed]
-    return filtered, True
+def _cell_is_empty_for_empty_row_check(v) -> bool:
+    """True if a cell counts as empty when deciding whether a whole row is blank."""
+    if v is None:
+        return True
+    try:
+        if v is pd.NA:
+            return True
+    except Exception:
+        pass
+    try:
+        if pd.isna(v):
+            return True
+    except Exception:
+        pass
+    if isinstance(v, float) and math.isnan(v):
+        return True
+    s = str(v).strip()
+    if not s:
+        return True
+    sl = s.lower()
+    if sl in ("nan", "none", "n/a", "na", "—", "-", "<na>", "#n/a"):
+        return True
+    return False
 
 
 def _is_empty_record(row) -> bool:
-    """True if the row has no meaningful data (all values empty, null, or whitespace)."""
+    """True if the row has no meaningful data (all values empty, null, whitespace, or NA-like)."""
     if not row or not isinstance(row, dict):
         return True
-    for v in row.values():
-        s = str(v).strip() if v is not None else ""
-        if s and s.lower() not in ("nan", "none", "n/a", "na", "—", "-"):
+    for k, v in row.items():
+        if k == "_has_opportunity":
+            continue
+        if not _cell_is_empty_for_empty_row_check(v):
             return False
     return True
+
+
+def _filter_empty_records(rows: list) -> list:
+    """Drop entirely empty dict rows (used before displaying tables)."""
+    if not rows:
+        return rows
+    return [r for r in rows if isinstance(r, dict) and not _is_empty_record(r)]
 
 
 def _status_row_class_rules_and_css(status_col_name: str):
@@ -4082,12 +3986,7 @@ def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[
     return cols2, rows2
 
 
-def _build_aggrid_community_grid_options(
-    df: pd.DataFrame,
-    status_col: str | None,
-    *,
-    suppress_status_column_filter: bool = False,
-) -> tuple[dict, str]:
+def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, str]:
     """Build grid options + optional custom CSS for row colors.
 
     Uses ``rowClassRules`` + ``custom_css`` (not ``getRowStyle``/JsCode) — JsCode often yields a blank grid on Streamlit Cloud.
@@ -4135,15 +4034,6 @@ def _build_aggrid_community_grid_options(
     go["columnDefs"] = _column_defs
     for cdef in _column_defs:
         _fn = cdef.get("field")
-        if (
-            suppress_status_column_filter
-            and status_col
-            and _fn == status_col
-        ):
-            cdef["filter"] = False
-            cdef["floatingFilter"] = False
-            cdef["suppressHeaderFilterButton"] = True
-            continue
         if _is_facility_name_aggrid_column(_fn):
             cdef["filter"] = False
             cdef["floatingFilter"] = False
@@ -4171,7 +4061,6 @@ def _render_master_table_aggrid_or_df(
     allow_download: bool,
     export_file_stem: str,
     export_button_key: str,
-    suppress_aggrid_status_filter: bool = False,
 ) -> None:
     """Kitchen Master table: AgGrid Community (rowClassRules + custom_css colors) or native dataframe fallback."""
     if df is None or df.empty:
@@ -4187,11 +4076,7 @@ def _render_master_table_aggrid_or_df(
     )
     if want_grid:
         try:
-            go, ag_custom_css = _build_aggrid_community_grid_options(
-                df,
-                status_col,
-                suppress_status_column_filter=suppress_aggrid_status_filter,
-            )
+            go, ag_custom_css = _build_aggrid_community_grid_options(df, status_col)
             if go:
                 _kwargs = dict(
                     gridOptions=go,
@@ -4284,7 +4169,7 @@ def _render_generic_tab(
     if not rows:
         st.info("No data yet. Data is refreshed every 15 minutes by the scheduler.")
         return
-    rows = [r for r in rows if not _is_empty_record(r)]
+    rows = _filter_empty_records([r for r in (rows or []) if isinstance(r, dict)])
     if not rows:
         st.info("No data yet (all rows are empty).")
         return
@@ -4312,8 +4197,6 @@ def _render_generic_tab(
         rows_shown = rows
     if regional_display in ("Kuwait", "UAE"):
         cols, rows_shown = _filter_regional_inventory_columns(regional_display, cols, rows_shown)
-    rows_shown = _filter_out_junk_kitchen_rows(rows_shown)
-    _suppress_km_status_filter = False
     _compact_tables = _use_compact_tables()
     if _compact_tables:
         _flt = st.container()
@@ -4371,12 +4254,7 @@ def _render_generic_tab(
                 r for r in rows_shown
                 if str((r or {}).get(_mf_col, "")).strip() in _mf_set
             ]
-    else:
-        rows_shown, _suppress_km_status_filter = _apply_kitchen_master_status_multiselect(
-            rows_shown,
-            cols,
-            key_suffix=f"{key_suffix}_{tab_id}",
-        )
+    rows_shown = _filter_empty_records(rows_shown)
     _row_count_placeholder = st.empty()
     st.divider()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
@@ -4402,7 +4280,6 @@ def _render_generic_tab(
             allow_download=allow_download,
             export_file_stem=f"{tab_id}_filtered",
             export_button_key=f"export_{key_suffix}_{tab_id}_master",
-            suppress_aggrid_status_filter=_suppress_km_status_filter,
         )
     elif not HAS_EXCEL:
         st.warning("Cannot show the data grid: pandas is not available in this environment.")
@@ -5677,8 +5554,7 @@ def main():
                         sheet_rows = list_generic_tab(tab_id, source="gsheet") or []
                         for r in sheet_rows:
                             combined_rows.append({"Sheet": label, **r})
-                    combined_rows = [r for r in combined_rows if not _is_empty_record(r)]
-                    combined_rows = _filter_out_junk_kitchen_rows(combined_rows)
+                    combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
                     if not combined_rows:
                         st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
                     else:
@@ -5688,12 +5564,7 @@ def main():
                             _df_temp = pd.DataFrame(combined_rows)
                             cols_combined = sorted(_df_temp.columns.tolist())
                         cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
-                        rows_shown = combined_rows
-                        rows_shown, _supp_combined = _apply_kitchen_master_status_multiselect(
-                            rows_shown,
-                            cols_combined,
-                            key_suffix="combined",
-                        )
+                        rows_shown = _filter_empty_records(combined_rows)
                         _row_count_placeholder_combined = st.empty()
                         st.divider()
                         df_combined = pd.DataFrame(rows_shown)
@@ -5717,7 +5588,6 @@ def main():
                                 allow_download=can_export,
                                 export_file_stem="master_kitchens_combined_filtered",
                                 export_button_key="export_master_kitchens_combined_master",
-                                suppress_aggrid_status_filter=_supp_combined,
                             )
             if not rows and not is_other_sheet and chosen_label:
                 st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
@@ -5726,25 +5596,17 @@ def main():
                 is_tracker = source_id == "main_tracker"
                 # No filter bar: single table like Excel sheet (filter via column filters below)
                 use_facility_tabs = False
-                rows_filtered = [r for r in rows if not _is_empty_record(r)]
-                rows_filtered = _filter_out_junk_kitchen_rows(rows_filtered)
+                rows_filtered = _filter_empty_records([r for r in (rows or []) if isinstance(r, dict)])
                 rows_display = rows_filtered  # used for table; updated by column filters when applied
                 st.markdown("---")
                 if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
                     st.info("No data in this source.")
                 cols_to_show: list = []
-                _supp_single = False
                 if rows_filtered and not use_facility_tabs:
                     all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
                     # Master Kitchens: hide Account Country and Sheet from the sheet
                     all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     cols_to_show = all_cols
-                    rows_display = rows_filtered
-                    rows_display, _supp_single = _apply_kitchen_master_status_multiselect(
-                        rows_display,
-                        cols_to_show,
-                        key_suffix=f"mk_{str(source_id).replace(' ', '_')}",
-                    )
                 display_df = None
                 if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                     display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
@@ -5766,7 +5628,6 @@ def main():
                         allow_download=can_export,
                         export_file_stem="master_kitchens_filtered",
                         export_button_key="export_master_kitchens_single_master",
-                        suppress_aggrid_status_filter=_supp_single,
                     )
                 if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
                     st.markdown("---")
