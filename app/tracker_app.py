@@ -4975,6 +4975,13 @@ def _render_master_table_aggrid_or_df(
 ) -> None:
     """Kitchen Master table: AgGrid Community (rowClassRules + custom_css colors) or native dataframe fallback."""
     if df is None or df.empty:
+        if rows_shown:
+            st.warning(
+                "The table is empty after preparing rows (unexpected). Try **Refresh** in the sidebar, or switch "
+                "**Kitchen Master data source** to **Google Sheet** if you expect live sheet data."
+            )
+        else:
+            st.info("No rows to show in this view.")
         return
     df = _prepare_kitchen_master_dataframe_for_display(df, rows_shown)
     _cc = {"_has_opportunity": None}
@@ -6339,8 +6346,20 @@ def main():
                     both_sources_available = bool(gsheet_tab_options)
                     _src_key = "master_kitchens_data_source"
                     if both_sources_available:
-                        if _src_key not in st.session_state:
-                            st.session_state[_src_key] = "bigquery" if bq_rows is not None else "gsheet"
+                        # Default BigQuery; user can switch here — previously the sheet looked "gone" with no control.
+                        st.session_state.setdefault(_src_key, "bigquery")
+                        st.radio(
+                            "Kitchen Master data source",
+                            options=["bigquery", "gsheet"],
+                            key=_src_key,
+                            horizontal=True,
+                            format_func=lambda x: (
+                                "BigQuery (refreshed every ~3 min)"
+                                if x == "bigquery"
+                                else "Google Sheet (live workbook)"
+                            ),
+                            help="If the facility grid looks wrong or empty, try **Google Sheet**. BigQuery is the warehouse copy.",
+                        )
                     else:
                         st.session_state[_src_key] = "bigquery"
                     use_bq = st.session_state.get(_src_key) == "bigquery"
