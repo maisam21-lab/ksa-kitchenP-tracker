@@ -1517,20 +1517,17 @@ def _kitchen_master_plain_tables() -> bool:
     return False
 
 
-def _kitchen_master_use_aggrid() -> bool:
-    """When True, Kitchen Master uses streamlit-aggrid (Excel-like column filters + rowClassRules).
-
-    **Default is False** — Streamlit Cloud often shows an empty Ag Grid iframe while data exists; native
-    ``st.dataframe`` + Styler/HTML keeps the table visible with status colors.
-    Set ``KITCHEN_MASTER_AGGRID=1`` (or ``true``/``yes``/``on``) in **Secrets** or env to use the grid when it works for you.
-    """
+def _kitchen_master_aggrid_secret_force() -> bool | None:
+    """If set in secrets/env, force Ag Grid on (True) or off (False). None = user picks in the Table view control."""
     v = (
         _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
-        or "0"
+        or ""
     ).strip().lower()
     if v in ("1", "true", "yes", "on"):
         return True
-    return False
+    if v in ("0", "false", "no", "off"):
+        return False
+    return None
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -5108,11 +5105,34 @@ def _render_master_table_aggrid_or_df(
         _cc.update(_streamlit_number_column_config_for_df(df))
     except Exception:
         pass
+    _ag_force = _kitchen_master_aggrid_secret_force()
+    if _ag_force is None:
+        _tv_horizontal = not _compact_layout_enabled()
+        st.radio(
+            "Table view",
+            options=["native", "grid"],
+            index=0,
+            horizontal=_tv_horizontal,
+            key="kitchen_master_table_view",
+            format_func=lambda x: (
+                "Data table (recommended)"
+                if x == "native"
+                else "Spreadsheet grid (filters)"
+            ),
+            help=(
+                "**Data table** — same rows with status colors (HTML/Styler); reliable on Streamlit Cloud. "
+                "**Spreadsheet grid** — Excel-like column filters and row colors inside Ag Grid; "
+                "can look blank in some browsers — switch back to Data table if you see no rows."
+            ),
+        )
+        _user_wants_grid = st.session_state.get("kitchen_master_table_view") == "grid"
+    else:
+        _user_wants_grid = _ag_force
     want_grid = bool(
         _HAS_AGGRI
         and AgGrid
         and GridOptionsBuilder
-        and _kitchen_master_use_aggrid()
+        and _user_wants_grid
         and not _use_compact_tables()
     )
     if want_grid:
