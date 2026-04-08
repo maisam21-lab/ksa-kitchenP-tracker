@@ -1289,16 +1289,29 @@ def _secrets_or_env_str(*names: str) -> str:
 
 
 def _kitchen_master_plain_tables() -> bool:
-    """When True (default), native ``st.dataframe`` fallback uses plain data — no Pandas Styler.
+    """When True, native ``st.dataframe`` skips Pandas Styler (no row colors).
 
-    When AgGrid is on, row colors use ``rowClassRules`` + CSS (not Styler). Styler is only for dataframe fallback.
-    Set ``KITCHEN_MASTER_STYLED_ROWS=1`` in secrets or env to use Styler on dataframe fallback.
+    **Default False** — status row colors apply on the native table (Vacant / Occupied / Churning / no status / Vacant+opp).
+
+    Set ``KITCHEN_MASTER_PLAIN_TABLES=1`` in secrets or env if Styler breaks rendering on your browser.
+    Legacy: ``KITCHEN_MASTER_STYLED_ROWS=0`` also forces plain (no colors).
     """
-    v = (
-        _secrets_or_env_str("KITCHEN_MASTER_STYLED_ROWS", "kitchen_master_styled_rows")
+    plain = (
+        _secrets_or_env_str(
+            "KITCHEN_MASTER_PLAIN_TABLES",
+            "kitchen_master_plain_tables",
+            "KITCHEN_MASTER_NO_ROW_COLORS",
+        )
         or ""
     ).strip().lower()
-    return v not in ("1", "true", "yes", "on")
+    if plain in ("1", "true", "yes", "on"):
+        return True
+    legacy = (
+        _secrets_or_env_str("KITCHEN_MASTER_STYLED_ROWS", "kitchen_master_styled_rows") or ""
+    ).strip().lower()
+    if legacy in ("0", "false", "no", "off"):
+        return True
+    return False
 
 
 def _kitchen_master_use_aggrid() -> bool:
