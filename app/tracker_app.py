@@ -1271,7 +1271,7 @@ def _table_height_px(default: int = 700) -> int:
 def _kitchen_master_plain_tables() -> bool:
     """When True (default), native ``st.dataframe`` fallback uses plain data — no Pandas Styler.
 
-    When AgGrid is on, row colors use JsCode (not Styler). Styler is only for dataframe fallback.
+    When AgGrid is on, row colors use ``rowClassRules`` + CSS (not Styler). Styler is only for dataframe fallback.
     Set env ``KITCHEN_MASTER_STYLED_ROWS=1`` to use Styler on dataframe fallback.
     """
     v = (os.environ.get("KITCHEN_MASTER_STYLED_ROWS") or "").strip().lower()
@@ -1279,9 +1279,9 @@ def _kitchen_master_plain_tables() -> bool:
 
 
 def _kitchen_master_use_aggrid() -> bool:
-    """When True (default), Kitchen Master uses streamlit-aggrid (community filters + getRowStyle colors).
+    """When True (default), Kitchen Master uses streamlit-aggrid (community filters + rowClassRules row colors).
 
-    Set env ``KITCHEN_MASTER_AGGRID=0`` to force native ``st.dataframe`` only.
+    Set env ``KITCHEN_MASTER_AGGRID=0`` to force native ``st.dataframe`` only if the grid iframe fails to render.
     """
     v = (os.environ.get("KITCHEN_MASTER_AGGRID") or "1").strip().lower()
     return v not in ("0", "false", "no", "off")
@@ -3858,38 +3858,14 @@ def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[
     return cols2, rows2
 
 
-def _status_get_row_style_js(status_col_name: str):
-    """AG Grid Community getRowStyle — same rules as _style_df_status_rows (incl. Vacant + opportunity)."""
-    if not JsCode:
-        return None
-    col_key = json.dumps(status_col_name)
-    js = """
-function(params) {
-    if (!params || !params.data) { return null; }
-    var d = params.data;
-    var raw = d[__COLKEY__];
-    var s = (raw != null ? String(raw).trim().toLowerCase() : '');
-    var hasOpp = !!d['_has_opportunity'];
-    if (!s || s === 'no status' || s === 'n/a' || s === 'na' || s === '\\u2014' || s === '-' || s === 'blocked') {
-        return { backgroundColor: '#B22222', color: '#FFFFFF' };
-    }
-    if (s === 'churning') { return { backgroundColor: '#FDE68A' }; }
-    if (s === 'occupied' || s === 'sold') { return { backgroundColor: '#FEE2E2' }; }
-    var isVac = (s === 'vacant' || (s.indexOf('vacant') === 0 && s.indexOf('occupied') < 0 && s.indexOf('sold') < 0 && s.indexOf('churning') < 0));
-    if (isVac) {
-        if (hasOpp) { return { backgroundColor: '#FEE2E2' }; }
-        return { backgroundColor: '#D1FAE5' };
-    }
-    return null;
-}
-"""
-    return JsCode(js.replace("__COLKEY__", col_key))
+def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, str]:
+    """Build grid options + optional custom CSS for row colors.
 
-
-def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> dict:
-    """AG Grid Community only: text/number/date filters — no Enterprise (set filter) modules."""
+    Uses ``rowClassRules`` + ``custom_css`` (not ``getRowStyle``/JsCode) — JsCode often yields a blank grid on Streamlit Cloud.
+    Returns ``(grid_options, custom_css_string)``.
+    """
     if not GridOptionsBuilder:
-        return {}
+        return {}, ""
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(
         filter=True,
@@ -3939,11 +3915,11 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
             cdef["suppressHeaderFilterButton"] = False
         if cdef.get("type") == []:
             cdef.pop("type", None)
+    custom_css = ""
     if status_col:
-        gs = _status_get_row_style_js(status_col)
-        if gs is not None:
-            go["getRowStyle"] = gs
-    return go
+        rules, custom_css = _status_row_class_rules_and_css(status_col)
+        go["rowClassRules"] = rules
+    return go, custom_css
 
 
 def _render_master_table_aggrid_or_df(
@@ -3957,7 +3933,7 @@ def _render_master_table_aggrid_or_df(
     export_file_stem: str,
     export_button_key: str,
 ) -> None:
-    """Kitchen Master table: AgGrid Community + JsCode row colors, or native dataframe fallback."""
+    """Kitchen Master table: AgGrid Community (rowClassRules + custom_css colors) or native dataframe fallback."""
     if df is None or df.empty:
         return
     _cc = {"_has_opportunity": None}
@@ -3970,24 +3946,29 @@ def _render_master_table_aggrid_or_df(
     )
     if want_grid:
         try:
-            go = _build_aggrid_community_grid_options(df, status_col)
+            go, ag_custom_css = _build_aggrid_community_grid_options(df, status_col)
             if go:
                 _kwargs = dict(
                     gridOptions=go,
                     use_container_width=True,
                     fit_columns_on_grid_load=False,
-                    height=_table_height_px(),
+                    height=max(420, int(_table_height_px())),
                     theme="streamlit",
                     show_toolbar=True,
                     show_search=True,
                     show_download_button=False,
                     enable_enterprise_modules=False,
-                    allow_unsafe_jscode=True,
+                    allow_unsafe_jscode=False,
                     key=grid_key,
                 )
+                if ag_custom_css and str(ag_custom_css).strip():
+                    _kwargs["custom_css"] = str(ag_custom_css)
                 if GridUpdateMode and DataReturnMode:
-                    _kwargs["update_mode"] = GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED
-                    _kwargs["data_return_mode"] = DataReturnMode.FILTERED_AND_SORTED
+                    try:
+                        _kwargs["update_mode"] = GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED
+                        _kwargs["data_return_mode"] = DataReturnMode.FILTERED_AND_SORTED
+                    except Exception:
+                        pass
                 grid_response = AgGrid(df, **_kwargs)
                 _total = len(rows_shown) if rows_shown else 0
                 _cnt = _total
@@ -4143,7 +4124,7 @@ def _render_generic_tab(
         if str(c).strip().lower() in ("status", "status__c"):
             status_col = c
             break
-    # Kitchen Master: AgGrid Community (filters + getRowStyle colors) or native dataframe fallback.
+    # Kitchen Master: AgGrid Community (filters + rowClassRules colors) or native dataframe fallback.
     if HAS_EXCEL and not df_display.empty:
         _df_show = _coerce_numeric_columns(df_display.copy())
         if status_col:
