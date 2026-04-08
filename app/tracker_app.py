@@ -174,11 +174,9 @@ TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
 # Main nav: **KSA** is the Master Kitchen area (replaces legacy label "Kitchen Master Data").
 SECTION_KSA = "KSA"
 _LEGACY_SECTION_KITCHEN_MASTER = "Kitchen Master Data"
-# Sub-nav inside **KSA** (same column+button sizing as Dashboard / Discussions tabs).
-# **KSA** label exists only on the main section tab; default sub-chip is **Saudi master** (same workbook).
+# Sub-nav inside **KSA**: regional workbooks only; main KSA sheet is the default (no extra chip).
 KITCHEN_MASTER_SUBVIEW_MAIN = "main"
 KITCHEN_MASTER_REGION_ROW: tuple[tuple[str, str], ...] = (
-    ("Saudi master", KITCHEN_MASTER_SUBVIEW_MAIN),
     ("Kuwait", "Kuwait"),
     ("UAE", "UAE"),
     ("Bahrain", "Bahrain"),
@@ -1436,8 +1434,9 @@ def _compact_layout_enabled() -> bool:
 
 
 def _kitchen_master_region_selector_ui() -> str:
-    """Saudi master + Kuwait / UAE / Bahrain — same UX as main section tabs (only **KSA** is the top nav label)."""
-    _allowed = {v for _, v in KITCHEN_MASTER_REGION_ROW}
+    """Kuwait / UAE / Bahrain chips; main KSA workbook is default. **Main** only when returning from a region."""
+    _regional = {v for _, v in KITCHEN_MASTER_REGION_ROW}
+    _allowed = _regional | {KITCHEN_MASTER_SUBVIEW_MAIN}
     if SESSION_KEY_KITCHEN_MASTER_REGION not in st.session_state:
         st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = KITCHEN_MASTER_SUBVIEW_MAIN
     cur = st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION]
@@ -1447,22 +1446,31 @@ def _kitchen_master_region_selector_ui() -> str:
     if cur not in _allowed:
         cur = KITCHEN_MASTER_SUBVIEW_MAIN
         st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = cur
-    labels = [lbl for lbl, _ in KITCHEN_MASTER_REGION_ROW]
     label_to_val = dict(KITCHEN_MASTER_REGION_ROW)
     val_to_label = {v: lbl for lbl, v in KITCHEN_MASTER_REGION_ROW}
+    _row_labels = [lbl for lbl, _ in KITCHEN_MASTER_REGION_ROW]
+    _mobile_opts = ["Main"] + _row_labels
     if _compact_layout_enabled():
-        _cur_label = val_to_label.get(cur, labels[0])
+        _cur_label = "Main" if cur == KITCHEN_MASTER_SUBVIEW_MAIN else val_to_label[cur]
         _sel_label = st.selectbox(
             "Market",
-            options=labels,
-            index=labels.index(_cur_label) if _cur_label in labels else 0,
+            options=_mobile_opts,
+            index=_mobile_opts.index(_cur_label) if _cur_label in _mobile_opts else 0,
             key="kitchen_master_region_mobile_selector",
         )
-        _next = label_to_val.get(_sel_label, KITCHEN_MASTER_SUBVIEW_MAIN)
+        _next = (
+            KITCHEN_MASTER_SUBVIEW_MAIN
+            if _sel_label == "Main"
+            else label_to_val[_sel_label]
+        )
         if _next != cur:
             st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = _next
             _rerun()
         return str(st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION])
+    if cur != KITCHEN_MASTER_SUBVIEW_MAIN:
+        if st.button("Main", key="km_region_back_main", use_container_width=True):
+            st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = KITCHEN_MASTER_SUBVIEW_MAIN
+            _rerun()
     r_cols = st.columns(len(KITCHEN_MASTER_REGION_ROW))
     for i, (lbl, val) in enumerate(KITCHEN_MASTER_REGION_ROW):
         with r_cols[i]:
@@ -7116,8 +7124,8 @@ def main():
         # PREVIEW_ONLY_IDS / super_user / manager_viewer: KSA master + optional Kuwait / UAE / Bahrain workbooks.
         if _user_sees_dashboard_all_countries(current_user, user_role):
             st.caption(
-                "The **KSA** tab above is the main entry. Use **Saudi master** below for the KSA workbook, "
-                "or **Kuwait / UAE / Bahrain** (preview testers) for regional workbooks."
+                "The **KSA** tab shows the main kitchen workbook by default. "
+                "Use **Kuwait / UAE / Bahrain** (preview testers) for regional workbooks — then **Main** to return."
             )
             _km_region = _kitchen_master_region_selector_ui()
             if _km_region == KITCHEN_MASTER_SUBVIEW_MAIN:
