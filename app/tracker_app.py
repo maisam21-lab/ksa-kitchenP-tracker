@@ -14,6 +14,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -765,9 +766,27 @@ CREATE TABLE IF NOT EXISTS app_discussions (
 
 
 def get_conn():
+    """Open SQLite with settings suited to Streamlit (reruns, possible multi-worker contention)."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
+    conn = sqlite3.connect(
+        str(DB_PATH),
+        timeout=60.0,
+        check_same_thread=False,
+    )
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=60000")
+    except sqlite3.Error:
+        pass
+    try:
+        # Better concurrent read/write than default rollback journal (reduces "database is locked").
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.Error:
+        pass
+    try:
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.Error:
+        pass
     return conn
 
 
@@ -853,18 +872,37 @@ def _init_db_schema():
     _sync_allowlist_from_config()
 
 
+def _init_db_schema_with_retries() -> None:
+    """Run schema init; retry when SQLite reports a transient lock (common on Cloud)."""
+    last: sqlite3.OperationalError | None = None
+    for i in range(35):
+        try:
+            _init_db_schema()
+            return
+        except sqlite3.OperationalError as e:
+            last = e
+            if "locked" not in str(e).lower():
+                raise
+            time.sleep(min(2.0, 0.06 * (1.3**min(i, 30))))
+    if last:
+        raise last
+
+
 def init_db():
-    """Create tables. Retries on /tmp if the repo path is not writable (common on Streamlit Cloud)."""
+    """Create tables. Retries on lock; falls back to /tmp if the primary path fails (Streamlit Cloud)."""
     global DB_PATH
     try:
-        _init_db_schema()
+        _init_db_schema_with_retries()
     except sqlite3.OperationalError:
-        DB_PATH = Path(tempfile.gettempdir()) / "ksa_kitchen_tracker.db"
+        alt = Path(tempfile.gettempdir()) / "ksa_kitchen_tracker.db"
+        if alt.resolve() == Path(DB_PATH).resolve():
+            raise
+        DB_PATH = alt
         try:
             DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
-        _init_db_schema()
+        _init_db_schema_with_retries()
 
 
 def _get_allowlist_ids_from_config() -> list[str]:
