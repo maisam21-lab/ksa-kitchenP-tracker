@@ -4923,7 +4923,11 @@ def _filter_junk_kitchen_records(rows: list) -> list:
 
 
 def _status_row_class_rules_and_css(status_col_name: str):
-    """Return (rowClassRules dict, custom_css str) for AgGrid status color coding. status_col_name is the exact dataframe column name (e.g. 'Status' or 'status__c')."""
+    """Return (rowClassRules dict, custom_css dict) for AgGrid status color coding.
+
+    ``streamlit-aggrid`` 1.x expects ``custom_css`` as a mapping of selector → style dict; a raw CSS
+    string breaks the component and the grid iframe renders blank on Streamlit Cloud.
+    """
     # JS-safe column key for data[] access
     col_key = status_col_name.replace("\\", "\\\\").replace("'", "\\'")
     # Expressions use AG Grid rowClassRules context: 'data' is the row data
@@ -4936,19 +4940,22 @@ def _status_row_class_rules_and_css(status_col_name: str):
         "status-churning": f"({data_ref}!=null?String({data_ref}).trim():'').toLowerCase()==='churning'",
         "status-occupied": f"(function(){{var s=({data_ref}!=null?String({data_ref}).trim():'').toLowerCase(); return s==='occupied'||s==='sold';}})()",
     }
-    # String CSS with .ag-row selector and !important so it overrides AG Grid theme in iframe
-    custom_css = """
-    .ag-row.status-no-status { background-color: #B22222 !important; color: white !important; }
-    .ag-row.status-no-status .ag-cell { background-color: #B22222 !important; color: white !important; }
-    .ag-row.status-vacant-opp { background-color: #FEE2E2 !important; }
-    .ag-row.status-vacant-opp .ag-cell { background-color: #FEE2E2 !important; }
-    .ag-row.status-vacant { background-color: #D1FAE5 !important; }
-    .ag-row.status-vacant .ag-cell { background-color: #D1FAE5 !important; }
-    .ag-row.status-churning { background-color: #FDE68A !important; }
-    .ag-row.status-churning .ag-cell { background-color: #FDE68A !important; }
-    .ag-row.status-occupied { background-color: #FEE2E2 !important; }
-    .ag-row.status-occupied .ag-cell { background-color: #FEE2E2 !important; }
-    """
+    _red_dark = {"background-color": "#B22222 !important", "color": "white !important"}
+    _red_cell = {"background-color": "#FEE2E2 !important"}
+    _green = {"background-color": "#D1FAE5 !important"}
+    _yellow = {"background-color": "#FDE68A !important"}
+    custom_css = {
+        ".ag-row.status-no-status": dict(_red_dark),
+        ".ag-row.status-no-status .ag-cell": dict(_red_dark),
+        ".ag-row.status-vacant-opp": dict(_red_cell),
+        ".ag-row.status-vacant-opp .ag-cell": dict(_red_cell),
+        ".ag-row.status-vacant": dict(_green),
+        ".ag-row.status-vacant .ag-cell": dict(_green),
+        ".ag-row.status-churning": dict(_yellow),
+        ".ag-row.status-churning .ag-cell": dict(_yellow),
+        ".ag-row.status-occupied": dict(_red_cell),
+        ".ag-row.status-occupied .ag-cell": dict(_red_cell),
+    }
     return row_class_rules, custom_css
 
 
@@ -5006,15 +5013,15 @@ def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[
     return cols2, rows2
 
 
-def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, str, bool]:
+def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, dict, bool]:
     """Build grid options + optional custom CSS for row colors.
 
     Uses ``rowClassRules`` + ``custom_css`` (not ``getRowStyle``/JsCode) — JsCode often yields a blank grid on Streamlit Cloud.
     For modest row counts, ``domLayout: autoHeight`` removes the large empty band inside the grid.
-    Returns ``(grid_options, custom_css_string, use_auto_height)``.
+    Returns ``(grid_options, custom_css_dict, use_auto_height)``.
     """
     if not GridOptionsBuilder:
-        return {}, "", False
+        return {}, {}, False
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(
         filter=True,
@@ -5071,7 +5078,7 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
             cdef["suppressHeaderFilterButton"] = False
         if cdef.get("type") == []:
             cdef.pop("type", None)
-    custom_css = ""
+    custom_css: dict = {}
     if status_col:
         rules, custom_css = _status_row_class_rules_and_css(status_col)
         go["rowClassRules"] = rules
@@ -5119,49 +5126,68 @@ def _render_master_table_aggrid_or_df(
     if want_grid:
         try:
             go, ag_custom_css, _use_ag_auto_height = _build_aggrid_community_grid_options(df, status_col)
-            if go:
-                _ag_iframe_h = _kitchen_master_aggrid_iframe_height_px(_n_rows, auto_height_layout=_use_ag_auto_height)
-                _kwargs = dict(
-                    gridOptions=go,
-                    use_container_width=True,
-                    fit_columns_on_grid_load=False,
-                    height=_ag_iframe_h,
-                    theme="streamlit",
-                    show_toolbar=True,
-                    # Quick search persists client-side and has caused blank / "No rows" grids; column filters stay on.
-                    show_search=False,
-                    show_download_button=False,
-                    enable_enterprise_modules=False,
-                    allow_unsafe_jscode=False,
-                    key=grid_key,
-                )
-                if ag_custom_css and str(ag_custom_css).strip():
-                    _kwargs["custom_css"] = str(ag_custom_css)
-                # Do not set GridUpdateMode/DataReturnMode — deprecated in st_aggrid and can raise, forcing silent fallback to dataframe (no row colors).
+        except Exception:
+            go = None
+        if go:
+            _ag_iframe_h = _kitchen_master_aggrid_iframe_height_px(_n_rows, auto_height_layout=_use_ag_auto_height)
+            _kwargs = dict(
+                gridOptions=go,
+                fit_columns_on_grid_load=False,
+                height=_ag_iframe_h,
+                theme="streamlit",
+                show_toolbar=True,
+                # Quick search persists client-side and has caused blank / "No rows" grids; column filters stay on.
+                show_search=False,
+                show_download_button=False,
+                enable_enterprise_modules=False,
+                allow_unsafe_jscode=False,
+                key=grid_key,
+                # Fewer moving parts on first paint vs filtered/sorted round-trips from an empty client grid.
+                use_json_serialization=True,
+            )
+            if DataReturnMode is not None:
+                try:
+                    _kwargs["data_return_mode"] = DataReturnMode.AS_INPUT
+                except Exception:
+                    pass
+            if isinstance(ag_custom_css, dict) and ag_custom_css:
+                _kwargs["custom_css"] = ag_custom_css
+            grid_response = None
+            try:
                 grid_response = AgGrid(df, **_kwargs)
+            except Exception:
+                grid_response = None
+            if grid_response is not None:
                 _total = len(rows_shown) if rows_shown else 0
                 _cnt = _total
-                if grid_response and grid_response.get("data") is not None:
-                    _cnt = len(grid_response["data"])
+                try:
+                    _gd = grid_response.get("data") if hasattr(grid_response, "get") else None
+                    if _gd is not None:
+                        _cnt = len(_gd)
+                except Exception:
+                    pass
                 if rows_shown:
-                    _kitchen_master_row_count_caption(
-                        row_count_placeholder,
-                        f"**{_cnt}** rows shown (out of **{_total}** total)",
-                    )
+                    try:
+                        _kitchen_master_row_count_caption(
+                            row_count_placeholder,
+                            f"**{_cnt}** rows shown (out of **{_total}** total)",
+                        )
+                    except Exception:
+                        pass
                     if allow_download:
-                        _rows_to_export = (
-                            grid_response.get("data")
-                            if (grid_response and grid_response.get("data") is not None)
-                            else rows_shown
-                        )
-                        _render_export_button(
-                            _normalize_export_rows_for_download(_rows_to_export),
-                            export_file_stem,
-                            key=export_button_key,
-                        )
+                        try:
+                            _rows_to_export = rows_shown
+                            _gd2 = grid_response.get("data") if hasattr(grid_response, "get") else None
+                            if _gd2 is not None:
+                                _rows_to_export = _gd2
+                            _render_export_button(
+                                _normalize_export_rows_for_download(_rows_to_export),
+                                export_file_stem,
+                                key=export_button_key,
+                            )
+                        except Exception:
+                            pass
                 return
-        except Exception:
-            pass
     if not _kitchen_master_plain_tables() and status_col:
         _df_show = _style_df_status_rows(df, status_col)
     else:
@@ -5349,10 +5375,11 @@ def _render_generic_tab(
         if status_col:
             if "_has_opportunity" not in _df_show.columns:
                 _df_show["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
+        _tab_part = re.sub(r"[^0-9a-zA-Z]+", "_", str(tab_id))[:72].strip("_") or "tab"
         _render_master_table_aggrid_or_df(
             _df_show,
             rows_shown,
-            grid_key=f"master_kitchens_grid_{key_suffix}",
+            grid_key=f"master_kitchens_grid_{key_suffix}_{_tab_part}",
             status_col=status_col,
             allow_download=allow_download,
             export_file_stem=f"{tab_id}_filtered",
@@ -6659,7 +6686,7 @@ def main():
                         except Exception:
                             pass
 
-    # Dashboard: management view (section_options already restricts who sees the button)
+# Dashboard: management view (section_options already restricts who sees the button)
     elif section == "Dashboard":
         superset_rows, superset_meta = _get_superset_master_kitchens()
         dashboard_from_superset = superset_rows is not None
