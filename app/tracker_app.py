@@ -5191,7 +5191,8 @@ def _filter_empty_records(rows: list) -> list:
 
 
 # Hide incomplete kitchen rows: no Type + no Floor + no List with odd or missing status; sparse
-# "No status" rows; rows with only List Price + Kitchen Number Name (or + non-standard Status); sparse KPIs.
+# "No status" rows; rows with only List Price + Kitchen Number Name (or + non-standard Status); sparse KPIs;
+# rows with no Type, no Floor price, and no Kitchen number/name together.
 _STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
     {"Vacant", "Churning", "Occupied", "Sold", "No status"}
 )
@@ -5536,6 +5537,22 @@ def _aggrid_kitchen_master_status_custom_css() -> dict:
     return out
 
 
+def _should_hide_missing_type_floor_and_kitchen_name_row(r: dict) -> bool:
+    """Hide when Type, Floor price, and Kitchen number/name are all absent or empty (no usable kitchen row)."""
+    if not isinstance(r, dict):
+        return False
+    tk = _find_kitchen_type_column_key(r)
+    fk = _find_floor_price_column_key(r)
+    nk = _find_kitchen_number_name_column_key(r)
+    # Sheet must expose at least one of these fields so we do not hide unrelated tabs/rows.
+    if tk is None and fk is None and nk is None:
+        return False
+    type_missing = tk is None or _is_missing_kitchen_type_for_junk_filter(r.get(tk))
+    floor_missing = fk is None or _is_missing_price_for_junk_filter(r.get(fk))
+    name_missing = nk is None or _cell_is_empty_for_empty_row_check(r.get(nk))
+    return type_missing and floor_missing and name_missing
+
+
 def _should_hide_list_price_and_kitchen_name_only_row(r: dict) -> bool:
     """Hide sparse rows where the only data is List Price + Kitchen Number Name (sheet padding / incomplete)."""
     if not isinstance(r, dict):
@@ -5588,6 +5605,7 @@ def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
     return (
         _should_hide_junk_kitchen_row(r)
         or _should_hide_no_status_sparse_kitchen_row(r)
+        or _should_hide_missing_type_floor_and_kitchen_name_row(r)
         or _should_hide_list_price_and_kitchen_name_only_row(r)
         or _should_hide_list_price_kitchen_name_and_incorrect_status_row(r)
     )
