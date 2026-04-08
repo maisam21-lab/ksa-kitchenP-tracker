@@ -1448,14 +1448,20 @@ def _kitchen_master_viewport_height_px(n_rows: int) -> int:
 
 
 def _kitchen_master_aggrid_iframe_height_px(n_rows: int, *, auto_height_layout: bool) -> int:
-    """Streamlit-aggrid iframe height. When Ag Grid uses ``domLayout: autoHeight``, keep the iframe tight so the blank band disappears."""
+    """Streamlit-aggrid iframe height. When Ag Grid uses ``domLayout: autoHeight``, keep the iframe tight so the blank band disappears.
+
+    Minimum height must cover toolbar + header + floating-filter row; otherwise the iframe clips to ~0 body
+    and the grid looks empty on Streamlit Cloud.
+    """
     n = max(0, int(n_rows))
     cap = max(280, int(_table_height_px()))
     if auto_height_layout:
         # autoHeight: grid body matches row count; wrapper height only needs chrome + rows
         h = 58 + max(1, min(n, 500)) * 30 + 24
-        return max(120, min(cap, h))
-    return _kitchen_master_viewport_height_px(n)
+        return max(220, min(cap, h))
+    base = _kitchen_master_viewport_height_px(n)
+    # normal layout: viewport math can dip to ~110px — too small once toolbar + floating filters are on
+    return max(380, min(cap, base))
 
 
 def _is_pandas_styler(x) -> bool:
@@ -5122,7 +5128,8 @@ def _render_master_table_aggrid_or_df(
                     height=_ag_iframe_h,
                     theme="streamlit",
                     show_toolbar=True,
-                    show_search=True,
+                    # Quick search persists client-side and has caused blank / "No rows" grids; column filters stay on.
+                    show_search=False,
                     show_download_button=False,
                     enable_enterprise_modules=False,
                     allow_unsafe_jscode=False,
