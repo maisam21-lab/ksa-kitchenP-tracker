@@ -1,7 +1,7 @@
 """
 Kitchens Tracker — web app. Run: streamlit run app/tracker_app.py
 All sheet tabs in tool form: view, filter, add/edit, export. Single source of truth.
-Accepts CSV or Excel (.xlsx) uploads. Can refresh directly from the online Google Sheet.
+Refreshes from the online Google Sheet (and scheduled jobs) — not from local file upload.
 """
 import base64
 import csv
@@ -17,27 +17,6 @@ from pathlib import Path
 
 import requests
 import streamlit as st
-
-try:
-    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode, DataReturnMode
-    _HAS_AGGRI = True
-except ImportError:
-    try:
-        from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
-        JsCode = None
-        _HAS_AGGRI = True
-    except ImportError:
-        try:
-            from st_aggrid import AgGrid, GridOptionsBuilder
-            JsCode = None
-            GridUpdateMode = None
-            DataReturnMode = None
-            _HAS_AGGRI = True
-        except ImportError:
-            JsCode = None
-            GridUpdateMode = None
-            DataReturnMode = None
-            _HAS_AGGRI = False
 
 try:
     from app import auth
@@ -158,6 +137,13 @@ UAE_KITCHEN_FACILITY_GIDS = [
 GSOURCE_KITCHEN_KW = "gsheet_kw"
 GSOURCE_KITCHEN_AE = "gsheet_ae"
 GSOURCE_KITCHEN_BH = "gsheet_bh"
+# Main KSA workbook + regional facility DB sources — all contribute to header "last refreshed".
+_GSHEET_FAMILY_REFRESH_SOURCES: tuple[str, ...] = (
+    "gsheet",
+    GSOURCE_KITCHEN_KW,
+    GSOURCE_KITCHEN_AE,
+    GSOURCE_KITCHEN_BH,
+)
 TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
 TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
 TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
@@ -303,6 +289,10 @@ GSHEET_HEADER_MAP = {
 
 def _parse_uploaded_file(upload):
     """Read uploaded CSV or Excel (.xlsx); return list of dicts (first row = headers)."""
+    try:
+        upload.seek(0)
+    except Exception:
+        pass
     name = (upload.name or "").lower()
     if name.endswith(".xlsx") or name.endswith(".xls"):
         if not HAS_EXCEL:
@@ -338,6 +328,10 @@ def _parse_workbook_all_sheets(upload, only_known_tabs: bool = True) -> dict[str
     """Read an Excel workbook and return {sheet_name: list of dicts}. If only_known_tabs, only read sheets matching SHEET_TAB_IDS (faster for large workbooks)."""
     if not HAS_EXCEL:
         raise ValueError("Excel support requires pandas and openpyxl. Install: pip install pandas openpyxl")
+    try:
+        upload.seek(0)
+    except Exception:
+        pass
     name = (upload.name or "").lower()
     if not (name.endswith(".xlsx") or name.endswith(".xls")):
         raise ValueError("Upload an Excel file (.xlsx or .xls)")
@@ -1102,6 +1096,41 @@ def get_last_refresh(source: str) -> str | None:
         return row[0] if row else None
 
 
+def _latest_refresh_among_gsheet_family() -> str | None:
+    """Most recent refreshed_at across main workbook (gsheet) and regional gsheet_kw / gsheet_ae / gsheet_bh."""
+    from datetime import datetime, timezone
+
+    best_dt: datetime | None = None
+    best_ts: str | None = None
+    for src in _GSHEET_FAMILY_REFRESH_SOURCES:
+        ts = get_last_refresh(src)
+        if not ts:
+            continue
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            dt = datetime.min.replace(tzinfo=timezone.utc)
+        if best_dt is None or dt > best_dt:
+            best_dt = dt
+            best_ts = ts
+    return best_ts
+
+
+def _backfill_gsheet_family_refresh_metadata() -> None:
+    """If tab data exists for a gsheet* source but refresh_metadata row is missing, record now (fixes empty DB upgrades)."""
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                f"SELECT DISTINCT source FROM generic_tab_data WHERE source IN ({','.join('?' * len(_GSHEET_FAMILY_REFRESH_SOURCES))})",
+                _GSHEET_FAMILY_REFRESH_SOURCES,
+            ).fetchall()
+        for (src,) in rows:
+            if src and not get_last_refresh(src):
+                set_last_refresh(src)
+    except Exception:
+        pass
+
+
 def _data_status_from_pulse(last_ts: str | None) -> tuple[str, str, str]:
     """From last refresh timestamp return (status_label, dot_color, formatted_ts).
     status_label: 'Live Data' | 'Delayed' | 'Stale'
@@ -1218,6 +1247,16 @@ def _use_compact_tables() -> bool:
 def _table_height_px(default: int = 700) -> int:
     """Adaptive table height; supports expanded table view on mobile."""
     return default
+
+
+def _kitchen_master_plain_tables() -> bool:
+    """When True (default), show Kitchen Master as plain dataframes — no Pandas Styler.
+
+    Styler output can render as an invisible/blank grid in some Streamlit Cloud / browser setups.
+    Set env ``KITCHEN_MASTER_STYLED_ROWS=1`` to re-enable row status colors.
+    """
+    v = (os.environ.get("KITCHEN_MASTER_STYLED_ROWS") or "").strip().lower()
+    return v not in ("1", "true", "yes", "on")
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -3737,31 +3776,6 @@ def _status_row_class_rules_and_css(status_col_name: str):
     return row_class_rules, custom_css
 
 
-def _status_get_row_style_js(status_col_name: str):
-    """Return JsCode for getRowStyle to apply status colors as inline styles (works when custom_css does not in iframe)."""
-    if not JsCode:
-        return None
-    col_key = status_col_name.replace("\\", "\\\\").replace("'", "\\'")
-    # getRowStyle(params): params.data has the row
-    return JsCode("""
-    function(params) {
-        var d = params.data;
-        if (!d) return null;
-        var col = '%s';
-        var v = (d[col] != null ? String(d[col]).trim() : '');
-        var low = v.toLowerCase();
-        var hasOpp = d['_has_opportunity'];
-        if (!v || low === 'no status' || low === 'n/a' || low === 'na' || low === '—' || low === '-' || low === 'blocked')
-            return { backgroundColor: '#B22222', color: 'white' };
-        if (low === 'vacant' || (low.indexOf('vacant') === 0 && low.indexOf('occupied') < 0 && low.indexOf('sold') < 0 && low.indexOf('churning') < 0))
-            return { backgroundColor: hasOpp ? '#FEE2E2' : '#D1FAE5' };
-        if (low === 'churning') return { backgroundColor: '#FDE68A' };
-        if (low === 'occupied' || low === 'sold') return { backgroundColor: '#FEE2E2' };
-        return { backgroundColor: '#FEE2E2' };
-    }
-    """ % col_key)
-
-
 def _kuwait_regional_hidden_column(name: str) -> bool:
     n = (name or "").strip().lower()
     alnum = re.sub(r"[^a-z0-9]", "", n)
@@ -3927,120 +3941,27 @@ def _render_generic_tab(
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
     df_display = pd.DataFrame(rows_shown)[display_cols] if display_cols and rows_shown else pd.DataFrame(rows_shown)
-    # Status color coding: use AgGrid with getRowStyle when available (same approach as test_aggrid_colors.py)
-    _status_colors = {"Vacant": "#D1FAE5", "Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Churning": "#FDE68A"}
-    _no_status_bg = "#B22222"
     status_col = None
     for c in df_display.columns:
         if str(c).strip().lower() in ("status", "status__c"):
             status_col = c
             break
-    if _HAS_AGGRI and HAS_EXCEL and not df_display.empty and not _use_compact_tables():
-        if status_col:
-            df_display = df_display.copy()
-            df_display["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-        df_display = _coerce_numeric_columns(df_display)
-        gb = GridOptionsBuilder.from_dataframe(df_display)
-        gb.configure_default_column(
-            filter=True,
-            sortable=True,
-            resizable=True,
-            floatingFilter=True,
-            suppressHeaderMenuButton=False,
-            suppressHeaderFilterButton=False,
-            menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
-        )
-        _max_set_filter_values = 500
-        for col in df_display.columns:
-            if _is_facility_name_aggrid_column(col):
-                gb.configure_column(col, filter=False, floatingFilter=False, suppressHeaderFilterButton=True)
-                continue
-            if pd.api.types.is_numeric_dtype(df_display[col]):
-                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
-            elif pd.api.types.is_datetime64_any_dtype(df_display[col]):
-                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
-            else:
-                # Set filter so all unique values appear when user clicks Filter (checkboxes)
-                ser = df_display[col].dropna().astype(str).str.strip()
-                uniq = ser[ser != ""].unique()
-                if len(uniq) <= _max_set_filter_values:
-                    vals = sorted(uniq.tolist(), key=str)
-                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=True)
-                else:
-                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
-        gb.configure_grid_options(
-            domLayout="normal",
-            suppressMenuHide=False,
-            columnMenu="legacy",
-        )
-        gb.configure_side_bar(filters_panel=False, columns_panel=False)
-        go = gb.build()
-        go["suppressCsvExport"] = True
-        if "defaultColDef" not in go:
-            go["defaultColDef"] = {}
-        go["defaultColDef"]["filter"] = True
-        go["defaultColDef"]["floatingFilter"] = True
-        go["defaultColDef"]["minWidth"] = 140
-        go["defaultColDef"]["suppressHeaderMenuButton"] = False
-        go["defaultColDef"]["suppressHeaderFilterButton"] = False
-        go["defaultColDef"]["wrapHeaderText"] = True
-        go["defaultColDef"]["autoHeaderHeight"] = True
-        go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
-        if "floatingFiltersHeight" in go:
-            del go["floatingFiltersHeight"]
-        _column_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
-        go["columnDefs"] = _column_defs
-        for cdef in _column_defs:
-            if _is_facility_name_aggrid_column(cdef.get("field")):
-                cdef["filter"] = False
-                cdef["floatingFilter"] = False
-                cdef["suppressHeaderFilterButton"] = True
-            else:
-                cdef["filter"] = True
-                cdef["floatingFilter"] = True
-                cdef["suppressHeaderFilterButton"] = False
-            if cdef.get("type") == []:
-                cdef.pop("type", None)
-        if status_col and JsCode:
-            go["getRowStyle"] = _status_get_row_style_js(status_col)
-        _update_mode = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
-        _data_mode = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
-        _grid_kw = dict(update_mode=_update_mode, data_return_mode=_data_mode) if (_update_mode and _data_mode) else {}
-        grid_response = AgGrid(
-            df_display,
-            gridOptions=go,
-            use_container_width=True,
-            fit_columns_on_grid_load=False,
-            height=_table_height_px(),
-            theme="streamlit",
-            show_toolbar=True,
-            show_search=True,
-            show_download_button=False,
-            enable_enterprise_modules=True,
-            allow_unsafe_jscode=True,
-            key=f"master_kitchens_grid_{key_suffix}",
-            **_grid_kw,
-        )
-        _total_count = len(rows_shown) if rows_shown else 0
-        _displayed_count = _total_count
-        if grid_response and grid_response.get("data") is not None:
-            _displayed_count = len(grid_response["data"])
-        if rows_shown:
-            _row_count_placeholder.caption(
-                f"**{_displayed_count}** rows shown (out of **{_total_count}** total)"
-            )
-            if allow_download:
-                _rows_to_export = grid_response.get("data") if (grid_response and grid_response.get("data") is not None) else rows_shown
-                _render_export_button(_rows_to_export, f"{tab_id}_filtered", key=f"export_{key_suffix}_{tab_id}_grid")
-    else:
-        _df_mobile = df_display
+    # Native Streamlit dataframe only (safe mode: no AgGrid, optional no-Styler — see _kitchen_master_plain_tables).
+    if HAS_EXCEL and not df_display.empty:
+        _df_show = _coerce_numeric_columns(df_display.copy())
         _cc = {"_has_opportunity": None}
         if status_col:
-            if "_has_opportunity" not in _df_mobile.columns:
-                _df_mobile = _df_mobile.copy()
-                _df_mobile["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-            _df_mobile = _style_df_status_rows(_df_mobile, status_col)
-        st.dataframe(_df_mobile, use_container_width=True, hide_index=True, height=_table_height_px(), column_config=_cc)
+            if "_has_opportunity" not in _df_show.columns:
+                _df_show["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
+            if not _kitchen_master_plain_tables():
+                _df_show = _style_df_status_rows(_df_show, status_col)
+        st.dataframe(
+            _df_show,
+            use_container_width=True,
+            hide_index=True,
+            height=_table_height_px(),
+            column_config=_cc,
+        )
         if rows_shown:
             _total_count = len(rows_shown)
             _row_count_placeholder.caption(
@@ -4048,12 +3969,19 @@ def _render_generic_tab(
             )
             if allow_download:
                 _render_export_button(rows_shown, f"{tab_id}_filtered", key=f"export_{key_suffix}_{tab_id}_df")
+    elif not HAS_EXCEL:
+        st.warning("Cannot show the data grid: pandas is not available in this environment.")
+    elif not rows_shown:
+        st.info("No rows match the current filters.")
+    elif df_display.empty:
+        st.info("No rows to display in this view.")
     # CSV download disabled app-wide (no Download CSV button)
 
 
 def main():
     st.set_page_config(page_title=APP_DISPLAY_TITLE, layout="wide", initial_sidebar_state="collapsed")
     init_db()
+    _backfill_gsheet_family_refresh_metadata()
 
     if _signed_out_gate_active():
         _render_signed_out_gate()
@@ -4173,18 +4101,6 @@ def main():
     .ag-toolbar [title*="Download"],
     .ag-toolbar button[title*="CSV"],
     [class*="ag-"] [title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-    /* Left-align all sheet grids (KSA / Kuwait / UAE / Bahrain — same as Excel-style sheets) */
-    .ag-root .ag-cell,
-    .ag-root .ag-group-value,
-    .ag-root .ag-cell-wrapper { text-align: left !important; justify-content: flex-start !important; }
-    .ag-root .ag-right-aligned-cell { text-align: left !important; }
-    .ag-root .ag-header-cell,
-    .ag-root .ag-header-cell-label,
-    .ag-root .ag-header-cell-text { text-align: left !important; justify-content: flex-start !important; }
-    .ag-root .ag-floating-filter input,
-    .ag-root .ag-floating-filter-body input { text-align: left !important; }
-    [data-testid="stDataFrame"] [role="gridcell"],
-    [data-testid="stDataFrame"] [role="columnheader"] { text-align: left !important; }
     /* Mobile Safari fallback for fullscreen button on dataframe toolbar:
        if native fullscreen fails, JS toggles this class on the table wrapper. */
     .mobile-fullscreen-fallback {
@@ -4626,7 +4542,7 @@ def main():
     )
 
     # Top bar (replaces sidebar): compact two-row layout
-    last_gsheet = get_last_refresh("gsheet")
+    last_gsheet = _latest_refresh_among_gsheet_family()
     if last_gsheet:
         try:
             from datetime import datetime
@@ -5072,7 +4988,6 @@ def main():
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
-        _show_refresh_btn = _is_developer() or user_role == "super_user"
         if st.session_state.get("preview_kitchen_region") == "KSA":
             st.session_state.pop("preview_kitchen_region", None)
         _bh_preview = _user_can_see_bahrain_kitchen_preview(current_user or "")
@@ -5260,14 +5175,29 @@ def main():
                     _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
                     # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
                     last_refresh = get_last_refresh("gsheet")
-                    # Auto-refresh when no data or stale (>15 min), no click needed (cooldown 15 min)
+                    # Auto-refresh from Google Sheets when stale: first-ever sync runs immediately;
+                    # after that use a short cooldown (90s) instead of 15 min so online data returns quickly.
                     import time
                     now_sec = time.time()
                     last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
-                    if _gsheet_refresh_is_stale(15) and (now_sec - last_run) >= 900:  # 15 min cooldown
+                    _never_gsheet = not last_refresh
+                    _cooldown = (
+                        0
+                        if _never_gsheet and not st.session_state.get("gsheet_initial_fetch_failed")
+                        else 90
+                    )
+                    _creds_ok = bool(_get_google_credentials_path())
+                    if (
+                        _creds_ok
+                        and _gsheet_refresh_is_stale(15)
+                        and (now_sec - last_run) >= _cooldown
+                    ):
                         st.session_state["gsheet_auto_refresh_last_run"] = now_sec
                         ok, msg = _refresh_from_online_sheet()
+                        if not ok and _never_gsheet:
+                            st.session_state["gsheet_initial_fetch_failed"] = True
                         if ok:
+                            st.session_state.pop("gsheet_initial_fetch_failed", None)
                             set_last_refresh("gsheet")
                             st.session_state["data_source"] = "gsheet"
                             _rerun()
@@ -5345,108 +5275,29 @@ def main():
                             if str(c).strip().lower() in ("status", "status__c"):
                                 status_col_combined = c
                                 break
-                    if _HAS_AGGRI and not df_combined.empty and not _use_compact_tables():
-                        gb = GridOptionsBuilder.from_dataframe(df_combined)
-                        gb.configure_default_column(
-                            filter=True,
-                            sortable=True,
-                            resizable=True,
-                            floatingFilter=True,
-                            suppressHeaderMenuButton=False,
-                            suppressHeaderFilterButton=False,
-                            menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
-                        )
-                        _max_set_combined = 500
-                        for col in df_combined.columns:
-                            if _is_facility_name_aggrid_column(col):
-                                gb.configure_column(col, filter=False, floatingFilter=False, suppressHeaderFilterButton=True)
-                                continue
-                            if pd.api.types.is_numeric_dtype(df_combined[col]):
-                                gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
-                            elif pd.api.types.is_datetime64_any_dtype(df_combined[col]):
-                                gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
+                        if HAS_EXCEL and not df_combined.empty:
+                            if _kitchen_master_plain_tables():
+                                _df_combined_show = df_combined
                             else:
-                                ser = df_combined[col].dropna().astype(str).str.strip()
-                                uniq = ser[ser != ""].unique()
-                                if len(uniq) <= _max_set_combined:
-                                    vals = sorted(uniq.tolist(), key=str)
-                                    gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=True)
-                                else:
-                                    gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
-                        gb.configure_grid_options(
-                            domLayout="normal",
-                            suppressMenuHide=False,
-                            columnMenu="legacy",
-                        )
-                        gb.configure_side_bar(filters_panel=False, columns_panel=False)
-                        go = gb.build()
-                        go["suppressCsvExport"] = True
-                        if "defaultColDef" not in go:
-                            go["defaultColDef"] = {}
-                        go["defaultColDef"]["filter"] = True
-                        go["defaultColDef"]["floatingFilter"] = True
-                        go["defaultColDef"]["minWidth"] = 140
-                        go["defaultColDef"]["suppressHeaderMenuButton"] = False
-                        go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                        go["defaultColDef"]["wrapHeaderText"] = True
-                        go["defaultColDef"]["autoHeaderHeight"] = True
-                        go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
-                        if "floatingFiltersHeight" in go:
-                            del go["floatingFiltersHeight"]
-                        _col_defs = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
-                        go["columnDefs"] = _col_defs
-                        for cdef in _col_defs:
-                            if _is_facility_name_aggrid_column(cdef.get("field")):
-                                cdef["filter"] = False
-                                cdef["floatingFilter"] = False
-                                cdef["suppressHeaderFilterButton"] = True
-                            else:
-                                cdef["filter"] = True
-                                cdef["floatingFilter"] = True
-                                cdef["suppressHeaderFilterButton"] = False
-                            if cdef.get("type") == []:
-                                cdef.pop("type", None)
-                        if status_col_combined and JsCode:
-                            go["getRowStyle"] = _status_get_row_style_js(status_col_combined)
-                        _um = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
-                        _dm = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
-                        _kw = dict(update_mode=_um, data_return_mode=_dm) if (_um and _dm) else {}
-                        grid_res = AgGrid(
-                            df_combined,
-                            gridOptions=go,
-                            use_container_width=True,
-                            fit_columns_on_grid_load=False,
-                            height=_table_height_px(),
-                            theme="streamlit",
-                            show_toolbar=True,
-                            show_search=True,
-                            show_download_button=False,
-                            enable_enterprise_modules=True,
-                            allow_unsafe_jscode=True,
-                            key="master_kitchens_grid_combined",
-                            **_kw,
-                        )
-                        _total_combined = len(rows_shown) if rows_shown else 0
-                        _cnt = _total_combined
-                        if grid_res and grid_res.get("data") is not None:
-                            _cnt = len(grid_res["data"])
-                        if rows_shown:
-                            _row_count_placeholder_combined.caption(
-                                f"**{_cnt}** rows shown (out of **{_total_combined}** total)"
+                                _df_combined_show = _style_df_status_rows(df_combined, status_col_combined)
+                            st.dataframe(
+                                _df_combined_show,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={"_has_opportunity": None},
+                                height=_table_height_px(),
                             )
-                            if can_export:
-                                _rows_to_export = grid_res.get("data") if (grid_res and grid_res.get("data") is not None) else rows_shown
-                                _render_export_button(_rows_to_export, "master_kitchens_combined_filtered", key="export_master_kitchens_combined")
-                    else:
-                            _df_combined_show = _style_df_status_rows(df_combined, status_col_combined)
-                            st.dataframe(_df_combined_show, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=_table_height_px())
                             if rows_shown:
                                 _total_combined = len(rows_shown)
                                 _row_count_placeholder_combined.caption(
                                     f"**{_total_combined}** rows shown (out of **{_total_combined}** total)"
                                 )
                                 if can_export:
-                                    _render_export_button(rows_shown, "master_kitchens_combined_filtered", key="export_master_kitchens_combined_df")
+                                    _render_export_button(
+                                        rows_shown,
+                                        "master_kitchens_combined_filtered",
+                                        key="export_master_kitchens_combined_df",
+                                    )
             if not rows and not is_other_sheet and chosen_label:
                 st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
             elif not is_other_sheet and source_id:
@@ -5459,145 +5310,42 @@ def main():
                 st.markdown("---")
                 if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
                     st.info("No data in this source.")
+                cols_to_show: list = []
                 if rows_filtered and not use_facility_tabs:
                     all_cols = list(rows_filtered[0].keys()) if rows_filtered else []
                     # Master Kitchens: hide Account Country and Sheet from the sheet
                     all_cols = [c for c in all_cols if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                     cols_to_show = all_cols
                     rows_display = rows_filtered
+                display_df = None
                 if HAS_EXCEL and rows_filtered and not use_facility_tabs:
                     display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                     display_df = display_df.copy()
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
                     display_df = _coerce_numeric_columns(display_df)
-                    _row_count_placeholder_single = st.empty()
-                if _HAS_AGGRI and not _use_compact_tables():
-                    # AgGrid with header filters; add getRowStyle when Status column exists (same as test that worked)
-                    status_col_ag = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
-                    gb = GridOptionsBuilder.from_dataframe(display_df)
-                    gb.configure_default_column(
-                        filter=True,
-                        sortable=True,
-                        resizable=True,
-                        floatingFilter=True,
-                        suppressHeaderMenuButton=False,
-                        suppressHeaderFilterButton=False,
-                        menuTabs=["filterMenuTab", "generalMenuTab", "columnsMenuTab"],
+                _row_count_placeholder_single = st.empty()
+                if display_df is not None and not display_df.empty:
+                    status_col_ag = next(
+                        (c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")),
+                        None,
                     )
-                    _max_set_master = 500
-                    for col in display_df.columns:
-                        if _is_facility_name_aggrid_column(col):
-                            gb.configure_column(col, filter=False, floatingFilter=False, suppressHeaderFilterButton=True)
-                            continue
-                        if pd.api.types.is_numeric_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agNumberColumnFilter", floatingFilter=True)
-                        elif pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                            gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
-                        else:
-                            ser = display_df[col].dropna().astype(str).str.strip()
-                            uniq = ser[ser != ""].unique()
-                            if len(uniq) <= _max_set_master:
-                                vals = sorted(uniq.tolist(), key=str)
-                                gb.configure_column(col, filter="agSetColumnFilter", filterParams={"values": vals, "maxDisplayedRows": 500}, floatingFilter=True)
-                            else:
-                                gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
-                    gb.configure_grid_options(
-                        domLayout="normal",
-                        suppressMenuHide=False,
-                        columnMenu="legacy",
-                    )
-                    gb.configure_side_bar(filters_panel=False, columns_panel=False)
-                    go = gb.build()
-                    go["suppressCsvExport"] = True
-                    if "defaultColDef" not in go:
-                        go["defaultColDef"] = {}
-                    go["defaultColDef"]["filter"] = True
-                    go["defaultColDef"]["floatingFilter"] = True
-                    go["defaultColDef"]["minWidth"] = 140
-                    go["defaultColDef"]["suppressHeaderMenuButton"] = False
-                    go["defaultColDef"]["suppressHeaderFilterButton"] = False
-                    go["defaultColDef"]["wrapHeaderText"] = True
-                    go["defaultColDef"]["autoHeaderHeight"] = True
-                    go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
-                    if "floatingFiltersHeight" in go:
-                        del go["floatingFiltersHeight"]
-                    _col_defs_m = [c for c in (go.get("columnDefs") or []) if c.get("field") != "_has_opportunity"]
-                    go["columnDefs"] = _col_defs_m
-                    for cdef in _col_defs_m:
-                        if _is_facility_name_aggrid_column(cdef.get("field")):
-                            cdef["filter"] = False
-                            cdef["floatingFilter"] = False
-                            cdef["suppressHeaderFilterButton"] = True
-                        else:
-                            cdef["filter"] = True
-                            cdef["floatingFilter"] = True
-                            cdef["suppressHeaderFilterButton"] = False
-                        if cdef.get("type") == []:
-                            cdef.pop("type", None)
-                    if status_col_ag and JsCode:
-                        go["getRowStyle"] = _status_get_row_style_js(status_col_ag)
-                    _um_m = (GridUpdateMode.FILTERING_CHANGED | GridUpdateMode.SORTING_CHANGED) if GridUpdateMode else None
-                    _dm_m = DataReturnMode.FILTERED_AND_SORTED if DataReturnMode else None
-                    _kw_m = dict(update_mode=_um_m, data_return_mode=_dm_m) if (_um_m and _dm_m) else {}
-                    grid_res_m = AgGrid(
-                        display_df,
-                        gridOptions=go,
+                    if _kitchen_master_plain_tables():
+                        _df_single_show = display_df
+                    else:
+                        _df_single_show = _style_df_status_rows(display_df, status_col_ag)
+                    st.dataframe(
+                        _df_single_show,
                         use_container_width=True,
-                        fit_columns_on_grid_load=False,
+                        hide_index=True,
+                        column_config={"_has_opportunity": None},
                         height=_table_height_px(),
-                        theme="streamlit",
-                        show_toolbar=True,
-                        show_search=True,
-                        show_download_button=False,
-                        enable_enterprise_modules=True,
-                        allow_unsafe_jscode=True,
-                        key="master_kitchens_grid_single",
-                        **_kw_m,
                     )
                     _total_single = len(rows_display) if rows_display else 0
-                    _cnt_m = _total_single
-                    if grid_res_m and grid_res_m.get("data") is not None:
-                        _cnt_m = len(grid_res_m["data"])
-                    if rows_display is not None:
-                        _row_count_placeholder_single.caption(
-                            f"**{_cnt_m}** rows shown (out of **{_total_single}** total)"
-                        )
-                        if can_export:
-                            _rows_to_export = grid_res_m.get("data") if (grid_res_m and grid_res_m.get("data") is not None) else rows_display
-                            _render_export_button(_rows_to_export, "master_kitchens_filtered", key="export_master_kitchens_single")
-                else:
-                        display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
-                        _sc = {"Occupied": "#FEE2E2", "Sold": "#FEE2E2", "Vacant": "#D1FAE5", "Churning": "#FDE68A"}
-                        _ns = "#B22222"
-                        status_col_m = next((c for c in display_df.columns if str(c).strip().lower() in ("status", "status__c")), None)
-                        if status_col_m and not display_df.empty:
-                            def _row_bg_m(row):
-                                v = (str(row[status_col_m]) if row[status_col_m] is not None else "").strip()
-                                low = v.lower()
-                                if not v or low in ("no status", "n/a", "na", "—", "-", "blocked"):
-                                    return [f"background-color: {_ns}; color: white"] * len(row)
-                                key = "Vacant" if (low == "vacant" or (low.startswith("vacant") and "occupied" not in low and "sold" not in low and "churning" not in low)) else "Churning" if low == "churning" else "Occupied" if low == "occupied" else "Sold" if low == "sold" else None
-                                bg = _sc.get(key, "") if key else _sc.get(v, "")
-                                if key == "Vacant" and bg:
-                                    has_opp = row.get("_has_opportunity", False)
-                                    if has_opp:
-                                        bg = _sc.get("Occupied", bg)
-                                return [f"background-color: {bg}" if bg else ""] * len(row)
-                            display_df = display_df.style.apply(_row_bg_m, axis=1)
-                        st.dataframe(display_df, use_container_width=True, hide_index=True, column_config={"_has_opportunity": None}, height=_table_height_px())
-                        if rows_display is not None:
-                            _total_single = len(rows_display)
-                            _row_count_placeholder_single.caption(
-                                f"**{_total_single}** rows shown (out of **{_total_single}** total)"
-                            )
-                            if can_export:
-                                _render_export_button(rows_display, "master_kitchens_filtered", key="export_master_kitchens_single_df")
-                if rows_filtered and not use_facility_tabs:
-                    _show = rows_display if rows_filtered else []
-                    for r in _show[:100]:
-                        st.json({k: r[k] for k in (cols_to_show or r.keys()) if k in r} if (cols_to_show and set(cols_to_show) != set(r.keys())) else r)
-                    if len(_show) > 100:
-                        st.caption(f"… and {len(_show) - 100} more.")
+                    _row_count_placeholder_single.caption(
+                        f"**{_total_single}** rows shown (out of **{_total_single}** total)"
+                    )
+                    if can_export:
+                        _render_export_button(rows_display, "master_kitchens_filtered", key="export_master_kitchens_single_df")
                 if HAS_EXCEL and rows_filtered and len(rows_filtered) > 0 and not use_facility_tabs:
                     st.markdown("---")
                     st.subheader("Pivot view")
