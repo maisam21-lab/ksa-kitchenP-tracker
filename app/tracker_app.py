@@ -1443,6 +1443,11 @@ def _kitchen_master_viewport_height_px(n_rows: int) -> int:
     return max(220, min(cap, h))
 
 
+def _is_pandas_styler(x) -> bool:
+    """True if ``x`` is a pandas Styler (used to avoid column_config that would strip row colors)."""
+    return type(x).__name__ == "Styler" and hasattr(x, "data")
+
+
 def _secrets_or_env_str(*names: str) -> str:
     """Read a string from ``st.secrets`` (Streamlit Cloud) and/or ``os.environ``.
 
@@ -5021,6 +5026,8 @@ def _render_master_table_aggrid_or_df(
             st.info("No rows to show in this view.")
         return
     df = _prepare_kitchen_master_dataframe_for_display(df, rows_shown)
+    # Column prep can change dtypes/names; re-resolve Status for Ag Grid rowClassRules + Styler.
+    status_col = _status_column_from_dataframe(df) or status_col
     _viewport_h = _kitchen_master_viewport_height_px(len(df.index))
     _cc = {"_has_opportunity": None}
     try:
@@ -5086,13 +5093,18 @@ def _render_master_table_aggrid_or_df(
         _df = _style_df_status_rows(df, status_col)
     else:
         _df = df
+    # Streamlit applies ``column_config`` (NumberColumn, etc.) after Styler and often strips row
+    # background colors. For Styler, only hide the helper column; keep full ``_cc`` for plain DataFrame.
+    _df_cc = _cc
+    if _is_pandas_styler(_df):
+        _df_cc = {"_has_opportunity": None}
     try:
         st.dataframe(
             _df,
             use_container_width=True,
             hide_index=True,
             height=_viewport_h,
-            column_config=_cc,
+            column_config=_df_cc,
         )
     except Exception:
         st.dataframe(
