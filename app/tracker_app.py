@@ -13,7 +13,9 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import requests
@@ -167,8 +169,62 @@ _GSHEET_FAMILY_REFRESH_SOURCES: tuple[str, ...] = (
 TAB_ID_KITCHEN_KW = "Kuwait Kitchen Master"
 TAB_ID_KITCHEN_AE = "UAE Kitchen Master"
 TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
+# Users who may open Kitchen Master regional views (Kuwait / UAE / Bahrain), not only KSA.
+# Union with PREVIEW_ONLY_IDS / BAHRAIN_KITCHEN_PREVIEW_IDS in Streamlit secrets or env.
+PREVIEW_ONLY_IDS = (
+    "maysam.abukashabeh@cloudkitchens.com,"
+    "jad.hajjar@cloudkitchens.com,"
+    "tala.zeineddine@cloudkitchens.com"
+)
+# CSV export allowlist (merged with EXPORT_ALLOWED_IDS in Streamlit secrets or env).
+EXPORT_ALLOWED_IDS = (
+    "maysam.abukashabeh@cloudkitchens.com,"
+    "jad.hajjar@cloudkitchens.com,"
+    "tala.zeineddine@cloudkitchens.com,"
+    "bassem.ghossaini@cloudkitchens.com,"
+    "michelle.kossaifi@cloudkitchens.com"
+)
+# Sign-in allowlist (merged with ALLOWLIST_IDS in secrets/env). Deduplicated emails; order not significant.
+ALLOWLIST_IDS = (
+    "masa.barhoumeh@cloudkitchens.com,"
+    "yousif.almohammedali@cloudkitchens.com,"
+    "osama.eliewa@cloudkitchens.com,"
+    "bassel.miri@cloudkitchens.com,"
+    "ahmad.elbasst@cloudkitchens.com,"
+    "riyad.ali@cloudkitchens.com,"
+    "muhammad.ali@cloudkitchens.com,"
+    "mohammad.bezzi@cloudkitchens.com,"
+    "sara.alabbasi@cloudkitchens.com,"
+    "maher.bouramia@cloudkitchens.com,"
+    "jad.alajouz@cloudkitchens.com,"
+    "abdelrahman.matar@cloudkitchens.com,"
+    "jad.hajjar@cloudkitchens.com,"
+    "tala.zeineddine@cloudkitchens.com,"
+    "yazan.saeed@cloudkitchens.com,"
+    "maysam.abukashabeh@cloudkitchens.com,"
+    "tarek.trad@cloudkitchens.com,"
+    "toufic.daher@cloudkitchens.com,"
+    "rafik.boudiaf@cloudkitchens.com,"
+    "hamza.alzaim@cloudkitchens.com,"
+    "hossam.metwally@cloudkitchens.com,"
+    "bassem.ghossaini@cloudkitchens.com,"
+    "nouf.alshammri@cloudkitchens.com,"
+    "michelle.kossaifi@cloudkitchens.com,"
+    "mohammed.masri@cloudkitchens.com,"
+    "gadah.saud@cloudkitchens.com,"
+    "lamees.aljamie@cloudkitchens.com,"
+    "abdullah.abohaymid@cloudkitchens.com,"
+    "mark.grehan@cloudkitchens.com"
+)
+# Product team IDs (merged with DEVELOPER_IDS in secrets). These emails get super_user → Dashboard + Kitchen Master + Discussions.
+DEVELOPER_IDS = (
+    "maysam.abukashabeh@cloudkitchens.com,"
+    "jad.hajjar@cloudkitchens.com,"
+    "tala.zeineddine@cloudkitchens.com,"
+    "yazan.saeed@cloudkitchens.com"
+)
 # Bahrain facilities live in the main workbook; only these worksheets (gids) load into gsheet_bh.
-# Share sheet with service account; restrict who sees the Bahrain tab via BAHRAIN_KITCHEN_PREVIEW_IDS in secrets.
+# Share sheet with service account; restrict who sees regional tabs via PREVIEW_ONLY_IDS / secrets.
 BAHRAIN_KITCHEN_SHEET_ID = SHEET_ID
 BAHRAIN_KITCHEN_WORKSHEET_GID = 2128153042
 BAHRAIN_KITCHEN_FACILITY_GIDS = [
@@ -185,7 +241,30 @@ def _rerun():
 
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
-DB_PATH = APP_DIR / "data" / "tracker.db"
+
+
+def _resolve_db_path() -> Path:
+    """SQLite file path. Streamlit Cloud often has a read-only repo; fall back to /tmp when app/data is not writable.
+
+    Override with env ``TRACKER_DB_PATH`` or ``SQLITE_DB_PATH`` (absolute path recommended on Cloud).
+    """
+    env = (os.environ.get("TRACKER_DB_PATH") or os.environ.get("SQLITE_DB_PATH") or "").strip()
+    if env:
+        return Path(env)
+    primary = APP_DIR / "data" / "tracker.db"
+    for p in (primary, Path(tempfile.gettempdir()) / "ksa_kitchen_tracker.db"):
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            t = p.parent / ".ksa_tracker_write_probe"
+            t.write_text("ok", encoding="utf-8")
+            t.unlink(missing_ok=True)
+            return p
+        except OSError:
+            continue
+    return Path(tempfile.gettempdir()) / "ksa_kitchen_tracker.db"
+
+
+DB_PATH = _resolve_db_path()
 STATIC_DIR = APP_DIR / "static"
 APP_DISPLAY_TITLE = "Kitchens Tracker"
 
@@ -687,7 +766,7 @@ CREATE TABLE IF NOT EXISTS app_discussions (
 
 def get_conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -740,7 +819,7 @@ def _migrate_generic_tab_data_if_needed(c):
     c.execute("ALTER TABLE generic_tab_data_new RENAME TO generic_tab_data")
 
 
-def init_db():
+def _init_db_schema():
     with get_conn() as c:
         c.execute(TABLE)
         c.execute(TABLE_EXEC_LOG)
@@ -774,15 +853,40 @@ def init_db():
     _sync_allowlist_from_config()
 
 
+def init_db():
+    """Create tables. Retries on /tmp if the repo path is not writable (common on Streamlit Cloud)."""
+    global DB_PATH
+    try:
+        _init_db_schema()
+    except sqlite3.OperationalError:
+        DB_PATH = Path(tempfile.gettempdir()) / "ksa_kitchen_tracker.db"
+        try:
+            DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        _init_db_schema()
+
+
 def _get_allowlist_ids_from_config() -> list[str]:
-    """Return allowlisted identifiers from ALLOWLIST_IDS (secrets or env)."""
+    """Return allowlisted identifiers from ALLOWLIST_IDS (secrets/env + built-in ALLOWLIST_IDS)."""
     try:
         ids = st.secrets.get("ALLOWLIST_IDS") or os.environ.get("ALLOWLIST_IDS", "")
     except Exception:
         ids = os.environ.get("ALLOWLIST_IDS", "")
+    parts: list[str] = []
     if isinstance(ids, list):
-        return [str(s).strip() for s in ids if s and str(s).strip()]
-    return [s.strip() for s in str(ids).split(",") if s.strip()]
+        parts = [str(s).strip() for s in ids if s and str(s).strip()]
+    else:
+        parts = [s.strip() for s in str(ids).split(",") if s.strip()]
+    seen: set[str] = set()
+    out: list[str] = []
+    for bucket in (parts, [s.strip() for s in str(ALLOWLIST_IDS or "").split(",") if s.strip()]):
+        for s in bucket:
+            k = (s or "").strip().lower()
+            if k and k not in seen:
+                seen.add(k)
+                out.append((s or "").strip())
+    return out
 
 
 def _sync_allowlist_from_config():
@@ -1015,7 +1119,7 @@ def remove_allowed_user(identifier: str) -> bool:
 
 
 def _allowlist_ids_from_secrets() -> set[str]:
-    """IDs (emails/names) from ALLOWLIST_IDS secrets/env, lowercased."""
+    """IDs (emails/names) from ALLOWLIST_IDS (secrets/env + built-in), lowercased."""
     try:
         raw = st.secrets.get("ALLOWLIST_IDS") or os.environ.get("ALLOWLIST_IDS", "")
     except Exception:
@@ -1025,7 +1129,28 @@ def _allowlist_ids_from_secrets() -> set[str]:
         s = part.strip()
         if s:
             ids.add(s.lower())
+    for part in str(ALLOWLIST_IDS or "").split(","):
+        s = part.strip()
+        if s:
+            ids.add(s.lower())
     return ids
+
+
+def _developer_ids_merged_list() -> list[str]:
+    """Lowercased emails from DEVELOPER_IDS (built-in + secrets/env), deduplicated."""
+    try:
+        raw = st.secrets.get("DEVELOPER_IDS") or os.environ.get("DEVELOPER_IDS", "")
+    except Exception:
+        raw = os.environ.get("DEVELOPER_IDS", "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for bucket in (str(DEVELOPER_IDS or ""), str(raw or "")):
+        for part in re.split(r"[,\n;\s]+", bucket.strip()):
+            s = (part or "").strip().lower()
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+    return out
 
 
 def is_user_allowed(identifier: str) -> bool:
@@ -1316,16 +1441,18 @@ def _kitchen_master_plain_tables() -> bool:
 
 
 def _kitchen_master_use_aggrid() -> bool:
-    """When True, Kitchen Master uses streamlit-aggrid (community filters + rowClassRules).
+    """When True, Kitchen Master uses streamlit-aggrid (Excel-like column filters + rowClassRules).
 
-    **Default is False** (native ``st.dataframe`` only) so tables always render on Streamlit Cloud.
-    Set ``KITCHEN_MASTER_AGGRID=1`` in **Secrets** or env to enable the spreadsheet-style grid.
+    **Default is True** so each column has filter menus / floating filters like a sheet.
+    Set ``KITCHEN_MASTER_AGGRID=0`` (or ``false``/``no``) in **Secrets** or env to fall back to native ``st.dataframe`` only.
     """
     v = (
         _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
-        or "0"
+        or "1"
     ).strip().lower()
-    return v in ("1", "true", "yes", "on")
+    if v in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -1881,7 +2008,7 @@ def _secrets_get_export_allowed_raw():
 
 
 def _export_allowed_ids_from_secrets() -> set[str]:
-    """IDs (emails) allowed to export data. Supports comma string or list in secrets/env."""
+    """IDs (emails) allowed to export. Merges EXPORT_ALLOWED_IDS (code) with secrets/env."""
     try:
         raw = (
             _secrets_get_export_allowed_raw()
@@ -1906,8 +2033,7 @@ def _export_allowed_ids_from_secrets() -> set[str]:
             s = (str(k).strip() or "").lower()
             if s and allowed:
                 out.add(s)
-        return out
-    if isinstance(raw, list):
+    elif isinstance(raw, list):
         for item in raw:
             s = (str(item).strip() or "").lower()
             if s:
@@ -1918,6 +2044,10 @@ def _export_allowed_ids_from_secrets() -> set[str]:
             s = (part or "").strip().lower()
             if s:
                 out.add(s)
+    for part in re.split(r"[,\n;\s]+", str(EXPORT_ALLOWED_IDS or "").strip()):
+        s = (part or "").strip().lower()
+        if s:
+            out.add(s)
     return out
 
 
@@ -1955,7 +2085,7 @@ def _secrets_get_bahrain_preview_raw():
 
 
 def _bahrain_preview_ids_from_secrets() -> set[str]:
-    """Emails allowed to see the Bahrain Kitchen Master tab and merged Bahrain dashboard rows."""
+    """Emails allowed for Kitchen Master regional previews (Kuwait, UAE, Bahrain). Merges PREVIEW_ONLY_IDS + secrets."""
     raw = _secrets_get_bahrain_preview_raw()
     out: set[str] = set()
     if isinstance(raw, dict):
@@ -1967,8 +2097,7 @@ def _bahrain_preview_ids_from_secrets() -> set[str]:
             s = (str(k).strip() or "").lower()
             if s and allowed:
                 out.add(s)
-        return out
-    if isinstance(raw, list):
+    elif isinstance(raw, list):
         for item in raw:
             s = (str(item).strip() or "").lower()
             if s:
@@ -1979,11 +2108,15 @@ def _bahrain_preview_ids_from_secrets() -> set[str]:
             s = (part or "").strip().lower()
             if s:
                 out.add(s)
+    for part in re.split(r"[,\n;\s]+", str(PREVIEW_ONLY_IDS or "").strip()):
+        s = (part or "").strip().lower()
+        if s:
+            out.add(s)
     return out
 
 
 def _user_can_see_bahrain_kitchen_preview(current_user: str) -> bool:
-    """Developer always; else email/local must be in BAHRAIN_KITCHEN_PREVIEW_IDS (non-empty)."""
+    """True if user may see Kitchen Master Kuwait/UAE/Bahrain (not only KSA). Developer always; else PREVIEW_ONLY_IDS + secrets."""
     if _is_developer():
         return True
     u = (current_user or "").strip().lower()
@@ -3107,9 +3240,13 @@ def _dashboard_kitchen_master_tab_names_for_country(ui_country: str, *, current_
         return None
     s = (ui_country or "").strip()
     if s == "Kuwait":
+        if not _user_can_see_bahrain_kitchen_preview(current_user or ""):
+            return None
         hidden = _regional_preview_hidden_tab_names_lower()
         return [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_KW) if (t or "").strip().lower() not in hidden]
     if s == "UAE":
+        if not _user_can_see_bahrain_kitchen_preview(current_user or ""):
+            return None
         hidden = _regional_preview_hidden_tab_names_lower()
         return [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_AE) if (t or "").strip().lower() not in hidden]
     if s == "Bahrain":
@@ -3118,7 +3255,7 @@ def _dashboard_kitchen_master_tab_names_for_country(ui_country: str, *, current_
             bh_tabs = [t for t in list_tab_ids_for_source(GSOURCE_KITCHEN_BH) if (t or "").strip().lower() not in hidden]
             if bh_tabs:
                 return bh_tabs
-        return list(_master_kitchens_other_sheet_ids())
+        return None
     if s == "Saudi Arabia":
         return list(_master_kitchens_other_sheet_ids())
     return None
@@ -3396,6 +3533,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
         for r in sheet_rows:
             combined_rows.append({"Sheet": label, **r})
     combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
+    combined_rows = _apply_kitchen_labels_to_combined_facility_rows(combined_rows)
     if not combined_rows:
         st.info("No rows in the selected sheets yet.")
         return
@@ -3701,6 +3839,32 @@ def _apply_kitchen_labels(rows: list[dict], cols: list[str]) -> tuple[list[dict]
     return out_rows, out_cols
 
 
+def _apply_kitchen_labels_to_combined_facility_rows(combined_rows: list[dict]) -> list[dict]:
+    """When multiple sheets are merged, unify API vs display column names into one column each.
+
+    Without this, ``Sell_Price__c`` on one facility and ``List Price`` on another become two
+    columns; pandas infers object dtypes and Ag Grid shows 6400.00000-style noise.
+    """
+    if not combined_rows:
+        return combined_rows
+    cols = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict))))
+    rows2, _ = _apply_kitchen_labels(combined_rows, cols)
+    return rows2
+
+
+def _normalize_export_rows_for_download(rows: list | None) -> list | None:
+    """Re-run cell sanitization on rows Ag Grid returns (JSON can reintroduce float formatting)."""
+    if not rows:
+        return rows
+    out = []
+    for r in rows:
+        if isinstance(r, dict):
+            out.append(_sanitize_kitchen_row_dict(dict(r)))
+        else:
+            out.append(r)
+    return out
+
+
 def _kitchens_column_order(cols: list[str]) -> list[str]:
     """Put County/Account Country near the start for Kitchens/SF Kitchen Data."""
     cols = list(cols)
@@ -3761,8 +3925,328 @@ def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
             continue
         ser = pd.to_numeric(df[col], errors="coerce")
         non_null = ser.notna().sum()
-        if non_null >= max(1, len(df) * 0.5):
+        # Lower threshold so mixed text columns (e.g. UAE) still become numeric when mostly numbers
+        if non_null >= max(1, int(len(df) * 0.28)):
             df[col] = ser
+    return df
+
+
+_NUMERIC_STRING_ONLY_RE = re.compile(r"^-?[\d,]+(?:\.[\d]*)?$")
+# Kitchen Size / Hood Size often arrive as "25.00000 m²" or "25.00000 sqm" — strip float noise from the number part.
+_SIZE_UNIT_SUFFIX_OK_RE = re.compile(
+    r"^(m²|m\u00b2|m2|sqm|sq\.?\s*m|square\s*meters?|sq\s*meters?|meters?\s*sq|sq\.?\s*meters?)$",
+    re.IGNORECASE,
+)
+
+
+def _prettify_numeric_string_plain_or_with_size_unit(raw: str):
+    """Compact plain numeric strings and number+area-unit strings (Kitchen/Hood Size columns). Returns None if not matched."""
+    if raw is None:
+        return None
+    t = str(raw).strip()
+    if not t:
+        return None
+    m = re.match(r"^\s*(-?[\d,]+(?:\.[\d]*))\s*(.*?)\s*$", t)
+    if not m:
+        return None
+    num_s, rest = m.group(1), m.group(2).strip()
+    try:
+        xf = float(num_s.replace(",", ""))
+    except ValueError:
+        return None
+    if not math.isfinite(xf):
+        return None
+    pv = _prettify_numeric_scalar_for_display(xf)
+    if not rest:
+        t0 = num_s.replace(",", "").replace(" ", "")
+        if _NUMERIC_STRING_ONLY_RE.match(t0):
+            return pv
+        return None
+    if not _SIZE_UNIT_SUFFIX_OK_RE.match(rest):
+        return None
+    return f"{pv} {rest.strip()}"
+
+
+def _sanitize_cell_value_for_kitchen(v):
+    """Normalize sheet/JSON noise: literal 'None'/'null' → None; '5192.000000' → int 5192."""
+    if v is None:
+        return v
+    if isinstance(v, Decimal):
+        try:
+            return _prettify_numeric_scalar_for_display(float(v))
+        except Exception:
+            return v
+    if isinstance(v, str):
+        t = v.strip()
+        if not t or t.lower() in ("none", "null", "nan", "n/a", "na", "#n/a", "undefined", "<na>"):
+            return None
+        t0 = t.replace(",", "").replace(" ", "")
+        if _NUMERIC_STRING_ONLY_RE.match(t0):
+            try:
+                return _prettify_numeric_scalar_for_display(float(t0))
+            except ValueError:
+                return v
+        pv_size = _prettify_numeric_string_plain_or_with_size_unit(t)
+        if pv_size is not None:
+            return pv_size
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return _prettify_numeric_scalar_for_display(v)
+    # numpy / pandas scalar types are not isinstance(..., float) but still print as 6400.00000 in grids
+    try:
+        if HAS_EXCEL and not isinstance(v, bool) and not pd.api.types.is_bool(v) and pd.api.types.is_number(v):
+            return _prettify_numeric_scalar_for_display(v)
+    except Exception:
+        pass
+    return v
+
+
+def _sanitize_kitchen_row_dict(r: dict) -> dict:
+    if not isinstance(r, dict):
+        return r
+    return {k: _sanitize_cell_value_for_kitchen(v) for k, v in r.items()}
+
+
+def _integerize_whole_number_float_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Float columns where every value is a whole number → pandas Int64 (cleaner in Streamlit/Arrow)."""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    for col in df.columns:
+        if col == "_has_opportunity":
+            continue
+        if not pd.api.types.is_float_dtype(df[col]):
+            continue
+        s = df[col].dropna()
+        if len(s) == 0:
+            continue
+        ok = True
+        for x in s:
+            try:
+                xf = float(x)
+            except (TypeError, ValueError):
+                ok = False
+                break
+            if not math.isfinite(xf):
+                ok = False
+                break
+            if abs(xf - round(xf)) > 1e-9 * max(1.0, abs(xf)):
+                ok = False
+                break
+        if not ok:
+            continue
+
+        def _to_int_or_na(x):
+            if pd.isna(x):
+                return pd.NA
+            try:
+                return int(round(float(x)))
+            except (TypeError, ValueError):
+                return pd.NA
+
+        try:
+            df[col] = df[col].map(_to_int_or_na).astype("Int64")
+        except Exception:
+            continue
+    return df
+
+
+def _cell_lock_numeric_for_display(v):
+    """Normalize any numeric-like cell for UI + Ag Grid; keeps dates/bools/text intact."""
+    if v is None:
+        return v
+    try:
+        if v is pd.NA:
+            return v
+    except Exception:
+        pass
+    try:
+        if pd.isna(v):
+            return v
+    except Exception:
+        pass
+    if isinstance(v, (datetime, date, pd.Timestamp)):
+        return v
+    if isinstance(v, str):
+        return _sanitize_cell_value_for_kitchen(v)
+    if isinstance(v, bool):
+        return v
+    try:
+        if HAS_EXCEL and pd.api.types.is_bool(v):
+            return v
+    except Exception:
+        pass
+    return _sanitize_cell_value_for_kitchen(v)
+
+
+def _dataframe_lock_numeric_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Final mandatory pass: every non-datetime cell through the sanitizer, then re-coerce dtypes.
+
+    streamlit-aggrid serializes the DataFrame to JSON; mixed object columns or numpy floats often
+    re-display as 6400.00000 unless values are plain int / compact float with stable dtypes.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    skip = {"_has_opportunity"}
+    for col in out.columns:
+        if col in skip:
+            continue
+        try:
+            if pd.api.types.is_datetime64_any_dtype(out[col]):
+                continue
+        except Exception:
+            pass
+        try:
+            if pd.api.types.is_bool_dtype(out[col]):
+                continue
+        except Exception:
+            pass
+        out[col] = out[col].map(_cell_lock_numeric_for_display)
+    out = _coerce_numeric_columns(out)
+    out = _integerize_whole_number_float_columns(out)
+    return out
+
+
+def _is_size_like_measurement_column(col) -> bool:
+    """Columns for area/dimensions (Size, Kitchen Size, …) that Ag Grid otherwise shows as 9.140000."""
+    if col is None or str(col) == "_has_opportunity":
+        return False
+    n = str(col).strip().lower()
+    if n == "size":
+        return True
+    if "kitchen size" in n or "hood size" in n:
+        return True
+    if n.endswith(" size") or n.endswith("_size"):
+        return True
+    return False
+
+
+def _scalar_to_compact_dimension_display_str(x):
+    """Render measurements as compact text so JSON/Ag Grid never apply six-decimal float formatting."""
+    if x is None:
+        return x
+    try:
+        if pd.isna(x):
+            return x
+    except Exception:
+        pass
+    if isinstance(x, str):
+        t = x.strip()
+        if not t:
+            return x
+        pv = _prettify_numeric_string_plain_or_with_size_unit(t)
+        if pv is not None and isinstance(pv, str) and any(c.isalpha() for c in pv):
+            return pv
+        try:
+            xf = float(t.replace(",", "").split()[0]) if t else float("nan")
+        except ValueError:
+            return x
+    elif isinstance(x, (int, float)) and not isinstance(x, bool):
+        try:
+            xf = float(x)
+        except (TypeError, ValueError):
+            return x
+    else:
+        try:
+            if HAS_EXCEL and not pd.api.types.is_bool(x) and pd.api.types.is_number(x):
+                xf = float(x)
+            else:
+                return x
+        except Exception:
+            return x
+    if not math.isfinite(xf):
+        return x
+    if abs(xf - round(xf)) < 1e-9 * max(1.0, abs(xf)):
+        return str(int(round(xf)))
+    r = round(xf, 8)
+    s = f"{r:.10f}".rstrip("0").rstrip(".")
+    return s
+
+
+def _format_size_like_columns_compact_string(df: pd.DataFrame) -> pd.DataFrame:
+    """Ag Grid renders float cells with fixed decimals; store Size columns as compact strings."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    for col in out.columns:
+        if not _is_size_like_measurement_column(col):
+            continue
+        out[col] = out[col].map(_scalar_to_compact_dimension_display_str)
+    return out
+
+
+def _sync_rows_shown_from_display_df(df: pd.DataFrame, rows_shown: list | None) -> None:
+    """Align row dicts with the DataFrame actually rendered (export + grid filtered data stay consistent)."""
+    if not rows_shown or df is None or df.empty:
+        return
+    try:
+        if len(rows_shown) != len(df.index):
+            return
+    except Exception:
+        return
+    ncols = len(df.columns)
+    for i in range(len(rows_shown)):
+        r = rows_shown[i]
+        if not isinstance(r, dict):
+            continue
+        for j in range(ncols):
+            c = df.columns[j]
+            try:
+                r[c] = df.iat[i, j]
+            except Exception:
+                pass
+
+
+def _streamlit_number_column_config_for_df(df: pd.DataFrame) -> dict:
+    """Compact numeric display for native ``st.dataframe`` (avoids long float strings in the UI)."""
+    if df is None or df.empty:
+        return {}
+    out: dict = {}
+    for col in df.columns:
+        if str(col) == "_has_opportunity":
+            continue
+        try:
+            if pd.api.types.is_bool_dtype(df[col]):
+                continue
+        except Exception:
+            pass
+        try:
+            dname = getattr(df[col].dtype, "name", "")
+            if pd.api.types.is_integer_dtype(df[col]) or dname in ("Int64", "Int32", "UInt64"):
+                out[col] = st.column_config.NumberColumn(str(col), format="%d")
+            elif pd.api.types.is_float_dtype(df[col]):
+                out[col] = st.column_config.NumberColumn(str(col), format="%.8g")
+        except Exception:
+            continue
+    return out
+
+
+def _prepare_kitchen_master_dataframe_for_display(df: pd.DataFrame, rows_shown: list | None) -> pd.DataFrame:
+    """Sanitize row dicts in place when aligned with df, then coerce → integerize → prettify → integerize.
+
+    Integerize runs before prettify so whole-number float columns become Int64; otherwise prettify maps
+    cells to mixed int/float, the column becomes object, and integerize is skipped — Ag Grid then shows
+    6400.000000-style floats.
+    """
+    if df is None or df.empty:
+        return df
+    cols = list(df.columns)
+    if rows_shown is not None and len(rows_shown) == len(df.index):
+        for i in range(len(rows_shown)):
+            rows_shown[i] = _sanitize_kitchen_row_dict(rows_shown[i])
+        df = pd.DataFrame(rows_shown)
+        for c in cols:
+            if c not in df.columns:
+                df[c] = pd.NA
+        df = df[cols]
+    df = _coerce_numeric_columns(df)
+    df = _integerize_whole_number_float_columns(df)
+    df = _prettify_numeric_columns_for_display_deep(df)
+    df = _dataframe_lock_numeric_display(df)
+    df = _format_size_like_columns_compact_string(df)
+    if rows_shown is not None and len(rows_shown) == len(df.index):
+        _sync_rows_shown_from_display_df(df, rows_shown)
     return df
 
 
@@ -3775,6 +4259,11 @@ def _prettify_numeric_scalar_for_display(x):
             return x
     except TypeError:
         pass
+    if isinstance(x, Decimal):
+        try:
+            x = float(x)
+        except Exception:
+            return x
     try:
         xf = float(x)
     except (TypeError, ValueError):
@@ -3822,10 +4311,15 @@ def _prettify_numeric_object_series(ser):
         except Exception:
             pass
         if isinstance(v, str):
-            t = str(v).strip().replace(",", "")
-            if not t or t.lower() in ("nan", "none", "null", "n/a", "na"):
+            t_full = str(v).strip()
+            if not t_full or t_full.lower() in ("nan", "none", "null", "n/a", "na"):
                 out.append(v)
                 continue
+            pv_sz = _prettify_numeric_string_plain_or_with_size_unit(t_full)
+            if pv_sz is not None:
+                out.append(pv_sz)
+                continue
+            t = t_full.replace(",", "")
             try:
                 xf = float(t)
             except ValueError:
@@ -3863,8 +4357,27 @@ def _prettify_numeric_columns_for_display_deep(df: pd.DataFrame) -> pd.DataFrame
                 float(s.replace(",", ""))
                 num_like += 1
             except ValueError:
-                pass
-        if num_like >= max(3, int(len(sample) * 0.55)):
+                if _prettify_numeric_string_plain_or_with_size_unit(s) is not None:
+                    num_like += 1
+        quick = non_null.head(min(24, len(non_null)))
+        any_plain_num_str = False
+        any_size_unit_str = False
+        for v in quick:
+            if isinstance(v, str):
+                t0 = v.strip().replace(",", "").replace(" ", "")
+                if _NUMERIC_STRING_ONLY_RE.match(t0):
+                    any_plain_num_str = True
+                    break
+                if _prettify_numeric_string_plain_or_with_size_unit(v.strip()) is not None:
+                    any_size_unit_str = True
+                    break
+        _force_size_col = "size" in str(col).lower()
+        if (
+            any_plain_num_str
+            or any_size_unit_str
+            or _force_size_col
+            or num_like >= max(2, int(len(sample) * 0.2))
+        ):
             df[col] = _prettify_numeric_object_series(ser)
     return df
 
@@ -3957,13 +4470,13 @@ def _row_is_overwhelmingly_none_like(row: dict) -> bool:
         return False
     skip = {"_has_opportunity", "Sheet"}
     keys = [k for k in row if k not in skip]
-    if len(keys) < 5:
+    if len(keys) < 4:
         return False
     n_empty = sum(1 for k in keys if _cell_is_empty_for_empty_row_check(row.get(k)))
     if n_empty >= len(keys):
         return True
-    # e.g. 7 of 8 columns are None/empty — hide
-    if n_empty >= max(len(keys) - 1, int(math.ceil(len(keys) * 0.88))):
+    # Hide padding rows: almost all cells None/blank
+    if n_empty >= max(len(keys) - 1, int(math.ceil(len(keys) * 0.72))):
         return True
     return False
 
@@ -3989,14 +4502,36 @@ def _filter_empty_records(rows: list) -> list:
     return [r for r in rows if isinstance(r, dict) and not _is_empty_record(r)]
 
 
-# Hide incomplete kitchen rows: no Type + no Floor + no List with odd or missing status; and sparse
-# "No status" rows (e.g. dark-red UI) with almost no filled cells or empty Sold rate / occupancy % columns.
+# Hide incomplete kitchen rows: no Type + no Floor + no List with odd or missing status; sparse
+# "No status" rows; rows with only List Price + Kitchen Number Name (or + non-standard Status); sparse KPIs.
 _STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
     {"Vacant", "Churning", "Occupied", "Sold", "No status"}
 )
 _KITCHEN_TYPE_COL_KEYS = ("Type", "Kitchen Type", "Type__c")
-_KITCHEN_FLOOR_PRICE_KEYS = ("Floor Price", "Floor_Price__c")
-_KITCHEN_LIST_PRICE_KEYS = ("List Price", "Sell_Price__c", "List_Price__c")
+_KITCHEN_FLOOR_PRICE_KEYS = (
+    "Floor Price",
+    "Floor_Price__c",
+    "floor_price",
+    "Floor_Price",
+    "Floor MRR",
+    "Floor (MRR)",
+)
+_KITCHEN_LIST_PRICE_KEYS = (
+    "List Price",
+    "Sell_Price__c",
+    "List_Price__c",
+    "sell_price",
+    "List_Price",
+    "List (MRR)",
+    "Kitchen_Number__c.Sell_Price__c",
+)
+_KITCHEN_NUMBER_NAME_KEYS = (
+    "Kitchen Number Name",
+    "Kitchen Number",
+    "Kitchen_Number_ID_18__c",
+    "Kitchen_Number__c",
+    "Name",
+)
 
 
 def _find_kitchen_column_key(r: dict, candidates: tuple[str, ...]) -> str | None:
@@ -4011,6 +4546,51 @@ def _find_kitchen_column_key(r: dict, candidates: tuple[str, ...]) -> str | None
         if needle in norm_map:
             return norm_map[needle]
     return None
+
+
+def _find_floor_price_column_key(r: dict) -> str | None:
+    k = _find_kitchen_column_key(r, _KITCHEN_FLOOR_PRICE_KEYS)
+    if k:
+        return k
+    for key in r:
+        if key in ("_has_opportunity", "Sheet"):
+            continue
+        ks = re.sub(r"[\s_]+", " ", str(key).lower()).strip()
+        if "floor" in ks and "price" in ks:
+            return key
+        if "floor" in ks and "mrr" in ks:
+            return key
+    return None
+
+
+def _find_list_price_column_key(r: dict) -> str | None:
+    k = _find_kitchen_column_key(r, _KITCHEN_LIST_PRICE_KEYS)
+    if k:
+        return k
+    for key in r:
+        if key in ("_has_opportunity", "Sheet"):
+            continue
+        ks = re.sub(r"[\s_]+", " ", str(key).lower()).strip()
+        if ("list" in ks or "sell" in ks) and ("price" in ks or "mrr" in ks):
+            return key
+    return None
+
+
+def _find_kitchen_number_name_column_key(r: dict) -> str | None:
+    k = _find_kitchen_column_key(r, _KITCHEN_NUMBER_NAME_KEYS)
+    if k:
+        return k
+    for key in r:
+        if key in ("_has_opportunity", "Sheet"):
+            continue
+        ks = re.sub(r"[\s_]+", " ", str(key).lower()).strip()
+        if "kitchen" in ks and "number" in ks and "name" in ks:
+            return key
+    return None
+
+
+def _find_kitchen_type_column_key(r: dict) -> str | None:
+    return _find_kitchen_column_key(r, _KITCHEN_TYPE_COL_KEYS)
 
 
 def _is_missing_kitchen_type_for_junk_filter(v) -> bool:
@@ -4055,19 +4635,19 @@ def _should_hide_junk_kitchen_row(r: dict) -> bool:
     """True when Type + Floor + List are all missing and status is odd OR 'No status' (incomplete junk)."""
     if not isinstance(r, dict):
         return False
-    tk = _find_kitchen_column_key(r, _KITCHEN_TYPE_COL_KEYS)
-    fk = _find_kitchen_column_key(r, _KITCHEN_FLOOR_PRICE_KEYS)
-    lk = _find_kitchen_column_key(r, _KITCHEN_LIST_PRICE_KEYS)
-    if tk is None or fk is None or lk is None:
+    tk = _find_kitchen_type_column_key(r)
+    fk = _find_floor_price_column_key(r)
+    lk = _find_list_price_column_key(r)
+    # Need at least one kitchen price/type column in the row so we do not hide unrelated tabs.
+    if tk is None and fk is None and lk is None:
         return False
-    if (
-        _is_missing_kitchen_type_for_junk_filter(r.get(tk))
-        and _is_missing_price_for_junk_filter(r.get(fk))
-        and _is_missing_price_for_junk_filter(r.get(lk))
-    ):
-        norm = _status_normalized_from_row(r)
-        return _is_odd_kitchen_status_normalized(norm) or norm == "No status"
-    return False
+    type_missing = tk is None or _is_missing_kitchen_type_for_junk_filter(r.get(tk))
+    floor_missing = fk is None or _is_missing_price_for_junk_filter(r.get(fk))
+    list_missing = lk is None or _is_missing_price_for_junk_filter(r.get(lk))
+    if not (type_missing and floor_missing and list_missing):
+        return False
+    norm = _status_normalized_from_row(r)
+    return _is_odd_kitchen_status_normalized(norm) or norm == "No status"
 
 
 def _meaningful_kitchen_cell_count(r: dict) -> int:
@@ -4115,10 +4695,8 @@ def _should_hide_no_status_sparse_kitchen_row(r: dict) -> bool:
         return False
     if _status_normalized_from_row(r) != "No status":
         return False
-    n_keys = len([k for k in r if k not in ("_has_opportunity", "Sheet")])
-    if n_keys < 5:
-        return False
     mc = _meaningful_kitchen_cell_count(r)
+    # Do not require a minimum key count — sparse dict rows (only non-null cells stored) used to skip this rule.
     if mc <= 2:
         return True
     if mc <= 4 and _sold_rate_metric_columns_all_empty(r):
@@ -4126,8 +4704,69 @@ def _should_hide_no_status_sparse_kitchen_row(r: dict) -> bool:
     return False
 
 
+def _is_kitchen_status_column_key(k) -> bool:
+    """True if this dict key is the kitchen Status field (any common casing / __c)."""
+    if k is None:
+        return False
+    n = re.sub(r"[\s_]+", "", str(k).strip().lower())
+    return n in ("status", "status__c", "statusc")
+
+
+def _should_hide_list_price_and_kitchen_name_only_row(r: dict) -> bool:
+    """Hide sparse rows where the only data is List Price + Kitchen Number Name (sheet padding / incomplete)."""
+    if not isinstance(r, dict):
+        return False
+    skip = {"_has_opportunity", "Sheet"}
+    lk = _find_list_price_column_key(r)
+    nk = _find_kitchen_number_name_column_key(r)
+    if lk is None or nk is None or lk == nk:
+        return False
+    if _cell_is_empty_for_empty_row_check(r.get(lk)) or _cell_is_empty_for_empty_row_check(r.get(nk)):
+        return False
+    for k, v in r.items():
+        if k in skip:
+            continue
+        if k == lk or k == nk:
+            continue
+        if not _cell_is_empty_for_empty_row_check(v):
+            return False
+    return True
+
+
+def _should_hide_list_price_kitchen_name_and_incorrect_status_row(r: dict) -> bool:
+    """Hide sparse rows: only List Price + Kitchen Number Name + Status, and Status is not a standard value."""
+    if not isinstance(r, dict):
+        return False
+    skip = {"_has_opportunity", "Sheet"}
+    lk = _find_list_price_column_key(r)
+    nk = _find_kitchen_number_name_column_key(r)
+    if lk is None or nk is None or lk == nk:
+        return False
+    if _cell_is_empty_for_empty_row_check(r.get(lk)) or _cell_is_empty_for_empty_row_check(r.get(nk)):
+        return False
+    for k, v in r.items():
+        if k in skip:
+            continue
+        if k == lk or k == nk:
+            continue
+        if _is_kitchen_status_column_key(k):
+            continue
+        if not _cell_is_empty_for_empty_row_check(v):
+            return False
+    raw = _status_cell_raw_from_row(r).strip()
+    if not raw:
+        return False
+    norm = _status_normalized_from_row(r)
+    return _is_odd_kitchen_status_normalized(norm)
+
+
 def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
-    return _should_hide_junk_kitchen_row(r) or _should_hide_no_status_sparse_kitchen_row(r)
+    return (
+        _should_hide_junk_kitchen_row(r)
+        or _should_hide_no_status_sparse_kitchen_row(r)
+        or _should_hide_list_price_and_kitchen_name_only_row(r)
+        or _should_hide_list_price_kitchen_name_and_incorrect_status_row(r)
+    )
 
 
 def _filter_junk_kitchen_records(rows: list) -> list:
@@ -4299,8 +4938,12 @@ def _render_master_table_aggrid_or_df(
     """Kitchen Master table: AgGrid Community (rowClassRules + custom_css colors) or native dataframe fallback."""
     if df is None or df.empty:
         return
-    df = _prettify_numeric_columns_for_display_deep(df)
+    df = _prepare_kitchen_master_dataframe_for_display(df, rows_shown)
     _cc = {"_has_opportunity": None}
+    try:
+        _cc.update(_streamlit_number_column_config_for_df(df))
+    except Exception:
+        pass
     want_grid = bool(
         _HAS_AGGRI
         and AgGrid
@@ -4348,7 +4991,11 @@ def _render_master_table_aggrid_or_df(
                             if (grid_response and grid_response.get("data") is not None)
                             else rows_shown
                         )
-                        _render_export_button(_rows_to_export, export_file_stem, key=export_button_key)
+                        _render_export_button(
+                            _normalize_export_rows_for_download(_rows_to_export),
+                            export_file_stem,
+                            key=export_button_key,
+                        )
                 return
         except Exception:
             pass
@@ -4378,7 +5025,11 @@ def _render_master_table_aggrid_or_df(
             f"**{_total_count}** rows shown (out of **{_total_count}** total)"
         )
         if allow_download:
-            _render_export_button(rows_shown, export_file_stem, key=export_button_key)
+            _render_export_button(
+                _normalize_export_rows_for_download(rows_shown),
+                export_file_stem,
+                key=export_button_key,
+            )
 
 
 def _render_generic_tab(
@@ -4502,7 +5153,7 @@ def _render_generic_tab(
             break
     # Kitchen Master: AgGrid Community (filters + rowClassRules colors) or native dataframe fallback.
     if HAS_EXCEL and not df_display.empty:
-        _df_show = _coerce_numeric_columns(df_display.copy())
+        _df_show = df_display.copy()
         if status_col:
             if "_has_opportunity" not in _df_show.columns:
                 _df_show["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
@@ -5214,24 +5865,15 @@ def main():
     if current_user:
         _persist_session_to_params(current_user)
 
-    # Helper: list of configured developer identifiers from secrets/env
-    def _get_developer_ids_list() -> list[str]:
-        try:
-            ids = st.secrets.get("DEVELOPER_IDS") or os.environ.get("DEVELOPER_IDS", "")
-        except Exception:
-            ids = os.environ.get("DEVELOPER_IDS", "")
-        return [s.strip().lower() for s in str(ids).split(",") if s.strip()]
-
     def _developer_section_visible(user: str) -> bool:
-        ids_list = _get_developer_ids_list()
+        ids_list = _developer_ids_merged_list()
         if not ids_list:
             return False
         if _is_developer():
             return True
         return (user or "").strip().lower() in ids_list
 
-    # Do NOT set developer_unlocked from DEVELOPER_IDS. That made _is_developer() true and forced
-    # super_user (Dashboard) for everyone on that list. DEVELOPER_IDS only elevates role in RBAC below.
+    # Do NOT set developer_unlocked from DEVELOPER_IDS. RBAC grants Dashboard for DEVELOPER_IDS via super_user; developer key is separate.
 
     # Single-row top bar: logo + title/status (left) | help, avatar, sign out (right)
     status_label, status_color, status_ts = _data_status_from_pulse(last_gsheet)
@@ -5422,11 +6064,11 @@ def main():
         user_role = "super_user"
     else:
         id_lower = (current_user or "").strip().lower() if current_user else ""
-        # 1) SUPER_USER_EMAILS in secrets = reliable way to grant Dashboard
+        # 1) SUPER_USER_EMAILS in secrets = grant Dashboard
+        # 2) DEVELOPER_IDS (built-in + secrets) = same super_user access (Dashboard + Kitchen Master + Discussions)
         super_emails = _get_super_user_emails()
-        # 2) DEVELOPER_IDS in secrets = same list can grant super_user (Dashboard) when signed in (no key needed)
         try:
-            dev_ids_set = set(_get_developer_ids_list())
+            dev_ids_set = set(_developer_ids_merged_list())
         except Exception:
             dev_ids_set = set()
         if id_lower and (id_lower in super_emails or id_lower in dev_ids_set):
@@ -5528,17 +6170,23 @@ def main():
     if section == "Kitchen Master Data":
         if st.session_state.get("preview_kitchen_region") == "KSA":
             st.session_state.pop("preview_kitchen_region", None)
-        _bh_preview = _user_can_see_bahrain_kitchen_preview(current_user or "")
-        if st.session_state.get("preview_kitchen_region") == "Bahrain" and not _bh_preview:
-            st.session_state.pop("preview_kitchen_region", None)
-        _cap_bh = " / **Bahrain** (preview testers)" if _bh_preview else ""
-        st.caption(
-            f"Choose **KSA** for the main master kitchen view, or **Kuwait** / **UAE**{_cap_bh} for regional facility workbooks."
-        )
+        _regional_preview = _user_can_see_bahrain_kitchen_preview(current_user or "")
+        if not _regional_preview:
+            _pk = st.session_state.get("preview_kitchen_region")
+            if _pk in ("Kuwait", "UAE", "Bahrain"):
+                st.session_state.pop("preview_kitchen_region", None)
         _cur = (st.session_state.get("preview_kitchen_region") or "").strip()
-        _regional_opts = ["KSA", "Kuwait", "UAE"]
-        if _bh_preview:
-            _regional_opts.append("Bahrain")
+        _regional_opts = ["KSA"]
+        if _regional_preview:
+            _regional_opts.extend(["Kuwait", "UAE", "Bahrain"])
+        if _regional_preview:
+            st.caption(
+                "Choose **KSA** for the main master kitchen view, or **Kuwait** / **UAE** / **Bahrain** for regional facility workbooks."
+            )
+        else:
+            st.caption(
+                "Choose **KSA** for the master kitchen view. Regional workbooks (Kuwait / UAE / Bahrain) are available to authorized users only."
+            )
 
         def _km_region_select_index(cur: str) -> int:
             if cur == "Kuwait" and "Kuwait" in _regional_opts:
@@ -5564,10 +6212,10 @@ def main():
                 st.session_state["preview_kitchen_region"] = _pick
                 _rerun()
         else:
-            if _bh_preview:
+            if _regional_preview:
                 _c_ksa, _c_kw, _c_ae, _c_bh = st.columns([1, 1, 1, 1])
             else:
-                _c_ksa, _c_kw, _c_ae = st.columns([1, 1, 1])
+                _c_ksa = st.columns(1)[0]
             with _c_ksa:
                 if st.button(
                     "KSA",
@@ -5577,25 +6225,25 @@ def main():
                 ):
                     st.session_state.pop("preview_kitchen_region", None)
                     _rerun()
-            with _c_kw:
-                if st.button(
-                    "Kuwait",
-                    key="km_preview_tab_kuwait",
-                    type="primary" if _cur == "Kuwait" else "secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state["preview_kitchen_region"] = "Kuwait"
-                    _rerun()
-            with _c_ae:
-                if st.button(
-                    "UAE",
-                    key="km_preview_tab_uae",
-                    type="primary" if _cur == "UAE" else "secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state["preview_kitchen_region"] = "UAE"
-                    _rerun()
-            if _bh_preview:
+            if _regional_preview:
+                with _c_kw:
+                    if st.button(
+                        "Kuwait",
+                        key="km_preview_tab_kuwait",
+                        type="primary" if _cur == "Kuwait" else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["preview_kitchen_region"] = "Kuwait"
+                        _rerun()
+                with _c_ae:
+                    if st.button(
+                        "UAE",
+                        key="km_preview_tab_uae",
+                        type="primary" if _cur == "UAE" else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["preview_kitchen_region"] = "UAE"
+                        _rerun()
                 with _c_bh:
                     if st.button(
                         "Bahrain",
@@ -5790,6 +6438,7 @@ def main():
                         for r in sheet_rows:
                             combined_rows.append({"Sheet": label, **r})
                     combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
+                    combined_rows = _apply_kitchen_labels_to_combined_facility_rows(combined_rows)
                     combined_rows = _filter_junk_kitchen_records(combined_rows)
                     if not combined_rows:
                         st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
@@ -5808,7 +6457,6 @@ def main():
                         if _disp_cols:
                             df_combined = df_combined[_disp_cols]
                         df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-                        df_combined = _coerce_numeric_columns(df_combined)
                         status_col_combined = None
                         for c in df_combined.columns:
                             if str(c).strip().lower() in ("status", "status__c"):
@@ -5849,7 +6497,6 @@ def main():
                     display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                     display_df = display_df.copy()
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
-                    display_df = _coerce_numeric_columns(display_df)
                 _row_count_placeholder_single = st.empty()
                 if display_df is not None and not display_df.empty:
                     status_col_ag = next(
@@ -6025,7 +6672,16 @@ def main():
             {c for c in _from_rows if c not in set(DASHBOARD_COUNTRY_FILTER_CORE)},
             key=str.casefold,
         )
-        unique_countries = list(DASHBOARD_COUNTRY_FILTER_CORE) + _extras
+        _regional_preview_dash = _user_can_see_bahrain_kitchen_preview(current_user or "")
+        _core_countries = list(DASHBOARD_COUNTRY_FILTER_CORE)
+        if not _regional_preview_dash:
+            _core_countries = [c for c in _core_countries if c == "Saudi Arabia"]
+            _extras = [
+                c
+                for c in _extras
+                if (c or "").strip() not in ("Bahrain", "Kuwait", "UAE")
+            ]
+        unique_countries = _core_countries + _extras
         n_filter_cols = 3 if has_go_live else 2
         selected_live = "All"
         if _compact_layout_enabled():
