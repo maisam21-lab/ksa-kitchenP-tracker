@@ -1550,26 +1550,16 @@ def _kitchen_master_plain_tables() -> bool:
 def _kitchen_master_use_aggrid() -> bool:
     """When True, Kitchen Master uses streamlit-aggrid (Excel-like column filters + rowClassRules).
 
-    **Default is True** so each column has filter menus / floating filters like a sheet.
-    Set ``KITCHEN_MASTER_AGGRID=0`` (or ``false``/``no``) in **Secrets** or env to fall back to native ``st.dataframe`` only.
+    **Default is False** — native ``st.dataframe`` / Styler so sheet data is visible without an embedded grid iframe.
+    Set ``KITCHEN_MASTER_AGGRID=1`` (or ``true``/``yes``/``on``) in **Secrets** or env to use the interactive grid.
     """
     v = (
         _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
-        or "1"
+        or "0"
     ).strip().lower()
-    if v in ("0", "false", "no", "off"):
-        return False
-    return True
-
-
-def _kitchen_master_force_safe_table() -> bool:
-    """When True, Kitchen Master skips the embedded Ag Grid and uses native ``st.dataframe`` / Styler (same as the checkbox “safe table”)."""
-    v = (
-        _secrets_or_env_str("KITCHEN_MASTER_SAFE_TABLE", "kitchen_master_safe_table")
-        or ""
-    ).strip().lower()
-    return v in ("1", "true", "yes", "on")
-
+    if v in ("1", "true", "yes", "on"):
+        return True
+    return False
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
     """Apply row status colors in non-AgGrid paths (mobile/tablet fallback)."""
@@ -5114,29 +5104,13 @@ def _render_master_table_aggrid_or_df(
         _cc.update(_streamlit_number_column_config_for_df(df))
     except Exception:
         pass
-    _force_safe = _kitchen_master_force_safe_table()
-    _ag_available = bool(
+    want_grid = bool(
         _HAS_AGGRI
         and AgGrid
         and GridOptionsBuilder
         and _kitchen_master_use_aggrid()
         and not _use_compact_tables()
     )
-    if _force_safe:
-        st.caption(
-            "**Safe table** is on via secrets/env (`KITCHEN_MASTER_SAFE_TABLE`). "
-            "Showing the native table instead of the embedded grid."
-        )
-    elif _ag_available:
-        st.checkbox(
-            "Safe table — show native data table if the sheet grid is not visible or says “No results”",
-            key="kitchen_master_safe_table",
-            help="Bypasses the embedded Ag Grid and shows the same rows in Streamlit’s scrollable table (status colors preserved when Styler is enabled).",
-        )
-    _safe_table = bool(
-        _force_safe or (_ag_available and st.session_state.get("kitchen_master_safe_table"))
-    )
-    want_grid = bool(_ag_available and not _safe_table)
     if want_grid:
         try:
             go, ag_custom_css, _use_ag_auto_height = _build_aggrid_community_grid_options(df, status_col)
