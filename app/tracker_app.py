@@ -1433,19 +1433,41 @@ def _table_height_px(default: int = 700) -> int:
 
 
 def _kitchen_master_viewport_height_px(n_rows: int) -> int:
-    """Ag Grid / dataframe height from row count — avoids a fixed ~700px box with only a few rows (large empty band)."""
-    cap = max(320, int(_table_height_px()))
+    """Native ``st.dataframe`` / fallback height from row count."""
+    cap = max(280, int(_table_height_px()))
     n = max(0, int(n_rows))
-    # Floating filters + toolbar + header row
-    overhead = 150
-    per_row = 40
+    if n <= 8:
+        overhead, per_row = 52, 28
+    elif n <= 40:
+        overhead, per_row = 72, 30
+    else:
+        overhead, per_row = 110, 34
     h = overhead + max(1, min(n, 800)) * per_row
-    return max(220, min(cap, h))
+    return max(110, min(cap, h))
+
+
+def _kitchen_master_aggrid_iframe_height_px(n_rows: int, *, auto_height_layout: bool) -> int:
+    """Streamlit-aggrid iframe height. When Ag Grid uses ``domLayout: autoHeight``, keep the iframe tight so the blank band disappears."""
+    n = max(0, int(n_rows))
+    cap = max(280, int(_table_height_px()))
+    if auto_height_layout:
+        # autoHeight: grid body matches row count; wrapper height only needs chrome + rows
+        h = 58 + max(1, min(n, 500)) * 30 + 24
+        return max(120, min(cap, h))
+    return _kitchen_master_viewport_height_px(n)
 
 
 def _is_pandas_styler(x) -> bool:
     """True if ``x`` is a pandas Styler (used to avoid column_config that would strip row colors)."""
     return type(x).__name__ == "Styler" and hasattr(x, "data")
+
+
+def _kitchen_master_row_count_caption(placeholder, text: str) -> None:
+    """Row count line below (or in) the grid — avoid ``st.empty()`` above the table (extra vertical gap)."""
+    if placeholder is not None:
+        placeholder.caption(text)
+    else:
+        st.caption(text)
 
 
 def _secrets_or_env_str(*names: str) -> str:
@@ -4939,14 +4961,15 @@ def _filter_regional_inventory_columns(region: str, cols: list[str], rows: list[
     return cols2, rows2
 
 
-def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, str]:
+def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | None) -> tuple[dict, str, bool]:
     """Build grid options + optional custom CSS for row colors.
 
     Uses ``rowClassRules`` + ``custom_css`` (not ``getRowStyle``/JsCode) — JsCode often yields a blank grid on Streamlit Cloud.
-    Returns ``(grid_options, custom_css_string)``.
+    For modest row counts, ``domLayout: autoHeight`` removes the large empty band inside the grid.
+    Returns ``(grid_options, custom_css_string, use_auto_height)``.
     """
     if not GridOptionsBuilder:
-        return {}, ""
+        return {}, "", False
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(
         filter=True,
@@ -4967,7 +4990,13 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
             gb.configure_column(col, filter="agDateColumnFilter", floatingFilter=True)
         else:
             gb.configure_column(col, filter="agTextColumnFilter", floatingFilter=True)
-    gb.configure_grid_options(domLayout="normal", suppressMenuHide=False, columnMenu="legacy")
+    _n = len(df.index)
+    _auto_h = _n <= 100
+    gb.configure_grid_options(
+        domLayout="autoHeight" if _auto_h else "normal",
+        suppressMenuHide=False,
+        columnMenu="legacy",
+    )
     gb.configure_side_bar(filters_panel=False, columns_panel=False)
     go = gb.build()
     go["suppressCsvExport"] = True
@@ -5001,7 +5030,7 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
     if status_col:
         rules, custom_css = _status_row_class_rules_and_css(status_col)
         go["rowClassRules"] = rules
-    return go, custom_css
+    return go, custom_css, _auto_h
 
 
 def _render_master_table_aggrid_or_df(
@@ -5010,10 +5039,10 @@ def _render_master_table_aggrid_or_df(
     *,
     grid_key: str,
     status_col: str | None,
-    row_count_placeholder,
     allow_download: bool,
     export_file_stem: str,
     export_button_key: str,
+    row_count_placeholder=None,
 ) -> None:
     """Kitchen Master table: AgGrid Community (rowClassRules + custom_css colors) or native dataframe fallback."""
     if df is None or df.empty:
@@ -5028,7 +5057,8 @@ def _render_master_table_aggrid_or_df(
     df = _prepare_kitchen_master_dataframe_for_display(df, rows_shown)
     # Column prep can change dtypes/names; re-resolve Status for Ag Grid rowClassRules + Styler.
     status_col = _status_column_from_dataframe(df) or status_col
-    _viewport_h = _kitchen_master_viewport_height_px(len(df.index))
+    _n_rows = len(df.index)
+    _viewport_h = _kitchen_master_viewport_height_px(_n_rows)
     _cc = {"_has_opportunity": None}
     try:
         _cc.update(_streamlit_number_column_config_for_df(df))
@@ -5043,13 +5073,14 @@ def _render_master_table_aggrid_or_df(
     )
     if want_grid:
         try:
-            go, ag_custom_css = _build_aggrid_community_grid_options(df, status_col)
+            go, ag_custom_css, _use_ag_auto_height = _build_aggrid_community_grid_options(df, status_col)
             if go:
+                _ag_iframe_h = _kitchen_master_aggrid_iframe_height_px(_n_rows, auto_height_layout=_use_ag_auto_height)
                 _kwargs = dict(
                     gridOptions=go,
                     use_container_width=True,
                     fit_columns_on_grid_load=False,
-                    height=_viewport_h,
+                    height=_ag_iframe_h,
                     theme="streamlit",
                     show_toolbar=True,
                     show_search=True,
@@ -5072,8 +5103,9 @@ def _render_master_table_aggrid_or_df(
                 if grid_response and grid_response.get("data") is not None:
                     _cnt = len(grid_response["data"])
                 if rows_shown:
-                    row_count_placeholder.caption(
-                        f"**{_cnt}** rows shown (out of **{_total}** total)"
+                    _kitchen_master_row_count_caption(
+                        row_count_placeholder,
+                        f"**{_cnt}** rows shown (out of **{_total}** total)",
                     )
                     if allow_download:
                         _rows_to_export = (
@@ -5116,8 +5148,9 @@ def _render_master_table_aggrid_or_df(
         )
     if rows_shown:
         _total_count = len(rows_shown)
-        row_count_placeholder.caption(
-            f"**{_total_count}** rows shown (out of **{_total_count}** total)"
+        _kitchen_master_row_count_caption(
+            row_count_placeholder,
+            f"**{_total_count}** rows shown (out of **{_total_count}** total)",
         )
         if allow_download:
             _render_export_button(
@@ -5236,7 +5269,6 @@ def _render_generic_tab(
                 if str((r or {}).get(_mf_col, "")).strip() in _mf_set
             ]
     rows_shown = _filter_empty_records(rows_shown)
-    _row_count_placeholder = st.empty()
     # Build display dataframe with selected columns only (Master list excludes Account Country)
     display_cols = [c for c in cols if rows_shown and c in (rows_shown[0].keys() if rows_shown else [])] or (list(rows_shown[0].keys()) if rows_shown else [])
     df_display = pd.DataFrame(rows_shown)[display_cols] if display_cols and rows_shown else pd.DataFrame(rows_shown)
@@ -5252,7 +5284,6 @@ def _render_generic_tab(
             rows_shown,
             grid_key=f"master_kitchens_grid_{key_suffix}",
             status_col=status_col,
-            row_count_placeholder=_row_count_placeholder,
             allow_download=allow_download,
             export_file_stem=f"{tab_id}_filtered",
             export_button_key=f"export_{key_suffix}_{tab_id}_master",
@@ -5395,6 +5426,8 @@ def main():
     .ag-toolbar [title*="Download"],
     .ag-toolbar button[title*="CSV"],
     [class*="ag-"] [title="Download as CSV"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+    /* streamlit-aggrid: avoid extra blank strip under the iframe */
+    iframe[title="st_aggrid"] { vertical-align: top !important; }
     /* Mobile Safari fallback for fullscreen button on dataframe toolbar:
        if native fullscreen fails, JS toggles this class on the table wrapper. */
     .mobile-fullscreen-fallback {
@@ -6552,7 +6585,6 @@ def main():
                             cols_combined = sorted(_df_temp.columns.tolist())
                         cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
                         rows_shown = combined_rows
-                        _row_count_placeholder_combined = st.empty()
                         df_combined = pd.DataFrame(rows_shown)
                         _disp_cols = [c for c in df_combined.columns if c in cols_combined]
                         if _disp_cols:
@@ -6565,7 +6597,6 @@ def main():
                                 rows_shown,
                                 grid_key="master_kitchens_grid_combined",
                                 status_col=status_col_combined,
-                                row_count_placeholder=_row_count_placeholder_combined,
                                 allow_download=can_export,
                                 export_file_stem="master_kitchens_combined_filtered",
                                 export_button_key="export_master_kitchens_combined_master",
@@ -6580,7 +6611,6 @@ def main():
                 rows_filtered = _filter_empty_records([r for r in (rows or []) if isinstance(r, dict)])
                 rows_filtered = _filter_junk_kitchen_records(rows_filtered)
                 rows_display = rows_filtered  # used for table; updated by column filters when applied
-                st.markdown("---")
                 if total > 0 and len(rows_filtered) == 0 and not use_facility_tabs:
                     st.info("No data in this source.")
                 cols_to_show: list = []
@@ -6594,7 +6624,6 @@ def main():
                     display_df = pd.DataFrame(rows_display)[cols_to_show] if cols_to_show else pd.DataFrame(rows_display)
                     display_df = display_df.copy()
                     display_df["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_display]
-                _row_count_placeholder_single = st.empty()
                 if display_df is not None and not display_df.empty:
                     status_col_ag = _status_column_from_dataframe(display_df)
                     _render_master_table_aggrid_or_df(
@@ -6602,7 +6631,6 @@ def main():
                         rows_display,
                         grid_key="master_kitchens_grid_single",
                         status_col=status_col_ag,
-                        row_count_placeholder=_row_count_placeholder_single,
                         allow_download=can_export,
                         export_file_stem="master_kitchens_filtered",
                         export_button_key="export_master_kitchens_single_master",
