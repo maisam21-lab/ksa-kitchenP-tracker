@@ -1268,23 +1268,50 @@ def _table_height_px(default: int = 700) -> int:
     return default
 
 
+def _secrets_or_env_str(*names: str) -> str:
+    """Read a string from ``st.secrets`` (Streamlit Cloud) and/or ``os.environ``.
+
+    Cloud app secrets are **not** always mirrored into the process environment; check both.
+    """
+    for name in names:
+        try:
+            if hasattr(st, "secrets") and st.secrets is not None:
+                v = st.secrets.get(name)
+                if v is not None and str(v).strip() != "":
+                    return str(v).strip()
+        except Exception:
+            pass
+    for name in names:
+        v = os.environ.get(name, "")
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return ""
+
+
 def _kitchen_master_plain_tables() -> bool:
     """When True (default), native ``st.dataframe`` fallback uses plain data — no Pandas Styler.
 
     When AgGrid is on, row colors use ``rowClassRules`` + CSS (not Styler). Styler is only for dataframe fallback.
-    Set env ``KITCHEN_MASTER_STYLED_ROWS=1`` to use Styler on dataframe fallback.
+    Set ``KITCHEN_MASTER_STYLED_ROWS=1`` in secrets or env to use Styler on dataframe fallback.
     """
-    v = (os.environ.get("KITCHEN_MASTER_STYLED_ROWS") or "").strip().lower()
+    v = (
+        _secrets_or_env_str("KITCHEN_MASTER_STYLED_ROWS", "kitchen_master_styled_rows")
+        or ""
+    ).strip().lower()
     return v not in ("1", "true", "yes", "on")
 
 
 def _kitchen_master_use_aggrid() -> bool:
-    """When True (default), Kitchen Master uses streamlit-aggrid (community filters + rowClassRules row colors).
+    """When True, Kitchen Master uses streamlit-aggrid (community filters + rowClassRules).
 
-    Set env ``KITCHEN_MASTER_AGGRID=0`` to force native ``st.dataframe`` only if the grid iframe fails to render.
+    **Default is False** (native ``st.dataframe`` only) so tables always render on Streamlit Cloud.
+    Set ``KITCHEN_MASTER_AGGRID=1`` in **Secrets** or env to enable the spreadsheet-style grid.
     """
-    v = (os.environ.get("KITCHEN_MASTER_AGGRID") or "1").strip().lower()
-    return v not in ("0", "false", "no", "off")
+    v = (
+        _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
+        or "0"
+    ).strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -3992,13 +4019,22 @@ def _render_master_table_aggrid_or_df(
         _df = _style_df_status_rows(df, status_col)
     else:
         _df = df
-    st.dataframe(
-        _df,
-        use_container_width=True,
-        hide_index=True,
-        height=_table_height_px(),
-        column_config=_cc,
-    )
+    try:
+        st.dataframe(
+            _df,
+            use_container_width=True,
+            hide_index=True,
+            height=_table_height_px(),
+            column_config=_cc,
+        )
+    except Exception:
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=_table_height_px(),
+            column_config=_cc,
+        )
     if rows_shown:
         _total_count = len(rows_shown)
         row_count_placeholder.caption(
