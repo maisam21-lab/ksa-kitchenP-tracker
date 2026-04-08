@@ -3767,7 +3767,7 @@ def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _prettify_numeric_scalar_for_display(x):
-    """Drop trailing fractional noise (10930.0 → int, 17.3 → rounded) for table display."""
+    """Drop trailing fractional noise (10930.0 → int; 17.35 stays compact) for table display."""
     if x is None:
         return x
     try:
@@ -3781,13 +3781,18 @@ def _prettify_numeric_scalar_for_display(x):
         return x
     if not math.isfinite(xf):
         return x
+    # Whole numbers as int (avoids 5192.0 / 5192.000000 in many renderers)
     if abs(xf - round(xf)) < 1e-9 * max(1.0, abs(xf)):
         return int(round(xf))
-    return round(xf, 4)
+    # General format: up to 6 significant figures, no long trailing zeros
+    try:
+        return float(f"{xf:.8g}")
+    except Exception:
+        return round(xf, 4)
 
 
 def _prettify_numeric_columns_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    """Integer-like values as int; other floats to 4 dp — avoids 10930.000000 in the UI."""
+    """Integer-like values as int; other floats compact — avoids 10930.000000 in the UI."""
     if df is None or df.empty:
         return df
     df = df.copy()
@@ -3798,6 +3803,69 @@ def _prettify_numeric_columns_for_display(df: pd.DataFrame) -> pd.DataFrame:
         if not pd.api.types.is_numeric_dtype(df[col]):
             continue
         df[col] = df[col].map(_prettify_numeric_scalar_for_display)
+    return df
+
+
+def _prettify_numeric_object_series(ser):
+    """Coerce object columns of numeric strings to prettified numbers (e.g. '5192.000000' → 5192)."""
+    if ser is None or len(ser) == 0:
+        return ser
+    out = []
+    for v in ser:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            out.append(v)
+            continue
+        try:
+            if pd.isna(v):
+                out.append(v)
+                continue
+        except Exception:
+            pass
+        if isinstance(v, str):
+            t = str(v).strip().replace(",", "")
+            if not t or t.lower() in ("nan", "none", "null", "n/a", "na"):
+                out.append(v)
+                continue
+            try:
+                xf = float(t)
+            except ValueError:
+                out.append(v)
+                continue
+            out.append(_prettify_numeric_scalar_for_display(xf))
+        else:
+            out.append(_prettify_numeric_scalar_for_display(v))
+    return pd.Series(out, index=ser.index, dtype=object)
+
+
+def _prettify_numeric_columns_for_display_deep(df: pd.DataFrame) -> pd.DataFrame:
+    """Like _prettify_numeric_columns_for_display but also fixes object columns that are numeric strings."""
+    df = _prettify_numeric_columns_for_display(df)
+    if df is None or df.empty:
+        return df
+    skip = {"_has_opportunity"}
+    for col in df.columns:
+        if col in skip:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            continue
+        ser = df[col]
+        non_null = ser.dropna()
+        if len(non_null) == 0:
+            continue
+        sample = non_null.head(min(80, len(non_null))).astype(str).str.strip()
+        num_like = 0
+        for s in sample:
+            if not s or s.lower() in ("nan", "none", "null", "n/a", "na"):
+                continue
+            try:
+                float(s.replace(",", ""))
+                num_like += 1
+            except ValueError:
+                pass
+        if num_like >= max(3, int(len(sample) * 0.55)):
+            df[col] = _prettify_numeric_object_series(ser)
     return df
 
 
@@ -3878,14 +3946,33 @@ def _cell_is_empty_for_empty_row_check(v) -> bool:
     if not s:
         return True
     sl = s.lower()
-    if sl in ("nan", "none", "n/a", "na", "—", "-", "<na>", "#n/a"):
+    if sl in ("nan", "none", "n/a", "na", "—", "-", "<na>", "#n/a", "null", "undefined"):
+        return True
+    return False
+
+
+def _row_is_overwhelmingly_none_like(row: dict) -> bool:
+    """True when most cells are None / 'None' / blank (wide sheet padding rows)."""
+    if not row or not isinstance(row, dict):
+        return False
+    skip = {"_has_opportunity", "Sheet"}
+    keys = [k for k in row if k not in skip]
+    if len(keys) < 5:
+        return False
+    n_empty = sum(1 for k in keys if _cell_is_empty_for_empty_row_check(row.get(k)))
+    if n_empty >= len(keys):
+        return True
+    # e.g. 7 of 8 columns are None/empty — hide
+    if n_empty >= max(len(keys) - 1, int(math.ceil(len(keys) * 0.88))):
         return True
     return False
 
 
 def _is_empty_record(row) -> bool:
-    """True if the row has no meaningful data (all values empty, null, whitespace, or NA-like)."""
+    """True if the row has no meaningful data (all values empty, null, whitespace, NA-like, or mostly None)."""
     if not row or not isinstance(row, dict):
+        return True
+    if _row_is_overwhelmingly_none_like(row):
         return True
     for k, v in row.items():
         if k == "_has_opportunity":
@@ -3930,7 +4017,7 @@ def _is_missing_kitchen_type_for_junk_filter(v) -> bool:
     if v is None:
         return True
     s = str(v).strip()
-    if not s or s.lower() in ("nan", "none", "n/a", "na", "—", "-"):
+    if not s or s.lower() in ("nan", "none", "null", "n/a", "na", "—", "-"):
         return True
     return False
 
@@ -4212,7 +4299,7 @@ def _render_master_table_aggrid_or_df(
     """Kitchen Master table: AgGrid Community (rowClassRules + custom_css colors) or native dataframe fallback."""
     if df is None or df.empty:
         return
-    df = _prettify_numeric_columns_for_display(df)
+    df = _prettify_numeric_columns_for_display_deep(df)
     _cc = {"_has_opportunity": None}
     want_grid = bool(
         _HAS_AGGRI
