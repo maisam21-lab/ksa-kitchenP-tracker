@@ -175,7 +175,14 @@ TAB_ID_KITCHEN_BH = "Bahrain Kitchen Master"
 SECTION_KSA = "KSA"
 _LEGACY_SECTION_KITCHEN_MASTER = "Kitchen Master Data"
 # Sub-nav inside **KSA** (same column+button sizing as Dashboard / Discussions tabs).
-KITCHEN_MASTER_REGION_OPTIONS: tuple[str, ...] = ("KSA", "Kuwait", "UAE", "Bahrain")
+# **KSA** label exists only on the main section tab; default sub-chip is **Saudi master** (same workbook).
+KITCHEN_MASTER_SUBVIEW_MAIN = "main"
+KITCHEN_MASTER_REGION_ROW: tuple[tuple[str, str], ...] = (
+    ("Saudi master", KITCHEN_MASTER_SUBVIEW_MAIN),
+    ("Kuwait", "Kuwait"),
+    ("UAE", "UAE"),
+    ("Bahrain", "Bahrain"),
+)
 SESSION_KEY_KITCHEN_MASTER_REGION = "kitchen_master_region_pick"
 # Users who may open Kitchen Master regional views (Kuwait / UAE / Bahrain), not only KSA.
 # Union with PREVIEW_ONLY_IDS / BAHRAIN_KITCHEN_PREVIEW_IDS in Streamlit secrets or env.
@@ -1429,35 +1436,43 @@ def _compact_layout_enabled() -> bool:
 
 
 def _kitchen_master_region_selector_ui() -> str:
-    """KSA / Kuwait / UAE / Bahrain picker — same UX as main section tabs (full-width button row or selectbox)."""
+    """Saudi master + Kuwait / UAE / Bahrain — same UX as main section tabs (only **KSA** is the top nav label)."""
+    _allowed = {v for _, v in KITCHEN_MASTER_REGION_ROW}
     if SESSION_KEY_KITCHEN_MASTER_REGION not in st.session_state:
-        st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = "KSA"
+        st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = KITCHEN_MASTER_SUBVIEW_MAIN
     cur = st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION]
-    if cur not in KITCHEN_MASTER_REGION_OPTIONS:
-        cur = "KSA"
+    if cur == "KSA":
+        cur = KITCHEN_MASTER_SUBVIEW_MAIN
         st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = cur
-    opts = list(KITCHEN_MASTER_REGION_OPTIONS)
+    if cur not in _allowed:
+        cur = KITCHEN_MASTER_SUBVIEW_MAIN
+        st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = cur
+    labels = [lbl for lbl, _ in KITCHEN_MASTER_REGION_ROW]
+    label_to_val = dict(KITCHEN_MASTER_REGION_ROW)
+    val_to_label = {v: lbl for lbl, v in KITCHEN_MASTER_REGION_ROW}
     if _compact_layout_enabled():
-        _sel = st.selectbox(
+        _cur_label = val_to_label.get(cur, labels[0])
+        _sel_label = st.selectbox(
             "Market",
-            options=opts,
-            index=opts.index(cur) if cur in opts else 0,
+            options=labels,
+            index=labels.index(_cur_label) if _cur_label in labels else 0,
             key="kitchen_master_region_mobile_selector",
         )
-        if _sel and _sel != cur:
-            st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = _sel
+        _next = label_to_val.get(_sel_label, KITCHEN_MASTER_SUBVIEW_MAIN)
+        if _next != cur:
+            st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = _next
             _rerun()
         return str(st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION])
-    r_cols = st.columns(len(opts))
-    for i, r_opt in enumerate(opts):
+    r_cols = st.columns(len(KITCHEN_MASTER_REGION_ROW))
+    for i, (lbl, val) in enumerate(KITCHEN_MASTER_REGION_ROW):
         with r_cols[i]:
             if st.button(
-                r_opt,
-                key=f"km_region_tab_{i}_{r_opt}",
-                type="primary" if cur == r_opt else "secondary",
+                lbl,
+                key=f"km_region_tab_{i}_{val}",
+                type="primary" if cur == val else "secondary",
                 use_container_width=True,
             ):
-                st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = r_opt
+                st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = val
                 _rerun()
     return str(st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION])
 
@@ -7101,11 +7116,11 @@ def main():
         # PREVIEW_ONLY_IDS / super_user / manager_viewer: KSA master + optional Kuwait / UAE / Bahrain workbooks.
         if _user_sees_dashboard_all_countries(current_user, user_role):
             st.caption(
-                "Choose **KSA** for the main Master Kitchen view, or **Kuwait / UAE / Bahrain** "
-                "(preview testers) for regional/facility workbooks."
+                "The **KSA** tab above is the main entry. Use **Saudi master** below for the KSA workbook, "
+                "or **Kuwait / UAE / Bahrain** (preview testers) for regional workbooks."
             )
             _km_region = _kitchen_master_region_selector_ui()
-            if _km_region == "KSA":
+            if _km_region == KITCHEN_MASTER_SUBVIEW_MAIN:
                 _render_kitchen_master_ksa_main(can_export=can_export, is_developer=is_developer)
             elif _km_region == "Kuwait":
                 _render_preview_regional_kitchen_master(
