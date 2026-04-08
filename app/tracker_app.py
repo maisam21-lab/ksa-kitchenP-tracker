@@ -1464,7 +1464,7 @@ def _is_pandas_styler(x) -> bool:
 
 
 def _deploy_git_info() -> tuple[str, str]:
-    """(short_sha_7, full_sha) from Streamlit Community Cloud / CI env — empty locally."""
+    """(short_sha_7, full_sha) — Cloud env vars first, then ``git rev-parse`` on the deployed checkout."""
     for key in (
         "STREAMLIT_GIT_COMMIT_SHA",
         "SOURCE_VERSION",
@@ -1475,6 +1475,21 @@ def _deploy_git_info() -> tuple[str, str]:
         v = (os.environ.get(key) or "").strip()
         if len(v) >= 7:
             return v[:7], v
+    try:
+        import subprocess
+
+        root = Path(__file__).resolve().parents[1]
+        r = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=6,
+        )
+        v = (r.stdout or "").strip()
+        if len(v) >= 7:
+            return v[:7], v
+    except Exception:
+        pass
     return "", ""
 
 
@@ -6310,14 +6325,6 @@ def main():
         section = section_options[0]
         st.session_state["section_radio"] = section
 
-    _d7, _dfull = _deploy_git_info()
-    if _d7:
-        st.caption(
-            f"**Build:** `{_d7}` — if UI changes from GitHub are missing, open the app on "
-            f"[Streamlit Cloud](https://share.streamlit.io/) → **⋮** → **Reboot app**, or confirm the app tracks "
-            f"`main` on the correct repo."
-        )
-
     # Tab row: desktop buttons; compact mode uses a single segmented control.
     if _compact_layout_enabled():
         _sel = st.selectbox(
@@ -6342,6 +6349,12 @@ def main():
                 ):
                     st.session_state["section_radio"] = opt
                     _rerun()
+
+    _d7, _ = _deploy_git_info()
+    st.markdown(
+        f"**App build:** `{_d7 or 'unknown'}` — if this is old vs [GitHub `main`](https://github.com/maisam21-lab/ksa-kitchenp-tracker/commits/main), "
+        f"open [Streamlit Cloud](https://share.streamlit.io/) → your app → **⋮** → **Reboot app**."
+    )
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
