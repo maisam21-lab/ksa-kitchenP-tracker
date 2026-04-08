@@ -1517,17 +1517,15 @@ def _kitchen_master_plain_tables() -> bool:
     return False
 
 
-def _kitchen_master_aggrid_secret_force() -> bool | None:
-    """If set in secrets/env, force Ag Grid on (True) or off (False). None = user picks in the Table view control."""
+def _kitchen_master_use_aggrid() -> bool:
+    """Kitchen Master uses Ag Grid (sheet-style filters + row colors) by default. Set ``KITCHEN_MASTER_AGGRID=0`` in secrets/env only if the iframe fails on your host."""
     v = (
         _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
-        or ""
+        or "1"
     ).strip().lower()
-    if v in ("1", "true", "yes", "on"):
-        return True
     if v in ("0", "false", "no", "off"):
         return False
-    return None
+    return True
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -5105,34 +5103,11 @@ def _render_master_table_aggrid_or_df(
         _cc.update(_streamlit_number_column_config_for_df(df))
     except Exception:
         pass
-    _ag_force = _kitchen_master_aggrid_secret_force()
-    if _ag_force is None:
-        _tv_horizontal = not _compact_layout_enabled()
-        st.radio(
-            "Table view",
-            options=["native", "grid"],
-            index=0,
-            horizontal=_tv_horizontal,
-            key="kitchen_master_table_view",
-            format_func=lambda x: (
-                "Data table (recommended)"
-                if x == "native"
-                else "Spreadsheet grid (filters)"
-            ),
-            help=(
-                "**Data table** — same rows with status colors (HTML/Styler); reliable on Streamlit Cloud. "
-                "**Spreadsheet grid** — Excel-like column filters and row colors inside Ag Grid; "
-                "can look blank in some browsers — switch back to Data table if you see no rows."
-            ),
-        )
-        _user_wants_grid = st.session_state.get("kitchen_master_table_view") == "grid"
-    else:
-        _user_wants_grid = _ag_force
     want_grid = bool(
         _HAS_AGGRI
         and AgGrid
         and GridOptionsBuilder
-        and _user_wants_grid
+        and _kitchen_master_use_aggrid()
         and not _use_compact_tables()
     )
     if want_grid:
@@ -5147,7 +5122,7 @@ def _render_master_table_aggrid_or_df(
                     height=_ag_iframe_h,
                     theme="streamlit",
                     show_toolbar=True,
-                    show_search=False,
+                    show_search=True,
                     show_download_button=False,
                     enable_enterprise_modules=False,
                     allow_unsafe_jscode=False,
@@ -6424,24 +6399,13 @@ def main():
                 source_ids_gsheet = {s[0]: s[1] for s in sources}
                 both_sources_available = bool(gsheet_tab_options)
                 _src_key = "master_kitchens_data_source"
+                # Always prefer the live Google Sheet when tabs exist (no source toggle — same as working in the workbook).
                 if both_sources_available:
-                    # Default BigQuery; user can switch here — previously the sheet looked "gone" with no control.
-                    st.session_state.setdefault(_src_key, "bigquery")
-                    st.radio(
-                        "Kitchen Master data source",
-                        options=["bigquery", "gsheet"],
-                        key=_src_key,
-                        horizontal=True,
-                        format_func=lambda x: (
-                            "BigQuery (refreshed every ~3 min)"
-                            if x == "bigquery"
-                            else "Google Sheet (live workbook)"
-                        ),
-                        help="If the facility grid looks wrong or empty, try **Google Sheet**. BigQuery is the warehouse copy.",
-                    )
+                    st.session_state[_src_key] = "gsheet"
+                    use_bq = False
                 else:
                     st.session_state[_src_key] = "bigquery"
-                use_bq = st.session_state.get(_src_key) == "bigquery"
+                    use_bq = True
                 if use_bq:
                     st.caption(f"Filter kitchen details and view your report. **BigQuery source** — refreshes every 3 min. Last refresh: {_mins_ago:.1f} min ago.")
                     chosen_label = "Master Kitchens (BigQuery)"
@@ -6450,7 +6414,7 @@ def main():
                     source_options = []
                     is_other_sheet = False
                 else:
-                    # User chose Google Sheet; show sheet selector (multi-select: one or multiple facilities/sheets)
+                    # Live Google Sheet when workbook tabs exist; facility multiselect (one or multiple sheets)
                     first_tab = next((t for t in gsheet_tab_options if str(t).strip().lower() != "aqiq"), gsheet_tab_options[0])
                     _sel_key = "master_sheets_selection"
                     # Use default only when key not yet set (let widget own session state to avoid Streamlit warning)
