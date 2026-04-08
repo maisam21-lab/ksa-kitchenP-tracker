@@ -1463,36 +1463,6 @@ def _is_pandas_styler(x) -> bool:
     return type(x).__name__ == "Styler" and hasattr(x, "data")
 
 
-def _deploy_git_info() -> tuple[str, str]:
-    """(short_sha_7, full_sha) — Cloud env vars first, then ``git rev-parse`` on the deployed checkout."""
-    for key in (
-        "STREAMLIT_GIT_COMMIT_SHA",
-        "SOURCE_VERSION",
-        "VERCEL_GIT_COMMIT_SHA",
-        "GITHUB_SHA",
-        "COMMIT_REF",
-    ):
-        v = (os.environ.get(key) or "").strip()
-        if len(v) >= 7:
-            return v[:7], v
-    try:
-        import subprocess
-
-        root = Path(__file__).resolve().parents[1]
-        r = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=6,
-        )
-        v = (r.stdout or "").strip()
-        if len(v) >= 7:
-            return v[:7], v
-    except Exception:
-        pass
-    return "", ""
-
-
 def _kitchen_master_row_count_caption(placeholder, text: str) -> None:
     """Row count line below (or in) the grid — avoid ``st.empty()`` above the table (extra vertical gap)."""
     if placeholder is not None:
@@ -1550,7 +1520,7 @@ def _kitchen_master_plain_tables() -> bool:
 def _kitchen_master_use_aggrid() -> bool:
     """When True, Kitchen Master uses streamlit-aggrid (Excel-like column filters + rowClassRules).
 
-    **Default is False** — native ``st.dataframe`` / Styler so sheet data is visible without an embedded grid iframe.
+    **Default is False** — native ``st.dataframe`` / Styler so data is always visible without an embedded iframe.
     Set ``KITCHEN_MASTER_AGGRID=1`` (or ``true``/``yes``/``on``) in **Secrets** or env to use the interactive grid.
     """
     v = (
@@ -1560,6 +1530,7 @@ def _kitchen_master_use_aggrid() -> bool:
     if v in ("1", "true", "yes", "on"):
         return True
     return False
+
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
     """Apply row status colors in non-AgGrid paths (mobile/tablet fallback)."""
@@ -4499,7 +4470,7 @@ def _prettify_numeric_columns_for_display_deep(df: pd.DataFrame) -> pd.DataFrame
 
 
 def _is_account_country_column(col_name: str) -> bool:
-    """True if this column is Account Country / facility_country (any casing/spacing/dots/prefix). Hide in Master Kitchens."""
+    """True if this column is Account Country, standalone County, or facility_country (any casing/spacing/dots). Hide in Master Kitchens."""
     if not col_name:
         return False
     n = str(col_name).strip().lower().replace(".", "_")
@@ -4507,9 +4478,10 @@ def _is_account_country_column(col_name: str) -> bool:
     # Strip trailing __c (Salesforce convention)
     if n.endswith("__c"):
         n = re.sub(r"_+c$", "", n)
-    # Match exact, suffix, or name containing both "account" and "country" / facility_country
+    # Match exact, suffix, or name containing both "account" and "country" / facility_country; also hide plain "County"
     return (
         n == "accountcountry"
+        or n == "county"
         or n in ("account_country", "facility_country")
         or n.endswith("account_country")
         or n.endswith("facility_country")
@@ -6358,12 +6330,6 @@ def main():
                 ):
                     st.session_state["section_radio"] = opt
                     _rerun()
-
-    _d7, _ = _deploy_git_info()
-    st.markdown(
-        f"**App build:** `{_d7 or 'unknown'}` — if this is old vs [GitHub `main`](https://github.com/maisam21-lab/ksa-kitchenp-tracker/commits/main), "
-        f"open [Streamlit Cloud](https://share.streamlit.io/) → your app → **⋮** → **Reboot app**."
-    )
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == "Kitchen Master Data":
