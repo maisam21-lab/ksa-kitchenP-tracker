@@ -1520,16 +1520,17 @@ def _kitchen_master_plain_tables() -> bool:
 def _kitchen_master_use_aggrid() -> bool:
     """When True, Kitchen Master uses streamlit-aggrid (Excel-like column filters + rowClassRules).
 
-    **Default is False** — native ``st.dataframe`` / Styler so data is always visible without an embedded iframe.
-    Set ``KITCHEN_MASTER_AGGRID=1`` (or ``true``/``yes``/``on``) in **Secrets** or env to use the interactive grid.
+    **Default is True** so status row colors and sheet-like filters apply on all facility views.
+    Set ``KITCHEN_MASTER_AGGRID=0`` (or ``false``/``no``/``off``) in **Secrets** or env if the embedded
+    grid iframe is blank or unreliable — the app falls back to native ``st.dataframe`` + Styler/HTML colors.
     """
     v = (
         _secrets_or_env_str("KITCHEN_MASTER_AGGRID", "kitchen_master_aggrid")
-        or "0"
+        or "1"
     ).strip().lower()
-    if v in ("1", "true", "yes", "on"):
-        return True
-    return False
+    if v in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def _style_df_status_rows(df: pd.DataFrame, status_col: str | None):
@@ -4806,16 +4807,37 @@ def _is_kitchen_status_column_key(k) -> bool:
     """True if this dict key is the kitchen Status field (SF, GSheet, BigQuery, or report exports)."""
     if k is None:
         return False
-    n = re.sub(r"[\s_]+", "", str(k).strip().lower())
-    return n in (
+    n = re.sub(r"[\s_.]+", "", str(k).strip().lower())
+    _exact = {
         "status",
-        "status__c",
         "statusc",
-        "kitchenstatus__c",
         "kitchenstatus",
         "kitchenstatusc",
-        "kitchennumberstatus__c",
-    )
+        "kitchennumberstatus",
+        "kitchennumberstatusc",
+        "operationalstatus",
+        "operationalstatusc",
+        "inventorystatus",
+        "inventorystatusc",
+        "kitchenoperationalstatus",
+        "kitchenoperationalstatusc",
+        "opsstatus",
+        "opsstatusc",
+        "salestatus",
+        "salestatusc",
+        "salesstatus",
+        "salesstatusc",
+        "unitstatus",
+        "unitstatusc",
+    }
+    if n in _exact:
+        return True
+    # Broader: …Status / …Status__c style headers once normalized (e.g. "Kitchen_Status__c")
+    if len(n) <= 48 and (n.endswith("status") or n.endswith("statusc")):
+        if n in ("poststatus", "substatus", "accountstatus", "paymentstatus"):
+            return False
+        return True
+    return False
 
 
 def _status_column_from_dataframe(df: pd.DataFrame) -> str | None:
