@@ -2291,8 +2291,10 @@ MASTER_KITCHENS_TAB_SHEETS = [
 ]
 
 
-# Tab IDs hidden from Kitchen Master Data facility/sheet filter (these sheets are excluded from the dropdown)
-# Per user: exclude Auto Refresh Execution Log, SF Kitchen Data, SF Churn Data, KSA Facility details, Pivot Table 11
+# Tab IDs hidden from Kitchen Master Data facility multiselect for EVERY signed-in user (same list for all — not RBAC).
+# Product invariant: KSA Kitchen Master must expose every other refreshed workbook tab as a selectable facility.
+# Do not filter this list by user/email/role without explicit product sign-off and a separate opt-in flag.
+# Hidden tabs: Auto Refresh Execution Log, SF Kitchen Data, SF Churn Data, KSA Facility details, Pivot Table 11, etc.
 MASTER_KITCHENS_HIDDEN_TABS = {
     "Auto Refresh Execution Log",
     "KSA Facility details",
@@ -2305,7 +2307,11 @@ MASTER_KITCHENS_HIDDEN_TABS = {
 
 
 def _master_kitchens_other_sheet_ids() -> list[str]:
-    """Sheet tab IDs shown as facilities in Kitchen Master Data. Excludes execution log, SF data, KSA facility details, pivot table 11."""
+    """All KSA workbook facility tabs for Kitchen Master (ordered like the Google Sheet).
+
+    Same tab IDs for every user. Only ``MASTER_KITCHENS_HIDDEN_TABS`` is subtracted — never filter by
+    ``current_user`` or allowlist here; that would break the main KSA tracker audience.
+    """
     _hidden_lower = {s.strip().lower() for s in MASTER_KITCHENS_HIDDEN_TABS}
     # Match workbook tab order when available (same order as the Google Sheet); then any extra tabs with data.
     ordered = list_gsheet_tab_ids_in_sheet_order()
@@ -2315,7 +2321,7 @@ def _master_kitchens_other_sheet_ids() -> list[str]:
 
 
 def _master_kitchens_sources() -> list[tuple[str, str]]:
-    """(display_name, source_id). KSA facility worksheets from the master workbook (minus hidden/system tabs)."""
+    """(display_name, source_id) for the Kitchen Master facility multiselect — full KSA sheet list, identical for all users."""
     return [(tab_id, tab_id) for tab_id in _master_kitchens_other_sheet_ids()]
 
 
@@ -3672,7 +3678,11 @@ def _row_key(row: dict, *keys) -> str:
 
 
 def _refresh_from_online_sheet():
-    """Pull all tabs from the online sheet and load into app DB. Returns (success, message)."""
+    """Pull all tabs from the online sheet and load into app DB. Returns (success, message).
+
+    KSA facility parity: generic (facility) worksheets persist even when empty (placeholder row) so every tab
+    stays visible in Kitchen Master — do not skip empty sheets here.
+    """
     creds_path = _get_google_credentials_path()
     if not creds_path:
         return False, (
