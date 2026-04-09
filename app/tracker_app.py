@@ -2629,7 +2629,7 @@ def _dashboard_load_gsheet_rows_with_sheet_stamp() -> list[dict]:
             row = dict(r)
             row["Sheet"] = tab_id
             out.append(row)
-    return out
+    return _filter_junk_kitchen_records(out)
 
 
 def _dashboard_facility_from_row(row) -> str:
@@ -2653,7 +2653,7 @@ def _dashboard_load_source(source_id: str) -> list[dict]:
         return list_rows()
     if source_id == "exec_log":
         return list_exec_log()  # already list of dicts
-    return list_generic_tab(source_id)
+    return _filter_junk_kitchen_records(list_generic_tab(source_id))
 
 
 def _get_superset_master_kitchens():
@@ -2789,7 +2789,7 @@ def _search_all_tabs(term: str) -> dict:
         rows = list_generic_tab(tab_id)
         matches = [r for r in rows if any(q in str(v).lower() for v in (r or {}).values() if v is not None)]
         if matches:
-            out[tab_id] = matches
+            out[tab_id] = _filter_junk_kitchen_records(matches)
 
     return out
 
@@ -5660,6 +5660,7 @@ def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
 
 
 def _filter_junk_kitchen_records(rows: list) -> list:
+    """Drop incomplete / padding kitchen rows everywhere (Kitchen Master, Dashboard KSA+regional+Superset, search)."""
     if not rows:
         return rows
     return [r for r in rows if isinstance(r, dict) and not _should_hide_incomplete_kitchen_row(r)]
@@ -7250,13 +7251,6 @@ def main():
                 if _source_refresh_is_stale(_gbh, 15):
                     _refresh_bahrain_workbook_from_sheets(silent=True)
                 _bahrain_dashboard_rows = _load_bahrain_dashboard_rows()
-        today_str = date.today().isoformat()
-        if snapshot_mod and rows_kitchens:
-            if not snapshot_mod.snapshot_exists_for_date(today_str):
-                try:
-                    snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
-                except Exception:
-                    pass
         # Ensure Account Country for filtering (Kitchens / Master list may use County or other keys)
         rows_kitchens = _ensure_account_country_in_kitchens(rows_kitchens)
         if _kuwait_dashboard_rows or _uae_dashboard_rows or _bahrain_dashboard_rows:
@@ -7267,6 +7261,15 @@ def main():
         go_live_rows = (csv_go_live or []) + (bq_go_live or [])
         if go_live_rows:
             rows_kitchens = _merge_go_live_into_kitchens(rows_kitchens, go_live_rows)
+        # Same junk/sparse-row rules as Kitchen Master (KSA + Kuwait/UAE/Bahrain + Superset).
+        rows_kitchens = _filter_junk_kitchen_records(rows_kitchens or [])
+        today_str = date.today().isoformat()
+        if snapshot_mod and rows_kitchens:
+            if not snapshot_mod.snapshot_exists_for_date(today_str):
+                try:
+                    snapshot_mod.write_daily_snapshot(rows_kitchens, today_str)
+                except Exception:
+                    pass
         has_go_live = bool(go_live_rows)
 
         def _country_label(raw: str) -> str:
