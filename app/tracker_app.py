@@ -5444,6 +5444,53 @@ def _is_kitchen_stage_column_key(k) -> bool:
     return True
 
 
+def _is_kitchen_inventory_kpi_column_key(k) -> bool:
+    """UAE-style sheet columns for sold rate / occupancy % (values may sit under Status/Stage or their own header)."""
+    if k is None:
+        return False
+    ks = str(k).lower()
+    if "sold" in ks and "rate" in ks:
+        return True
+    if "occupancy" in ks and "%" in ks:
+        return True
+    if any(x in ks for x in ("ops occupancy", "occupancy %", "occupancy%")):
+        return True
+    return False
+
+
+def _scalar_counts_as_sheet_padding_zero(v) -> bool:
+    """True for 0 / 0.0 / False / \"0\" — exported rows often pad numeric columns with zeros instead of blanks."""
+    if v is None:
+        return False
+    if isinstance(v, bool):
+        return v is False
+    try:
+        if v is pd.NA:
+            return False
+    except Exception:
+        pass
+    try:
+        if pd.isna(v):
+            return False
+    except Exception:
+        pass
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        try:
+            f = float(v)
+            return math.isfinite(f) and abs(f) < 1e-12
+        except (TypeError, ValueError):
+            return False
+    s = str(v).strip().lower()
+    if s in ("0", "0.0", "0.00", "0.000", "false"):
+        return True
+    s2 = s.replace(",", "").replace("%", "").strip()
+    try:
+        f = float(s2)
+        return math.isfinite(f) and abs(f) < 1e-12
+    except ValueError:
+        return False
+
+
 def _status_column_from_dataframe(df: pd.DataFrame) -> str | None:
     """Resolve the Status column for Kitchen Master row colors (Ag Grid rowClassRules + Styler fallback)."""
     if df is None or df.empty:
@@ -5568,10 +5615,10 @@ def _should_hide_missing_type_floor_and_kitchen_name_row(r: dict) -> bool:
 
 
 def _should_hide_list_price_name_status_stage_sparse_row(r: dict) -> bool:
-    """Hide padding rows: only List price + Kitchen name, optionally plus Status and/or Stage — nothing else."""
+    """Hide padding rows: only List price + Kitchen name, optionally Status / Stage / inventory KPIs — nothing else meaningful."""
     if not isinstance(r, dict):
         return False
-    skip = {"_has_opportunity", "Sheet"}
+    skip = {"_has_opportunity", "Sheet", "km_row_cls"}
     lk = _find_list_price_column_key(r)
     nk = _find_kitchen_number_name_column_key(r)
     if lk is None or nk is None or lk == nk:
@@ -5586,6 +5633,8 @@ def _should_hide_list_price_name_status_stage_sparse_row(r: dict) -> bool:
             return True
         if _is_kitchen_stage_column_key(k):
             return True
+        if _is_kitchen_inventory_kpi_column_key(k):
+            return True
         return False
 
     for k, v in r.items():
@@ -5593,8 +5642,11 @@ def _should_hide_list_price_name_status_stage_sparse_row(r: dict) -> bool:
             continue
         if _allowed_sparse_key(k):
             continue
-        if not _cell_is_empty_for_empty_row_check(v):
-            return False
+        if _cell_is_empty_for_empty_row_check(v):
+            continue
+        if _scalar_counts_as_sheet_padding_zero(v):
+            continue
+        return False
     return True
 
 
