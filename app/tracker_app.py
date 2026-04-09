@@ -5191,8 +5191,9 @@ def _filter_empty_records(rows: list) -> list:
 
 
 # Hide incomplete kitchen rows: no Type + no Floor + no List with odd or missing status; sparse
-# "No status" rows; rows with only List Price + Kitchen Number Name (or + non-standard Status); sparse KPIs;
-# rows with no Type, no Floor price, and no Kitchen number/name together.
+# "No status" rows; sparse KPIs;
+# rows with no Type, no Floor price, and no Kitchen number/name together;
+# rows where the only populated fields are List price + Kitchen name (+ optional Status / Stage).
 _STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
     {"Vacant", "Churning", "Occupied", "Sold", "No status"}
 )
@@ -5430,6 +5431,19 @@ def _is_kitchen_status_column_key(k) -> bool:
     return False
 
 
+def _is_kitchen_stage_column_key(k) -> bool:
+    """True if this dict key is a pipeline / sales Stage field (sheet exports)."""
+    if k is None:
+        return False
+    ks = re.sub(r"[\s_]+", " ", str(k).strip().lower())
+    if "stage" not in ks:
+        return False
+    # Avoid matching unrelated headers (unlikely in kitchen sheets).
+    if ks in ("postage", "postagec", "substage override"):
+        return False
+    return True
+
+
 def _status_column_from_dataframe(df: pd.DataFrame) -> str | None:
     """Resolve the Status column for Kitchen Master row colors (Ag Grid rowClassRules + Styler fallback)."""
     if df is None or df.empty:
@@ -5553,8 +5567,8 @@ def _should_hide_missing_type_floor_and_kitchen_name_row(r: dict) -> bool:
     return type_missing and floor_missing and name_missing
 
 
-def _should_hide_list_price_and_kitchen_name_only_row(r: dict) -> bool:
-    """Hide sparse rows where the only data is List Price + Kitchen Number Name (sheet padding / incomplete)."""
+def _should_hide_list_price_name_status_stage_sparse_row(r: dict) -> bool:
+    """Hide padding rows: only List price + Kitchen name, optionally plus Status and/or Stage — nothing else."""
     if not isinstance(r, dict):
         return False
     skip = {"_has_opportunity", "Sheet"}
@@ -5564,41 +5578,24 @@ def _should_hide_list_price_and_kitchen_name_only_row(r: dict) -> bool:
         return False
     if _cell_is_empty_for_empty_row_check(r.get(lk)) or _cell_is_empty_for_empty_row_check(r.get(nk)):
         return False
+
+    def _allowed_sparse_key(k) -> bool:
+        if k == lk or k == nk:
+            return True
+        if _is_kitchen_status_column_key(k):
+            return True
+        if _is_kitchen_stage_column_key(k):
+            return True
+        return False
+
     for k, v in r.items():
         if k in skip:
             continue
-        if k == lk or k == nk:
+        if _allowed_sparse_key(k):
             continue
         if not _cell_is_empty_for_empty_row_check(v):
             return False
     return True
-
-
-def _should_hide_list_price_kitchen_name_and_incorrect_status_row(r: dict) -> bool:
-    """Hide sparse rows: only List Price + Kitchen Number Name + Status, and Status is not a standard value."""
-    if not isinstance(r, dict):
-        return False
-    skip = {"_has_opportunity", "Sheet"}
-    lk = _find_list_price_column_key(r)
-    nk = _find_kitchen_number_name_column_key(r)
-    if lk is None or nk is None or lk == nk:
-        return False
-    if _cell_is_empty_for_empty_row_check(r.get(lk)) or _cell_is_empty_for_empty_row_check(r.get(nk)):
-        return False
-    for k, v in r.items():
-        if k in skip:
-            continue
-        if k == lk or k == nk:
-            continue
-        if _is_kitchen_status_column_key(k):
-            continue
-        if not _cell_is_empty_for_empty_row_check(v):
-            return False
-    raw = _status_cell_raw_from_row(r).strip()
-    if not raw:
-        return False
-    norm = _status_normalized_from_row(r)
-    return _is_odd_kitchen_status_normalized(norm)
 
 
 def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
@@ -5606,8 +5603,7 @@ def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
         _should_hide_junk_kitchen_row(r)
         or _should_hide_no_status_sparse_kitchen_row(r)
         or _should_hide_missing_type_floor_and_kitchen_name_row(r)
-        or _should_hide_list_price_and_kitchen_name_only_row(r)
-        or _should_hide_list_price_kitchen_name_and_incorrect_status_row(r)
+        or _should_hide_list_price_name_status_stage_sparse_row(r)
     )
 
 
