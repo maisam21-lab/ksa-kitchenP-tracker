@@ -2452,12 +2452,19 @@ def _bahrain_preview_ids_from_secrets() -> set[str]:
 
 
 def _user_can_see_bahrain_kitchen_preview(current_user: str) -> bool:
-    """True if user may see Kitchen Master Kuwait/UAE/Bahrain (not only KSA). Developer always; else PREVIEW_ONLY_IDS + secrets."""
+    """True if user may see Kitchen Master Kuwait/UAE/Bahrain (not only KSA).
+
+    Developer always; else PREVIEW_ONLY_IDS + secrets; and EXPORT_ALLOWED_IDS users
+    also get regional access so they can export from any sheet/country.
+    """
     if _is_developer():
         return True
     u = (current_user or "").strip().lower()
     if not u:
         return False
+    # Export allowlist should work across all regional sheets, not only KSA.
+    if _can_user_export(u):
+        return True
     preview_norm = _email_set_with_local_parts(_bahrain_preview_ids_from_secrets())
     if not preview_norm:
         return False
