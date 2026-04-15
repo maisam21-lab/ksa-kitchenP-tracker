@@ -3806,8 +3806,6 @@ def _load_uae_dashboard_rows() -> list[dict]:
         for r in list_generic_tab(tab_id, source=GSOURCE_KITCHEN_AE) or []:
             if not isinstance(r, dict) or _is_empty_record(r):
                 continue
-            if _is_uae_nonsense_row(r):
-                continue
             row = dict(r)
             row["Account Country"] = "UAE"
             row["Sheet"] = tab_id
@@ -4273,8 +4271,6 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     if not _show_combined:
         _single_tab_id = source_ids.get(_labels_to_use[0], _labels_to_use[0])
         _single_rows = list_generic_tab(_single_tab_id, source=gsource) or []
-        if region == "UAE":
-            _single_rows = [r for r in _single_rows if isinstance(r, dict) and not _is_uae_nonsense_row(r)]
         _single_rows = _filter_empty_records([r for r in _single_rows if isinstance(r, dict)])
         _render_generic_tab(
             _single_tab_id,
@@ -4292,8 +4288,6 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     for label in _labels_to_use:
         tab_id = source_ids.get(label, label)
         sheet_rows = list_generic_tab(tab_id, source=gsource) or []
-        if region == "UAE":
-            sheet_rows = [r for r in sheet_rows if isinstance(r, dict) and not _is_uae_nonsense_row(r)]
         for r in sheet_rows:
             combined_rows.append({"Sheet": label, **r})
     combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
@@ -5741,19 +5735,8 @@ def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
     )
 
 
-def _hide_non_related_rows_enabled() -> bool:
-    """Whether Kitchen Master/Dashboard should hide non-related sparse rows."""
-    try:
-        v = st.session_state.get("hide_non_related_rows")
-        if v is None:
-            return False
-        return bool(v)
-    except Exception:
-        return False
-
-
-def _is_uae_nonsense_row(r: dict) -> bool:
-    """UAE-only hard cleanup for obviously non-usable rows."""
+def _is_nonsense_kitchen_row(r: dict) -> bool:
+    """True when a row matches sparse/junk patterns (any country / source)."""
     if not isinstance(r, dict):
         return True
     norm = _status_normalized_from_row(r)
@@ -5768,17 +5751,11 @@ def _filter_junk_kitchen_records(rows: list) -> list:
     """Drop incomplete / padding kitchen rows everywhere (Kitchen Master, Dashboard KSA+regional+Superset, search)."""
     if not rows:
         return rows
-    if not _hide_non_related_rows_enabled():
-        return [r for r in rows if isinstance(r, dict)]
     out: list[dict] = []
     for r in rows:
         if not isinstance(r, dict):
             continue
-        norm = _status_normalized_from_row(r)
-        # Strict mode: hide non-standard / missing status rows, plus existing sparse/junk patterns.
-        if not norm or norm == "No status" or _is_odd_kitchen_status_normalized(norm):
-            continue
-        if _should_hide_incomplete_kitchen_row(r):
+        if _is_nonsense_kitchen_row(r):
             continue
         out.append(r)
     return out
@@ -7262,15 +7239,6 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
-    if "hide_non_related_rows" not in st.session_state:
-        st.session_state["hide_non_related_rows"] = False
-    with st.sidebar:
-        st.checkbox(
-            "Hide non-related rows",
-            key="hide_non_related_rows",
-            help="When ON, hides sparse/incomplete kitchen rows that are likely not useful for operations.",
-        )
-
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
     _preview_regional = _user_can_see_bahrain_kitchen_preview(current_user or "")
