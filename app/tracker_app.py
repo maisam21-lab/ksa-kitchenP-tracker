@@ -5735,10 +5735,23 @@ def _should_hide_incomplete_kitchen_row(r: dict) -> bool:
     )
 
 
+def _hide_non_related_rows_enabled() -> bool:
+    """Whether Kitchen Master/Dashboard should hide non-related sparse rows."""
+    try:
+        v = st.session_state.get("hide_non_related_rows")
+        if v is None:
+            return True
+        return bool(v)
+    except Exception:
+        return True
+
+
 def _filter_junk_kitchen_records(rows: list) -> list:
     """Drop incomplete / padding kitchen rows everywhere (Kitchen Master, Dashboard KSA+regional+Superset, search)."""
     if not rows:
         return rows
+    if not _hide_non_related_rows_enabled():
+        return [r for r in rows if isinstance(r, dict)]
     return [r for r in rows if isinstance(r, dict) and not _should_hide_incomplete_kitchen_row(r)]
 
 
@@ -7220,6 +7233,14 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
+    if "hide_non_related_rows" not in st.session_state:
+        st.session_state["hide_non_related_rows"] = True
+    with st.sidebar:
+        st.checkbox(
+            "Hide non-related rows",
+            key="hide_non_related_rows",
+            help="When ON, hides sparse/incomplete kitchen rows that are likely not useful for operations.",
+        )
 
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
