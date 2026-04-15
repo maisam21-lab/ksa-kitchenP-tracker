@@ -252,6 +252,38 @@ def _rerun():
     else:
         st.experimental_rerun()
 
+
+def _render_recovery_actions_bar() -> None:
+    """In-app fallback actions when Streamlit top-right menu is unavailable."""
+    c1, c2, c3 = st.columns([1, 1, 6])
+    with c1:
+        if st.button("Rerun app", key="btn_rerun_app_top"):
+            _rerun()
+    with c2:
+        if st.button("Clear cache", key="btn_clear_cache_top"):
+            try:
+                if hasattr(st, "cache_data"):
+                    st.cache_data.clear()
+                if hasattr(st, "cache_resource"):
+                    st.cache_resource.clear()
+            except Exception:
+                pass
+            _clear_list_generic_tab_cache()
+            # Drop known UI/data caches in session state, keep auth/role context untouched.
+            for k in (
+                "bq_master_kitchens_rows",
+                "bq_master_kitchens_fetched_at",
+                "bq_export_sheet_rows",
+                "bq_export_sheet_fetched_at",
+                "gsheet_auto_refresh_last_run",
+                "gsheet_initial_fetch_failed",
+            ):
+                st.session_state.pop(k, None)
+            st.success("Cache cleared. Reloading latest data...")
+            _rerun()
+    with c3:
+        st.caption("If the top-right menu is hidden, use these actions to recover quickly.")
+
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 
@@ -6425,6 +6457,8 @@ def main():
         div[data-testid="stVerticalBlock"] > div { padding-top: 0.25rem; }
         </style>
         """, unsafe_allow_html=True)
+
+    _render_recovery_actions_bar()
 
     # Section nav: tabs only (no dots) — bold text, active tab with teal underline
     st.markdown(
