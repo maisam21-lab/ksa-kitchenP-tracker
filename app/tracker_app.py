@@ -304,11 +304,9 @@ def _strip_salesforce_picklist_prefix(val) -> str:
 
 
 def _row_has_opportunity_name(row) -> bool:
-    """True when a **Vacant** kitchen row should use the “deal / approved” highlight (pink).
+    """True when a kitchen row has non-empty Opportunity Name-style value.
 
-    Either:
-    - **Opportunity** column has any non-empty name (Opportunity Name and SF/GSheet aliases), or
-    - A **stage / approval / deal status** column value indicates **Approved** (handles ``(1) Approved`` too).
+    Used for coloring only: Vacant + opportunity -> pink; Vacant without opportunity stays green.
     """
     if row is None:
         return False
@@ -317,33 +315,6 @@ def _row_has_opportunity_name(row) -> bool:
         v = row.get(k) if hasattr(row, "get") else (row[k] if k in (row.index if hasattr(row, "index") else []) else None)
         if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
             return True
-    # Stage / approval columns (e.g. "Approved", "(2) Approved")
-    try:
-        for k in (row.keys() if hasattr(row, "keys") else []):
-            lk = str(k).strip().lower()
-            if not any(
-                t in lk
-                for t in (
-                    "stage",
-                    "approval",
-                    "deal status",
-                    "opp stage",
-                    "opportunity stage",
-                    "kitchen stage",
-                    "sales stage",
-                )
-            ):
-                continue
-            v = row.get(k) if hasattr(row, "get") else None
-            if v is None:
-                continue
-            vs = _strip_salesforce_picklist_prefix(str(v)).strip().lower()
-            if not vs:
-                continue
-            if "approved" in vs and "unapproved" not in vs and "not approved" not in vs:
-                return True
-    except Exception:
-        pass
     # Fallback: any key containing "opportunity" with non-empty value
     try:
         for k in (row.keys() if hasattr(row, "keys") else (row.index if hasattr(row, "index") else [])):
@@ -1153,7 +1124,6 @@ def _render_signed_out_gate() -> None:
         """,
         unsafe_allow_html=True,
     )
-    _render_builtin_action_row()
     _remembered = (st.session_state.get("remembered_email") or "").strip()
     st.text_input(
         "Your email",
@@ -1662,20 +1632,6 @@ def _experimental_changes_allowed() -> bool:
         or ""
     ).strip().lower()
     return raw in ("1", "true", "yes", "on")
-
-
-def _render_builtin_action_row() -> None:
-    """Reliable in-body quick actions for landing + app views."""
-    st.caption("Quick actions")
-    c1, c2 = st.columns([4, 1])
-    with c1:
-        st.markdown(
-            "[Share](https://ksa-kitchenp-tracker-dcl4vvscpgpgeamjbmpnyj.streamlit.app/) · "
-            "[GitHub](https://github.com/maisam21-lab/ksa-kitchenP-tracker)"
-        )
-    with c2:
-        if st.button("Refresh", key="builtin_action_refresh", use_container_width=True):
-            _rerun()
 
 
 def _kitchen_master_plain_tables() -> bool:
@@ -6476,7 +6432,7 @@ def main():
     /* Shift main block only — padding stAppViewContainer can clip the Streamlit header on some builds. */
     [data-testid="stAppViewContainer"] > div { padding-top: unset !important; margin-top: unset !important; }
     [data-testid="stAppViewContainer"] { padding-top: unset !important; }
-    .block-container { padding-top: 72px !important; }
+    .block-container { padding-top: 8px !important; }
     [data-testid="stVerticalBlock"] > div:first-child { padding-top: 0 !important; margin-top: 0 !important; }
     /* Slightly smaller base font app-wide */
     .stApp h1 { font-size: 1.2rem !important; }
@@ -6510,7 +6466,7 @@ def main():
     [data-testid="stMain"] { padding-top: unset !important; }
     [data-testid="stMain"] > div { padding-top: unset !important; margin-top: unset !important; }
     .stMainBlockContainer { padding-top: unset !important; }
-    .stMain .block-container { padding-top: 72px !important; }
+    .stMain .block-container { padding-top: 8px !important; }
     /* ========== Header: Tailwind-style single row (px-6 py-3, border-gray-100, shadow-sm) ========== */
     .header-top-bar + div {
         position: relative !important;
@@ -6522,7 +6478,7 @@ def main():
         min-height: 72px !important;
         max-width: 1600px !important;
         width: 100% !important;
-        margin: 36px auto 0 auto !important;
+        margin: 12px auto 0 auto !important;
         padding: clamp(12px, 2vw, 24px) clamp(16px, 3vw, 24px) !important;
         border-bottom: 1px solid #f3f4f6 !important;
         background: #ffffff !important;
@@ -6531,7 +6487,7 @@ def main():
         box-sizing: border-box !important;
     }
     @media (max-width: 768px) {
-        .header-top-bar + div { margin-top: 28px !important; padding: 12px 16px !important; min-height: auto !important; height: auto !important; }
+        .header-top-bar + div { margin-top: 10px !important; padding: 12px 16px !important; min-height: auto !important; height: auto !important; }
         .header-top-bar + div [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; height: auto !important; min-height: 56px !important; gap: 12px !important; }
         .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"] { height: auto !important; min-height: 44px !important; }
         .header-top-bar + div [data-testid="stVerticalBlock"] { height: auto !important; }
@@ -6912,8 +6868,8 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Small spacer; main offset is .stMain .block-container padding (avoids clipping host header).
-    st.markdown('<div style="height: 24px;"></div>', unsafe_allow_html=True)
+    # Keep only a tiny spacer before custom header row.
+    st.markdown('<div style="height: 6px;"></div>', unsafe_allow_html=True)
 
     # Top bar (replaces sidebar): compact two-row layout
     last_gsheet = _latest_refresh_among_gsheet_family()
@@ -7327,9 +7283,6 @@ def main():
                 ):
                     st.session_state["section_radio"] = opt
                     _rerun()
-
-    # Main app body actions (rendered after section nav so they are visible inside tracker pages).
-    _render_builtin_action_row()
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == SECTION_KSA:
