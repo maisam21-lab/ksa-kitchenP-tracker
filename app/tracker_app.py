@@ -315,16 +315,6 @@ def _row_has_opportunity_name(row) -> bool:
         v = row.get(k) if hasattr(row, "get") else (row[k] if k in (row.index if hasattr(row, "index") else []) else None)
         if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
             return True
-    # Fallback: any key containing "opportunity" with non-empty value
-    try:
-        for k in (row.keys() if hasattr(row, "keys") else (row.index if hasattr(row, "index") else [])):
-            if "opportunity" not in str(k).lower():
-                continue
-            v = row.get(k) if hasattr(row, "get") else row[k]
-            if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
-                return True
-    except Exception:
-        pass
     return False
 
 
