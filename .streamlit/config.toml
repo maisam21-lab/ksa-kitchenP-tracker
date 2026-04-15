@@ -8,3 +8,7 @@ font = "sans serif"
 
 [server]
 headless = true
+
+[client]
+# Force full Streamlit toolbar in deployed app (Share/star/edit/menu when account/context allows).
+toolbarMode = "developer"

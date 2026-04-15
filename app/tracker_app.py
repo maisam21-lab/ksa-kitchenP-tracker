@@ -291,8 +291,25 @@ def _logo_path():
     return None
 
 
+def _strip_salesforce_picklist_prefix(val) -> str:
+    """Strip leading ``(n) `` / ``n.`` from picklist labels (Status, Stage, etc.)."""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if not s:
+        return ""
+    s = re.sub(r"^\(\s*\d+\s*\)\s*", "", s, flags=re.IGNORECASE).strip() or s
+    s = re.sub(r"^\d+\s*[.)]\s*", "", s, flags=re.IGNORECASE).strip() or s
+    return s
+
+
 def _row_has_opportunity_name(row) -> bool:
-    """True if row has any Opportunity Name–style field filled (for coloring: Vacant + opportunity → red)."""
+    """True when a **Vacant** kitchen row should use the “deal / approved” highlight (pink).
+
+    Either:
+    - **Opportunity** column has any non-empty name (Opportunity Name and SF/GSheet aliases), or
+    - A **stage / approval / deal status** column value indicates **Approved** (handles ``(1) Approved`` too).
+    """
     if row is None:
         return False
     # Same keys as Dashboard _opportunity_name (SF / GSheet / BigQuery)
@@ -300,6 +317,33 @@ def _row_has_opportunity_name(row) -> bool:
         v = row.get(k) if hasattr(row, "get") else (row[k] if k in (row.index if hasattr(row, "index") else []) else None)
         if v is not None and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
             return True
+    # Stage / approval columns (e.g. "Approved", "(2) Approved")
+    try:
+        for k in (row.keys() if hasattr(row, "keys") else []):
+            lk = str(k).strip().lower()
+            if not any(
+                t in lk
+                for t in (
+                    "stage",
+                    "approval",
+                    "deal status",
+                    "opp stage",
+                    "opportunity stage",
+                    "kitchen stage",
+                    "sales stage",
+                )
+            ):
+                continue
+            v = row.get(k) if hasattr(row, "get") else None
+            if v is None:
+                continue
+            vs = _strip_salesforce_picklist_prefix(str(v)).strip().lower()
+            if not vs:
+                continue
+            if "approved" in vs and "unapproved" not in vs and "not approved" not in vs:
+                return True
+    except Exception:
+        pass
     # Fallback: any key containing "opportunity" with non-empty value
     try:
         for k in (row.keys() if hasattr(row, "keys") else (row.index if hasattr(row, "index") else [])):
@@ -1081,6 +1125,35 @@ def _signed_out_gate_active() -> bool:
 
 
 def _render_signed_out_gate() -> None:
+    # Apply on landing/signed-out screen too (main style block is below and won't run after st.stop()).
+    st.markdown(
+        """
+        <style>
+        header[data-testid="stHeader"] {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 10000 !important;
+        }
+        div[data-testid="stToolbar"] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+            z-index: 10001 !important;
+        }
+        div[data-testid="stDecoration"] {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    _render_builtin_action_row()
     _remembered = (st.session_state.get("remembered_email") or "").strip()
     st.text_input(
         "Your email",
@@ -1558,6 +1631,51 @@ def _secrets_or_env_str(*names: str) -> str:
         if v is not None and str(v).strip() != "":
             return str(v).strip()
     return ""
+
+
+def _production_safe_mode_enabled() -> bool:
+    """Production safety guardrail (default ON).
+
+    Set ``PRODUCTION_SAFE_MODE=0`` only in non-production environments when you
+    intentionally want to allow experimental behavior.
+
+    This flag does **not** change Kitchen Master row colors, filters, or data refresh —
+    only future opt-in experimental UI (see ``_experimental_changes_allowed``).
+    """
+    raw = (_secrets_or_env_str("PRODUCTION_SAFE_MODE", "production_safe_mode") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return True
+
+
+def _experimental_changes_allowed() -> bool:
+    """Experimental behavior is opt-in and blocked by production-safe mode.
+
+    Requires BOTH:
+    - ``PRODUCTION_SAFE_MODE=0``
+    - ``ALLOW_EXPERIMENTAL_UI=1`` (or true/yes/on)
+    """
+    if _production_safe_mode_enabled():
+        return False
+    raw = (
+        _secrets_or_env_str("ALLOW_EXPERIMENTAL_UI", "allow_experimental_ui")
+        or ""
+    ).strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _render_builtin_action_row() -> None:
+    """Reliable in-body quick actions for landing + app views."""
+    st.caption("Quick actions")
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        st.markdown(
+            "[Share](https://ksa-kitchenp-tracker-dcl4vvscpgpgeamjbmpnyj.streamlit.app/) · "
+            "[GitHub](https://github.com/maisam21-lab/ksa-kitchenP-tracker)"
+        )
+    with c2:
+        if st.button("Refresh", key="builtin_action_refresh", use_container_width=True):
+            _rerun()
 
 
 def _kitchen_master_plain_tables() -> bool:
@@ -3956,11 +4074,21 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
             source_options = [s[0] for s in sources]
             source_ids = {s[0]: s[1] for s in sources}
             if not source_options:
-                st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
-                rows = []
-                source_id = None
-                chosen_label = ""
-                is_other_sheet = False
+                rows = (
+                    list_generic_tab("Kitchens", source="salesforce")
+                    or list_generic_tab("SF Kitchen Data", source="salesforce")
+                    or []
+                )
+                if rows:
+                    st.info("Live sheet data is temporarily unavailable. Showing latest Salesforce snapshot.")
+                    source_id = "salesforce_kitchens"
+                    chosen_label = "Salesforce snapshot"
+                    is_other_sheet = False
+                else:
+                    st.info("No sheet data yet. Data is refreshed every 15 minutes by the scheduler.")
+                    source_id = None
+                    chosen_label = ""
+                    is_other_sheet = False
             else:
                 # Sheet selector: multi-select so user can view one or multiple sheets
                 first_tab = next((t for t in source_options if str(t).strip().lower() != "aqiq"), source_options[0])
@@ -4282,12 +4410,7 @@ def _refresh_from_online_sheet():
     """
     creds_path = _get_google_credentials_path()
     if not creds_path:
-        return False, (
-            "No Google credentials. "
-            "Streamlit Cloud: in Secrets add [gsheet_service_account] with your service account JSON. "
-            "Local: put the JSON at scripts/credentials.json or set GOOGLE_APPLICATION_CREDENTIALS. "
-            "Share the sheet with the service account email (Viewer). See docs/REFRESH_FROM_ONLINE_SHEET.md."
-        )
+        return False, "Google Sheet refresh is not configured."
     try:
         data = _fetch_online_sheet(SHEET_ID, creds_path)
     except Exception as e:
@@ -5119,7 +5242,7 @@ def _normalize_status_label(val) -> str:
     """Normalize status value for filter: Vacant, Churning, Occupied, Sold, or raw. Used for Status filter and row count."""
     if val is None:
         return ""
-    s = str(val).strip()
+    s = _strip_salesforce_picklist_prefix(val)
     if not s:
         return "No status"
     low = s.lower()
@@ -5896,11 +6019,24 @@ def _render_master_table_aggrid_or_df(
     df_ag = df
     if status_col and str(status_col) in df.columns:
         df_ag = df.copy()
-        if "_has_opportunity" not in df_ag.columns:
-            if rows_shown is not None and len(rows_shown) == len(df_ag.index):
-                df_ag["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-            else:
-                df_ag["_has_opportunity"] = False
+        _hop_from_rows: list[bool] | None = None
+        if rows_shown is not None and len(rows_shown) == len(df_ag.index):
+            try:
+                _hop_from_rows = [bool(_row_has_opportunity_name(r)) for r in rows_shown]
+            except Exception:
+                _hop_from_rows = None
+        if _hop_from_rows is None:
+            # Fallback to dataframe rows so "Vacant + opportunity" color still applies
+            # even when rows_shown length diverges from df_ag (filters/transforms).
+            _hop_from_rows = [bool(_row_has_opportunity_name(r)) for r in df_ag.to_dict(orient="records")]
+        if "_has_opportunity" in df_ag.columns:
+            try:
+                _existing = df_ag["_has_opportunity"].fillna(False).astype(bool).tolist()
+            except Exception:
+                _existing = [bool(v) for v in df_ag["_has_opportunity"].tolist()]
+            df_ag["_has_opportunity"] = [bool(a or b) for a, b in zip(_existing, _hop_from_rows)]
+        else:
+            df_ag["_has_opportunity"] = _hop_from_rows
         df_ag["km_row_cls"] = _compute_km_row_cls_series(df_ag, status_col)
     if want_grid and _kitchen_master_streamlit_value_list_filters():
         df_ag, rows_shown = _apply_streamlit_status_value_filter(
@@ -5910,6 +6046,8 @@ def _render_master_table_aggrid_or_df(
         if df_ag.empty:
             st.info("No rows match the Status filter above. Select more values in the multiselect.")
             return
+        if status_col and str(status_col) in df_ag.columns:
+            df_ag["km_row_cls"] = _compute_km_row_cls_series(df_ag, status_col)
     if want_grid:
         try:
             go, ag_custom_css, _use_ag_auto_height, _ag_lic = _build_aggrid_community_grid_options(df_ag, status_col)
@@ -6185,6 +6323,8 @@ def _render_generic_tab(
 
 def main():
     st.set_page_config(page_title=APP_DISPLAY_TITLE, layout="wide", initial_sidebar_state="collapsed")
+    # Session-level guardrail marker for any future feature toggles.
+    st.session_state["_production_safe_mode"] = _production_safe_mode_enabled()
     init_db()
     _backfill_gsheet_family_refresh_metadata()
 
@@ -6234,7 +6374,7 @@ def main():
         <style>
         .stApp { background: #0F172A; font-family: sans-serif; font-size: 0.8125rem !important; }
         header[data-testid="stHeader"] { background: #1E293B !important; border-bottom: 1px solid #334155; }
-        header[data-testid="stHeader"] * { color: #F1F5F9 !important; }
+        /* Do not use header * { color } — it breaks Streamlit's top toolbar icons on some builds. */
         section[data-testid="stSidebar"] { background: #1E293B; border-right: 4px solid #0F766E; }
         section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] .stCaption { color: #E2E8F0 !important; }
         section[data-testid="stSidebar"] input { background: #334155 !important; color: #F1F5F9 !important; border-color: #475569 !important; }
@@ -6266,8 +6406,8 @@ def main():
         st.markdown("""
         <style>
         .stApp { background: #FAFBFC; font-family: sans-serif; font-size: 0.8125rem !important; }
-        header[data-testid="stHeader"] { background: #F1F3F4 !important; border-bottom: 1px solid #E2E8F0; }
-        header[data-testid="stHeader"] * { color: #1E293B !important; }
+        header[data-testid="stHeader"] { background: #FFFFFF !important; border-bottom: 1px solid #E2E8F0; }
+        /* Do not use header * { color } — it breaks Streamlit's top toolbar icons on some builds. */
         section[data-testid="stSidebar"] { background: #FFFFFF; border-right: 4px solid #0F766E; }
         section[data-testid="stSidebar"] .stMarkdown { color: #1E293B !important; font-weight: 600 !important; }
         h1 { background: #0F766E !important; color: white !important; font-weight: 700 !important; padding: 20px 28px !important; margin: 0 0 1.5rem 0 !important; border-radius: 0 10px 10px 0 !important; }
@@ -6333,10 +6473,10 @@ def main():
         height: calc(100vh - 24px) !important;
         min-height: calc(100vh - 24px) !important;
     }
-    /* Remove space above section tabs and shift main content up */
-    [data-testid="stAppViewContainer"] > div { padding-top: 0 !important; margin-top: 0 !important; }
-    [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
-    .block-container { padding-top: 0 !important; }
+    /* Shift main block only — padding stAppViewContainer can clip the Streamlit header on some builds. */
+    [data-testid="stAppViewContainer"] > div { padding-top: unset !important; margin-top: unset !important; }
+    [data-testid="stAppViewContainer"] { padding-top: unset !important; }
+    .block-container { padding-top: 72px !important; }
     [data-testid="stVerticalBlock"] > div:first-child { padding-top: 0 !important; margin-top: 0 !important; }
     /* Slightly smaller base font app-wide */
     .stApp h1 { font-size: 1.2rem !important; }
@@ -6353,17 +6493,28 @@ def main():
         border-radius: 0 0 10px 10px !important;
         box-shadow: 0 1px 3px rgba(15,118,110,0.2);
     }
-    /* Hide Streamlit default header (teal bar with page title and link icon) */
-    header[data-testid="stHeader"] { display: none !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; border: none !important; overflow: hidden !important; }
-    /* Streamlit 1.30+: remove dead vertical gap reserved for toolbar / decoration when header is hidden */
-    div[data-testid="stToolbar"] { display: none !important; height: 0 !important; }
-    div[data-testid="stDecoration"] { display: none !important; height: 0 !important; }
-    [data-testid="stMain"] { padding-top: 0 !important; }
-    [data-testid="stMain"] > div { padding-top: 0 !important; margin-top: 0 !important; }
-    .stMainBlockContainer { padding-top: 0 !important; }
-    .stMain .block-container { padding-top: 0.5rem !important; }
+    /* Keep Streamlit top chrome visible; offset content inside main only. */
+    header[data-testid="stHeader"] {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        position: relative !important;
+        z-index: 100000 !important;
+    }
+    div[data-testid="stToolbar"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        z-index: 100001 !important;
+    }
+    [data-testid="stMain"] { padding-top: unset !important; }
+    [data-testid="stMain"] > div { padding-top: unset !important; margin-top: unset !important; }
+    .stMainBlockContainer { padding-top: unset !important; }
+    .stMain .block-container { padding-top: 72px !important; }
     /* ========== Header: Tailwind-style single row (px-6 py-3, border-gray-100, shadow-sm) ========== */
     .header-top-bar + div {
+        position: relative !important;
+        z-index: 1 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
@@ -6371,7 +6522,7 @@ def main():
         min-height: 72px !important;
         max-width: 1600px !important;
         width: 100% !important;
-        margin: 0 auto !important;
+        margin: 36px auto 0 auto !important;
         padding: clamp(12px, 2vw, 24px) clamp(16px, 3vw, 24px) !important;
         border-bottom: 1px solid #f3f4f6 !important;
         background: #ffffff !important;
@@ -6380,7 +6531,7 @@ def main():
         box-sizing: border-box !important;
     }
     @media (max-width: 768px) {
-        .header-top-bar + div { padding: 12px 16px !important; min-height: auto !important; height: auto !important; }
+        .header-top-bar + div { margin-top: 28px !important; padding: 12px 16px !important; min-height: auto !important; height: auto !important; }
         .header-top-bar + div [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; height: auto !important; min-height: 56px !important; gap: 12px !important; }
         .header-top-bar + div [data-testid="stHorizontalBlock"] > [data-testid="column"] { height: auto !important; min-height: 44px !important; }
         .header-top-bar + div [data-testid="stVerticalBlock"] { height: auto !important; }
@@ -6761,6 +6912,9 @@ def main():
         unsafe_allow_html=True,
     )
 
+    # Small spacer; main offset is .stMain .block-container padding (avoids clipping host header).
+    st.markdown('<div style="height: 24px;"></div>', unsafe_allow_html=True)
+
     # Top bar (replaces sidebar): compact two-row layout
     last_gsheet = _latest_refresh_among_gsheet_family()
     if last_gsheet:
@@ -6896,7 +7050,7 @@ def main():
     status_class = "live" if "Live" in status_label else ("delayed" if "Delayed" in status_label else "stale")
     updated_ago = _format_updated_ago(last_gsheet)
     _compact_ui = _compact_layout_enabled()
-    st.markdown('<div class="header-top-bar"></div>', unsafe_allow_html=True)
+    # Keep native Streamlit header/toolbar behavior untouched.
     with st.container():
         if _compact_ui:
             c_logo, c_main = st.columns([1, 3])
@@ -7121,24 +7275,6 @@ def main():
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
 
-    # Developer-only diagnostics (collapsed) to confirm export gating without exposing to normal users.
-    if _is_developer():
-        with st.sidebar.expander("Diagnostics (developer)", expanded=False):
-            st.write("Export enabled:", bool(can_export))
-            st.write("Current user:", current_user or "—")
-            try:
-                _ex_ids = _export_allowed_ids_from_secrets()
-                st.write("Export allowlist size:", len(_ex_ids))
-                _cu_d = (current_user or "").strip().lower()
-                _loc_d = _cu_d.split("@", 1)[0] if "@" in _cu_d else _cu_d
-                _ex_n = {(a or "").strip().lower() for a in _ex_ids if (a or "").strip()}
-                st.write(
-                    "On EXPORT_* list:",
-                    bool(_ex_n and (_cu_d in _ex_n or _loc_d in _ex_n)),
-                )
-            except Exception:
-                st.write("Export allowlist size: —")
-
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
     _preview_regional = _user_can_see_bahrain_kitchen_preview(current_user or "")
@@ -7191,6 +7327,9 @@ def main():
                 ):
                     st.session_state["section_radio"] = opt
                     _rerun()
+
+    # Main app body actions (rendered after section nav so they are visible inside tracker pages).
+    _render_builtin_action_row()
 
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == SECTION_KSA:
