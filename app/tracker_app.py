@@ -2876,6 +2876,7 @@ def save_generic_tab(tab_id, rows, source: str):
                 "INSERT INTO generic_tab_data (source, tab_id, row_index, data) VALUES (?, ?, ?, ?)",
                 (source, tab_id, i, json.dumps(row, ensure_ascii=False)),
             )
+    _clear_list_generic_tab_cache()
 
 
 def _regional_sheet_rows_for_sqlite(ws_rows: list[dict]) -> list[dict]:
@@ -3716,6 +3717,21 @@ def _dashboard_kitchen_master_tab_names_for_country(
     return None
 
 
+@st.cache_data(ttl=20, show_spinner=False)
+def _list_generic_tab_cached(tab_id: str, *, source: str | None = None) -> list[dict]:
+    """Small read cache to reduce rerun stalls while switching filters/facilities."""
+    rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
+    return rows or []
+
+
+def _clear_list_generic_tab_cache() -> None:
+    """Invalidate cached tab rows after any refresh/write path."""
+    try:
+        _list_generic_tab_cached.clear()
+    except Exception:
+        pass
+
+
 def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
     """Fetch Kuwait facility sheets and persist under gsheet_kw. Returns True on success."""
     sid, _, _, gsource = _regional_kitchen_workbook_settings("Kuwait")
@@ -3739,6 +3755,7 @@ def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
                 _regional_sheet_rows_for_sqlite(ws_rows or []),
                 source=gsource,
             )
+        _clear_list_generic_tab_cache()
         set_last_refresh(gsource)
         return True
     except Exception as e:
@@ -3754,7 +3771,7 @@ def _load_kuwait_dashboard_rows() -> list[dict]:
     for tab_id in list_tab_ids_for_source(GSOURCE_KITCHEN_KW):
         if (tab_id or "").strip().lower() in hidden:
             continue
-        for r in list_generic_tab(tab_id, source=GSOURCE_KITCHEN_KW) or []:
+        for r in _list_generic_tab_cached(tab_id, source=GSOURCE_KITCHEN_KW):
             if not isinstance(r, dict) or _is_empty_record(r):
                 continue
             row = dict(r)
@@ -3788,6 +3805,7 @@ def _refresh_uae_workbook_from_sheets(*, silent: bool = True) -> bool:
                 _regional_sheet_rows_for_sqlite(ws_rows or []),
                 source=gsource,
             )
+        _clear_list_generic_tab_cache()
         set_last_refresh(gsource)
         return True
     except Exception as e:
@@ -3803,7 +3821,7 @@ def _load_uae_dashboard_rows() -> list[dict]:
     for tab_id in list_tab_ids_for_source(GSOURCE_KITCHEN_AE):
         if (tab_id or "").strip().lower() in hidden:
             continue
-        for r in list_generic_tab(tab_id, source=GSOURCE_KITCHEN_AE) or []:
+        for r in _list_generic_tab_cached(tab_id, source=GSOURCE_KITCHEN_AE):
             if not isinstance(r, dict) or _is_empty_record(r):
                 continue
             row = dict(r)
@@ -3836,6 +3854,7 @@ def _refresh_bahrain_workbook_from_sheets(*, silent: bool = True) -> bool:
                 _regional_sheet_rows_for_sqlite(ws_rows or []),
                 source=gsource,
             )
+        _clear_list_generic_tab_cache()
         set_last_refresh(gsource)
         return True
     except Exception as e:
@@ -3851,7 +3870,7 @@ def _load_bahrain_dashboard_rows() -> list[dict]:
     for tab_id in list_tab_ids_for_source(GSOURCE_KITCHEN_BH):
         if (tab_id or "").strip().lower() in hidden:
             continue
-        for r in list_generic_tab(tab_id, source=GSOURCE_KITCHEN_BH) or []:
+        for r in _list_generic_tab_cached(tab_id, source=GSOURCE_KITCHEN_BH):
             if not isinstance(r, dict) or _is_empty_record(r):
                 continue
             row = dict(r)
@@ -3954,7 +3973,7 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                     chosen_labels = [first_tab]
                 chosen_labels = [t for t in chosen_labels if t in gsheet_tab_options] or [first_tab]
                 source_id = source_ids_gsheet.get(chosen_labels[0], first_tab)
-                rows = list_generic_tab(source_id, source="gsheet")
+                rows = _list_generic_tab_cached(source_id, source="gsheet")
                 source_options = gsheet_tab_options
                 source_ids = source_ids_gsheet
                 chosen_label = "Master Kitchens (Google Sheet)"
@@ -4049,7 +4068,7 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                     chosen_labels = [first_tab]
                 chosen_labels = [t for t in chosen_labels if t in source_options] or [first_tab]
                 source_id = source_ids.get(chosen_labels[0], first_tab)
-                rows = list_generic_tab(source_id, source="gsheet")
+                rows = _list_generic_tab_cached(source_id, source="gsheet")
                 is_other_sheet = True
     # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
     if is_other_sheet and chosen_labels:
@@ -4071,9 +4090,14 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
             combined_rows = []
             for label in _labels_to_use:
                 tab_id = source_ids.get(label, label)
-                sheet_rows = list_generic_tab(tab_id, source="gsheet") or []
+                sheet_rows = _list_generic_tab_cached(tab_id, source="gsheet")
                 for r in sheet_rows:
-                    combined_rows.append({"Sheet": label, **r})
+                    if not isinstance(r, dict):
+                        continue
+                    row = dict(r)
+                    # Always stamp facility from current selector; don't trust incoming "Sheet" payload.
+                    row["Sheet"] = label
+                    combined_rows.append(row)
             combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
             combined_rows = _apply_kitchen_labels_to_combined_facility_rows(combined_rows)
             combined_rows = _filter_junk_kitchen_records(combined_rows)
@@ -4270,7 +4294,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     _show_combined = len(_labels_to_use) > 1
     if not _show_combined:
         _single_tab_id = source_ids.get(_labels_to_use[0], _labels_to_use[0])
-        _single_rows = list_generic_tab(_single_tab_id, source=gsource) or []
+        _single_rows = _list_generic_tab_cached(_single_tab_id, source=gsource)
         _single_rows = _filter_empty_records([r for r in _single_rows if isinstance(r, dict)])
         _render_generic_tab(
             _single_tab_id,
@@ -4287,9 +4311,13 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     combined_rows = []
     for label in _labels_to_use:
         tab_id = source_ids.get(label, label)
-        sheet_rows = list_generic_tab(tab_id, source=gsource) or []
+        sheet_rows = _list_generic_tab_cached(tab_id, source=gsource)
         for r in sheet_rows:
-            combined_rows.append({"Sheet": label, **r})
+            if not isinstance(r, dict):
+                continue
+            row = dict(r)
+            row["Sheet"] = label
+            combined_rows.append(row)
     combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
     combined_rows = _apply_kitchen_labels_to_combined_facility_rows(combined_rows)
     if not combined_rows:
@@ -6160,7 +6188,7 @@ def _render_generic_tab(
     regional_display: str | None = None,
 ):
     """View/filter for a generic tab. When source is set (e.g. 'gsheet'), read only from that source; else use session data_source. hide_account_country: when True (e.g. single facility in Master Kitchens), hide Account Country column. drop_facility_name_column: remove Facility Name column (Kuwait tab — avoids redundant filter UI). regional_display: Kuwait/UAE — hide comment columns for regional inventory view."""
-    rows = rows_override if rows_override is not None else (list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id))
+    rows = rows_override if rows_override is not None else _list_generic_tab_cached(tab_id, source=source)
     # Kitchens: fallback to legacy SF Kitchen Data (before rename)
     if rows_override is None and not rows and tab_id == "Kitchens":
         rows = list_generic_tab("SF Kitchen Data", source=source) if source else list_generic_tab("SF Kitchen Data")
