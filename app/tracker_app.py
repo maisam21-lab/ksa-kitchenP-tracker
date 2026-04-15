@@ -5606,7 +5606,7 @@ def _kitchen_master_row_css_class_from_values(status_val, has_opportunity: bool)
     if not norm or norm == "No status":
         return "status-no-status"
     if norm == "Vacant":
-        return "status-vacant-opp" if has_opportunity else "status-vacant"
+        return "status-vacant"
     if norm == "Churning":
         return "status-churning"
     if norm in ("Occupied", "Sold"):
