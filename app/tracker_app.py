@@ -5850,7 +5850,9 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
     For modest row counts, ``domLayout: autoHeight`` removes the large empty band inside the grid.
 
     With Enterprise modules (default **trial** without a key, or with ``AG_GRID_LICENSE_KEY``), text columns use **Set Filter**
-    (checkbox list of distinct values). With ``AG_GRID_ENTERPRISE_TRIAL=0``, uses Community **text** filters only.
+    (checkbox list of distinct values), plus **cell selection** so users can drag a range and **Ctrl+C** (with headers)
+    like Excel. ``enableCellTextSelection`` stays off in that mode so it does not block range clipboard copy.
+    With ``AG_GRID_ENTERPRISE_TRIAL=0`` (Community only), Set Filter is replaced by text filters and only in-cell text selection is enabled.
 
     Returns ``(grid_options, custom_css_dict, use_auto_height, enterprise_license_or_none)``.
     """
@@ -5917,7 +5919,15 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
     go["defaultColDef"]["wrapHeaderText"] = True
     go["defaultColDef"]["autoHeaderHeight"] = True
     go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
-    go["defaultColDef"]["enableCellTextSelection"] = True
+    # Clipboard: with Enterprise (default trial), ``enableCellTextSelection`` makes Ctrl+C copy only
+    # highlighted in-cell text — not ranges. Cell selection + clipboard needs it off (AG Grid docs).
+    if _use_set:
+        go["cellSelection"] = {"enableColumnSelection": True}
+        go["copyHeadersToClipboard"] = True
+        go["defaultColDef"]["enableCellTextSelection"] = False
+    else:
+        go["defaultColDef"]["enableCellTextSelection"] = True
+        go["ensureDomOrder"] = True
     if "floatingFiltersHeight" in go:
         del go["floatingFiltersHeight"]
     _hidden_fields = {"_has_opportunity", "km_row_cls"}
@@ -6048,6 +6058,12 @@ def _render_master_table_aggrid_or_df(
             go = None
             _ag_lic = None
         if go:
+            if not _aggrid_use_enterprise_modules():
+                st.caption(
+                    "Block copy (**click-drag** or **Shift+click**, then **Ctrl+C**) needs AG Grid Enterprise features. "
+                    "This app loads them by default; if you set **AG_GRID_ENTERPRISE_TRIAL=0**, only single-cell text "
+                    "selection is available."
+                )
             _ag_iframe_h = _kitchen_master_aggrid_iframe_height_px(_n_rows, auto_height_layout=_use_ag_auto_height)
             _kwargs = dict(
                 gridOptions=go,
