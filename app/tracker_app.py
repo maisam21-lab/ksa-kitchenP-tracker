@@ -76,21 +76,19 @@ except ImportError:
     HAS_EXCEL = False
 
 try:
-    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode, DataReturnMode
+    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, DataReturnMode
 
     _HAS_AGGRI = True
 except ImportError:
     try:
         from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
-        GridUpdateMode = None
         DataReturnMode = None
         _HAS_AGGRI = True
     except ImportError:
         AgGrid = None  # type: ignore[misc, assignment]
         GridOptionsBuilder = None  # type: ignore[misc, assignment]
         JsCode = None  # type: ignore[misc, assignment]
-        GridUpdateMode = None
         DataReturnMode = None
         _HAS_AGGRI = False
 
@@ -5919,6 +5917,7 @@ def _build_aggrid_community_grid_options(df: pd.DataFrame, status_col: str | Non
     go["defaultColDef"]["wrapHeaderText"] = True
     go["defaultColDef"]["autoHeaderHeight"] = True
     go["defaultColDef"]["cellStyle"] = {"textAlign": "left"}
+    go["defaultColDef"]["enableCellTextSelection"] = True
     if "floatingFiltersHeight" in go:
         del go["floatingFiltersHeight"]
     _hidden_fields = {"_has_opportunity", "km_row_cls"}
@@ -6125,7 +6124,8 @@ def _render_master_table_aggrid_or_df(
             # Taller minimum so Cloud layouts don’t clip the HTML table (iframe height is explicit).
             _ch = min(1200, max(360, _viewport_h + 48))
             st_components.html(
-                f'<div style="width:100%;overflow:auto;font-family:system-ui,sans-serif;font-size:13px;">{_html_sty.to_html()}</div>',
+                f'<div style="width:100%;overflow:auto;font-family:system-ui,sans-serif;font-size:13px;'
+                f'-webkit-user-select:text;user-select:text;">{_html_sty.to_html()}</div>',
                 height=_ch,
                 scrolling=True,
             )
@@ -6385,9 +6385,9 @@ def main():
         .stButton > button[kind="primary"] { background: #0F766E !important; color: white !important; border: none !important; }
         .streamlit-expanderHeader { background: #334155 !important; color: #E2E8F0 !important; border-left: 4px solid #0F766E; }
         .stTextInput input, .stSelectbox > div { background: #334155 !important; color: #F1F5F9 !important; border: 1px solid #475569 !important; }
-        .stDataFrame { border-radius: 8px; border: 1px solid #475569; background: #1E293B !important; }
+        .stDataFrame { border-radius: 8px; border: 1px solid #475569; background: #1E293B !important; -webkit-user-select: text !important; user-select: text !important; }
         .stDataFrame thead th { background: #334155 !important; color: #F1F5F9 !important; border-bottom: 2px solid #0F766E !important; }
-        .stDataFrame tbody td { background: #1E293B !important; color: #E2E8F0 !important; }
+        .stDataFrame tbody td { background: #1E293B !important; color: #E2E8F0 !important; -webkit-user-select: text !important; user-select: text !important; }
         [data-testid="stMetricValue"] { color: #F1F5F9 !important; }
         section[data-testid="stSidebar"] [data-testid="stMetricValue"] { font-size: 0.8rem !important; }
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
@@ -6416,9 +6416,9 @@ def main():
         .stButton > button[kind="primary"] { background: #0F766E !important; border: none !important; color: white !important; }
         .streamlit-expanderHeader { background: #F8FAFC; border-radius: 8px; border-left: 4px solid #0F766E; }
         .stTextInput input, .stSelectbox > div { border-radius: 6px !important; background: #F8FAFC !important; border: 1px solid #E2E8F0 !important; }
-        .stDataFrame { border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; }
+        .stDataFrame { border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; -webkit-user-select: text !important; user-select: text !important; }
         .stDataFrame thead th { background: #F1F5F9 !important; color: #1E293B !important; font-weight: 600 !important; padding: 10px 12px !important; border-bottom: 2px solid #0F766E !important; }
-        .stDataFrame tbody td { padding: 8px 12px !important; }
+        .stDataFrame tbody td { padding: 8px 12px !important; -webkit-user-select: text !important; user-select: text !important; }
         [data-testid="stMetricValue"] { color: #1E293B !important; }
         section[data-testid="stSidebar"] [data-testid="stMetricValue"] { font-size: 0.8rem !important; }
         section[data-testid="stSidebar"] [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
