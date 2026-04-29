@@ -4794,7 +4794,31 @@ def _sanitize_cell_value_for_kitchen(v):
 def _sanitize_kitchen_row_dict(r: dict) -> dict:
     if not isinstance(r, dict):
         return r
-    return {k: _sanitize_cell_value_for_kitchen(v) for k, v in r.items()}
+    out = {k: _sanitize_cell_value_for_kitchen(v) for k, v in r.items()}
+    # Regional sheets can expose kitchen type under variant headers.
+    # Keep a canonical ``Type`` value for filtering and row-quality rules.
+    tk = _find_kitchen_type_column_key(out)
+    if tk:
+        tv = out.get(tk)
+        if not _is_missing_kitchen_type_for_junk_filter(tv):
+            cur = out.get("Type")
+            if _is_missing_kitchen_type_for_junk_filter(cur):
+                out["Type"] = tv
+    # Last-resort fallback for regional sheets: infer type from kitchen name like
+    # "K4 (Hot) - KWT - Jahra ...", when explicit Type columns are blank.
+    cur_type = out.get("Type")
+    if _is_missing_kitchen_type_for_junk_filter(cur_type):
+        nk = _find_kitchen_number_name_column_key(out)
+        if nk:
+            name_blob = str(out.get(nk) or "").strip()
+            if name_blob:
+                m = re.search(r"\(([^)]+)\)", name_blob)
+                if m:
+                    guess = (m.group(1) or "").strip()
+                    # Avoid writing numeric/noisy parenthesis tokens as a "Type".
+                    if guess and not re.fullmatch(r"[-\d\W_]+", guess):
+                        out["Type"] = guess
+    return out
 
 
 def _integerize_whole_number_float_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -5300,7 +5324,15 @@ def _filter_empty_records(rows: list) -> list:
 _STANDARD_KITCHEN_STATUS_NORMALIZED = frozenset(
     {"Vacant", "Churning", "Occupied", "Sold", "No status"}
 )
-_KITCHEN_TYPE_COL_KEYS = ("Type", "Kitchen Type", "Type__c")
+_KITCHEN_TYPE_COL_KEYS = (
+    "Type",
+    "Kitchen Type",
+    "Type__c",
+    "Kitchen_Type",
+    "Type of Kitchen",
+    "Unit Type",
+    "Kitchen Unit Type",
+)
 _KITCHEN_FLOOR_PRICE_KEYS = (
     "Floor Price",
     "Floor_Price__c",
@@ -5383,7 +5415,20 @@ def _find_kitchen_number_name_column_key(r: dict) -> str | None:
 
 
 def _find_kitchen_type_column_key(r: dict) -> str | None:
-    return _find_kitchen_column_key(r, _KITCHEN_TYPE_COL_KEYS)
+    k = _find_kitchen_column_key(r, _KITCHEN_TYPE_COL_KEYS)
+    if k:
+        return k
+    for key in r:
+        if key in ("_has_opportunity", "Sheet"):
+            continue
+        ks = re.sub(r"[^a-z0-9]+", "", str(key).lower())
+        # Keep this strict enough to avoid accidental matches (e.g. "type of issue")
+        # while covering common regional-sheet variants.
+        if ks in ("type", "kitchentype", "kitchenunittype", "unittype", "typeofkitchen"):
+            return key
+        if "kitchen" in ks and "type" in ks:
+            return key
+    return None
 
 
 def _is_missing_kitchen_type_for_junk_filter(v) -> bool:
