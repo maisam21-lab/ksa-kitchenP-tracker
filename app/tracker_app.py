@@ -187,6 +187,17 @@ PREVIEW_ONLY_IDS = (
     "jad.hajjar@cloudkitchens.com,"
     "tala.zeineddine@cloudkitchens.com"
 )
+# Optional market-scoped visibility (secrets/env):
+# - MARKET_VIEW_KSA_IDS
+# - MARKET_VIEW_UAE_IDS
+# - MARKET_VIEW_KUWAIT_IDS
+# - MARKET_VIEW_BAHRAIN_IDS
+# Comma/newline/semicolon-separated emails. When a user is in one of these lists,
+# Kitchen Master and Dashboard views are restricted to that market.
+MARKET_VIEW_KSA_IDS = ""
+MARKET_VIEW_UAE_IDS = ""
+MARKET_VIEW_KUWAIT_IDS = ""
+MARKET_VIEW_BAHRAIN_IDS = ""
 # CSV export allowlist (merged with EXPORT_ALLOWED_IDS in Streamlit secrets or env).
 EXPORT_ALLOWED_IDS = (
     "maysam.abukashabeh@cloudkitchens.com,"
@@ -1465,9 +1476,14 @@ def _compact_layout_enabled() -> bool:
     return bool(_mobile_mode_enabled())
 
 
-def _kitchen_master_region_selector_ui() -> str:
-    """Kuwait / UAE / Bahrain chips; main KSA workbook is default. **Main** only when returning from a region."""
+def _kitchen_master_region_selector_ui(allowed_regions: set[str] | None = None) -> str:
+    """Kuwait / UAE / Bahrain chips; main KSA workbook is default. **Main** only when returning from a region.
+
+    ``allowed_regions`` can restrict visible markets for market-scoped users.
+    """
     _regional = {v for _, v in KITCHEN_MASTER_REGION_ROW}
+    if allowed_regions:
+        _regional = {r for r in _regional if r in allowed_regions}
     _allowed = _regional | {KITCHEN_MASTER_SUBVIEW_MAIN}
     if SESSION_KEY_KITCHEN_MASTER_REGION not in st.session_state:
         st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = KITCHEN_MASTER_SUBVIEW_MAIN
@@ -1478,9 +1494,12 @@ def _kitchen_master_region_selector_ui() -> str:
     if cur not in _allowed:
         cur = KITCHEN_MASTER_SUBVIEW_MAIN
         st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = cur
-    label_to_val = dict(KITCHEN_MASTER_REGION_ROW)
-    val_to_label = {v: lbl for lbl, v in KITCHEN_MASTER_REGION_ROW}
-    _row_labels = [lbl for lbl, _ in KITCHEN_MASTER_REGION_ROW]
+    _pairs = [(lbl, val) for lbl, val in KITCHEN_MASTER_REGION_ROW if val in _regional]
+    if not _pairs:
+        return KITCHEN_MASTER_SUBVIEW_MAIN
+    label_to_val = dict(_pairs)
+    val_to_label = {v: lbl for lbl, v in _pairs}
+    _row_labels = [lbl for lbl, _ in _pairs]
     _mobile_opts = ["Main"] + _row_labels
     if _compact_layout_enabled():
         _cur_label = "Main" if cur == KITCHEN_MASTER_SUBVIEW_MAIN else val_to_label[cur]
@@ -1503,8 +1522,8 @@ def _kitchen_master_region_selector_ui() -> str:
         if st.button("Main", key="km_region_back_main", use_container_width=True):
             st.session_state[SESSION_KEY_KITCHEN_MASTER_REGION] = KITCHEN_MASTER_SUBVIEW_MAIN
             _rerun()
-    r_cols = st.columns(len(KITCHEN_MASTER_REGION_ROW))
-    for i, (lbl, val) in enumerate(KITCHEN_MASTER_REGION_ROW):
+    r_cols = st.columns(len(_pairs))
+    for i, (lbl, val) in enumerate(_pairs):
         with r_cols[i]:
             if st.button(
                 lbl,
@@ -2500,6 +2519,66 @@ def _email_set_with_local_parts(ids: set[str]) -> set[str]:
         if "@" in s:
             out.add(s.split("@", 1)[0])
     return out
+
+
+def _market_view_ids_from_secrets(market: str) -> set[str]:
+    """Emails scoped to a single market view (KSA/UAE/Kuwait/Bahrain), lowercased."""
+    m = (market or "").strip().lower()
+    if m == "ksa":
+        keys = ("MARKET_VIEW_KSA_IDS", "market_view_ksa_ids")
+        built_in = MARKET_VIEW_KSA_IDS
+    elif m == "uae":
+        keys = ("MARKET_VIEW_UAE_IDS", "market_view_uae_ids")
+        built_in = MARKET_VIEW_UAE_IDS
+    elif m == "kuwait":
+        keys = ("MARKET_VIEW_KUWAIT_IDS", "market_view_kuwait_ids", "MARKET_VIEW_KW_IDS", "market_view_kw_ids")
+        built_in = MARKET_VIEW_KUWAIT_IDS
+    elif m == "bahrain":
+        keys = ("MARKET_VIEW_BAHRAIN_IDS", "market_view_bahrain_ids")
+        built_in = MARKET_VIEW_BAHRAIN_IDS
+    else:
+        return set()
+    out: set[str] = set()
+    for key in keys:
+        try:
+            raw = st.secrets.get(key)
+        except Exception:
+            raw = None
+        if raw is None:
+            raw = os.environ.get(key, "")
+        for part in re.split(r"[,\n;\s]+", str(raw or "").strip()):
+            s = (part or "").strip().lower()
+            if s:
+                out.add(s)
+    for part in re.split(r"[,\n;\s]+", str(built_in or "").strip()):
+        s = (part or "").strip().lower()
+        if s:
+            out.add(s)
+    return out
+
+
+def _market_scope_for_user(current_user: str | None, user_role: str | None) -> str | None:
+    """Return user market scope: 'Saudi Arabia' / 'UAE' / 'Kuwait' / 'Bahrain', else None (=all countries)."""
+    if _is_developer():
+        return None
+    r = (user_role or "").strip().lower()
+    if r in ("super_user", "manager_viewer"):
+        return None
+    u = (current_user or "").strip().lower()
+    if not u:
+        return None
+    local = u.split("@", 1)[0] if "@" in u else u
+    checks = (
+        ("Saudi Arabia", _market_view_ids_from_secrets("ksa")),
+        ("UAE", _market_view_ids_from_secrets("uae")),
+        ("Kuwait", _market_view_ids_from_secrets("kuwait")),
+        ("Bahrain", _market_view_ids_from_secrets("bahrain")),
+    )
+    for label, ids in checks:
+        expanded = _email_set_with_local_parts(ids)
+        if expanded and (u in expanded or local in expanded):
+            return label
+    return None
 
 
 def _bahrain_preview_ids_from_secrets() -> set[str]:
@@ -4216,11 +4295,7 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
 def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is_developer: bool) -> None:
     """Kitchen Master Data view for Kuwait/UAE/Bahrain regional workbooks (Google Sheets)."""
     sid, gid, _legacy_tab_id, gsource = _regional_kitchen_workbook_settings(region)
-    docs = f"https://docs.google.com/spreadsheets/d/{sid}/edit?gid={gid}" if sid and gid is not None else (f"https://docs.google.com/spreadsheets/d/{sid}/edit" if sid else "")
-    st.caption(
-        f"**{region} kitchen master** — [Open workbook]({docs}). "
-        "Auto-refresh every 15 min."
-    )
+    st.caption(f"**{region} kitchen master**")
     # Avoid blocking every rerun: refresh only if stale/missing, or when user explicitly clicks refresh.
     _has_any_loaded_tabs = bool(list_tab_ids_for_source(gsource))
     _needs_refresh = _source_refresh_is_stale(gsource, 15) or not _has_any_loaded_tabs
@@ -7329,6 +7404,7 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
+    _market_scope = _market_scope_for_user(current_user, user_role)
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
     _preview_regional = _user_can_see_bahrain_kitchen_preview(current_user or "")
@@ -7385,6 +7461,16 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == SECTION_KSA:
         st.session_state.pop("preview_kitchen_region", None)
+        if _market_scope in ("Kuwait", "UAE", "Bahrain"):
+            st.caption(f"Market-scoped view: **{_market_scope}**")
+            _render_preview_regional_kitchen_master(
+                _market_scope, can_export=can_export, is_developer=is_developer
+            )
+            return
+        if _market_scope == "Saudi Arabia":
+            st.caption("Market-scoped view: **Saudi Arabia (KSA)**")
+            _render_kitchen_master_ksa_main(can_export=can_export, is_developer=is_developer)
+            return
         # PREVIEW_ONLY_IDS / super_user / manager_viewer: KSA master + optional Kuwait / UAE / Bahrain workbooks.
         if _user_sees_dashboard_all_countries(current_user, user_role):
             st.caption(
@@ -7444,7 +7530,10 @@ def main():
                 _refresh_uae_workbook_from_sheets(silent=True)
             if _sid_ae:
                 _uae_dashboard_rows = _load_uae_dashboard_rows()
-            if _sid_bh and _user_sees_dashboard_all_countries(current_user, user_role):
+            if _sid_bh and (
+                _user_sees_dashboard_all_countries(current_user, user_role)
+                or _market_scope == "Bahrain"
+            ):
                 if _source_refresh_is_stale(_gbh, 15):
                     _refresh_bahrain_workbook_from_sheets(silent=True)
                 _bahrain_dashboard_rows = _load_bahrain_dashboard_rows()
@@ -7501,6 +7590,12 @@ def main():
                 return _country_label(inferred)
             return "Saudi Arabia"
 
+        if _market_scope in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain"):
+            rows_kitchens = [
+                r for r in (rows_kitchens or [])
+                if _dashboard_row_country(r) == _market_scope
+            ]
+
         def _facility_select_options(sel_country: str, rows_subset: list) -> list[str]:
             """Facility dropdown: same tab names as Kitchen Master for that country, union any row-derived names.
 
@@ -7546,7 +7641,10 @@ def main():
         )
         _regional_preview_dash = _user_sees_dashboard_all_countries(current_user, user_role)
         _core_countries = list(DASHBOARD_COUNTRY_FILTER_CORE)
-        if not _regional_preview_dash:
+        if _market_scope in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain"):
+            _core_countries = [_market_scope]
+            _extras = []
+        elif not _regional_preview_dash:
             _core_countries = [c for c in _core_countries if c == "Saudi Arabia"]
             _extras = [
                 c
