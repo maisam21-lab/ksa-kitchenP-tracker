@@ -7482,6 +7482,19 @@ def main():
             st.stop()
     _market_scope = _market_scope_for_user(current_user, user_role)
     _scoped_markets = [m for m in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain") if m in set(_market_matches)]
+
+    def _dashboard_access_allowed(user_email: str | None) -> bool:
+        if _is_developer():
+            return True
+        u = (user_email or "").strip().lower()
+        if not u:
+            return False
+        local = u.split("@", 1)[0] if "@" in u else u
+        dev_expanded = _email_set_with_local_parts(set(_developer_ids_merged_list()))
+        return u in dev_expanded or local in dev_expanded
+
+    _can_open_dashboard = _dashboard_access_allowed(current_user)
+
     def _section_display_name(opt: str) -> str:
         if (
             opt == SECTION_KSA
@@ -7495,12 +7508,7 @@ def main():
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
     _preview_regional = _user_can_see_bahrain_kitchen_preview(current_user or "")
-    if (
-        _is_developer()
-        or user_role == "super_user"
-        or user_role == "manager_viewer"
-        or _preview_regional
-    ):
+    if _can_open_dashboard:
         section_options = [SECTION_KSA, "Dashboard", "Discussions"]
     else:
         section_options = [SECTION_KSA, "Discussions"]
@@ -7602,6 +7610,9 @@ def main():
 
     # Dashboard: management view (section_options already restricts who sees the button)
     elif section == "Dashboard":
+        if not _can_open_dashboard:
+            st.error("Access restricted. Dashboard is available only for DEVELOPER_IDS users.")
+            st.stop()
         superset_rows, superset_meta = _get_superset_master_kitchens()
         dashboard_from_superset = superset_rows is not None
         if dashboard_from_superset:
