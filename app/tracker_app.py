@@ -2549,21 +2549,31 @@ def _market_view_ids_from_secrets(market: str) -> set[str]:
     else:
         return set()
     out: set[str] = set()
+
+    def _merge_blob(raw_blob: object) -> None:
+        for part in re.split(r"[,\n;\s]+", str(raw_blob or "").strip()):
+            s = (part or "").strip().lower()
+            if s:
+                out.add(s)
+
     for key in keys:
         try:
             raw = st.secrets.get(key)
         except Exception:
             raw = None
+        # Support nested secrets tables (e.g. keys accidentally placed under another TOML section).
+        try:
+            sec = getattr(st, "secrets", None)
+            if sec:
+                for val in sec.values():
+                    if isinstance(val, dict) and key in val:
+                        _merge_blob(val.get(key))
+        except Exception:
+            pass
         if raw is None:
             raw = os.environ.get(key, "")
-        for part in re.split(r"[,\n;\s]+", str(raw or "").strip()):
-            s = (part or "").strip().lower()
-            if s:
-                out.add(s)
-    for part in re.split(r"[,\n;\s]+", str(built_in or "").strip()):
-        s = (part or "").strip().lower()
-        if s:
-            out.add(s)
+        _merge_blob(raw)
+    _merge_blob(built_in)
     return out
 
 
