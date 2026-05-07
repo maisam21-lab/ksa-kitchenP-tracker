@@ -7489,6 +7489,14 @@ def main():
             st.caption(f"Detected markets: `{', '.join(_market_matches)}`")
             st.stop()
     _market_scope = _market_scope_for_user(current_user, user_role)
+    def _section_display_name(opt: str) -> str:
+        if (
+            opt == SECTION_KSA
+            and not _is_market_admin
+            and _market_scope in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain")
+        ):
+            return "KSA" if _market_scope == "Saudi Arabia" else _market_scope
+        return opt
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
     _preview_regional = _user_can_see_bahrain_kitchen_preview(current_user or "")
@@ -7524,6 +7532,7 @@ def main():
             options=section_options,
             index=section_options.index(section) if section in section_options else 0,
             key="section_mobile_selector",
+            format_func=_section_display_name,
         )
         if _sel and _sel != section:
             st.session_state["section_radio"] = _sel
@@ -7534,7 +7543,7 @@ def main():
             with tab_cols[i]:
                 is_selected = opt == section
                 if st.button(
-                    opt,
+                    _section_display_name(opt),
                     key=f"section_tab_{i}_{opt.replace(' ', '_')}",
                     type="primary" if is_selected else "secondary",
                     use_container_width=True,
