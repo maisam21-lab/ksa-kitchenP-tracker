@@ -1212,20 +1212,30 @@ def remove_allowed_user(identifier: str) -> bool:
 
 
 def _allowlist_ids_from_secrets() -> set[str]:
-    """IDs (emails/names) from ALLOWLIST_IDS (secrets/env + built-in), lowercased."""
+    """IDs (emails/names) allowed to enter the app, lowercased.
+
+    Includes:
+    - ALLOWLIST_IDS (secrets/env + built-in)
+    - All MARKET_VIEW_* IDs so market-scoped users can sign in without duplicating entries.
+    """
     try:
         raw = st.secrets.get("ALLOWLIST_IDS") or os.environ.get("ALLOWLIST_IDS", "")
     except Exception:
         raw = os.environ.get("ALLOWLIST_IDS", "")
     ids: set[str] = set()
-    for part in str(raw).split(","):
+    for part in re.split(r"[,\n;\s]+", str(raw or "").strip()):
         s = part.strip()
         if s:
             ids.add(s.lower())
-    for part in str(ALLOWLIST_IDS or "").split(","):
+    for part in re.split(r"[,\n;\s]+", str(ALLOWLIST_IDS or "").strip()):
         s = part.strip()
         if s:
             ids.add(s.lower())
+    for market in ("ksa", "uae", "kuwait", "bahrain"):
+        try:
+            ids.update(_market_view_ids_from_secrets(market))
+        except Exception:
+            pass
     return ids
 
 
