@@ -2578,11 +2578,12 @@ def _market_view_ids_from_secrets(market: str) -> set[str]:
 
 
 def _market_scope_for_user(current_user: str | None, user_role: str | None) -> str | None:
-    """Return user market scope: 'Saudi Arabia' / 'UAE' / 'Kuwait' / 'Bahrain', else None (=all countries)."""
+    """Return user market scope: 'Saudi Arabia' / 'UAE' / 'Kuwait' / 'Bahrain', else None (=all countries).
+
+    Market list membership takes precedence over RBAC role so users mapped to a market
+    are consistently scoped even if they also have elevated role labels.
+    """
     if _is_developer():
-        return None
-    r = (user_role or "").strip().lower()
-    if r in ("super_user", "manager_viewer"):
         return None
     u = (current_user or "").strip().lower()
     if not u:
