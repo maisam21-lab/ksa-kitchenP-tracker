@@ -2611,6 +2611,24 @@ def _market_matches_for_user(current_user: str | None) -> list[str]:
     return out
 
 
+def _market_membership_debug(current_user: str | None) -> list[tuple[str, bool, int]]:
+    """Return per-market debug tuples: (label, matches_user, configured_ids_count)."""
+    u = (current_user or "").strip().lower()
+    local = u.split("@", 1)[0] if "@" in u else u
+    checks = (
+        ("Saudi Arabia", _market_view_ids_from_secrets("ksa")),
+        ("UAE", _market_view_ids_from_secrets("uae")),
+        ("Kuwait", _market_view_ids_from_secrets("kuwait")),
+        ("Bahrain", _market_view_ids_from_secrets("bahrain")),
+    )
+    out: list[tuple[str, bool, int]] = []
+    for label, ids in checks:
+        expanded = _email_set_with_local_parts(ids)
+        matched = bool(expanded and u and (u in expanded or local in expanded))
+        out.append((label, matched, len(ids)))
+    return out
+
+
 def _bahrain_preview_ids_from_secrets() -> set[str]:
     """Emails allowed for Kitchen Master regional previews (Kuwait, UAE, Bahrain). Merges all PREVIEW_* secrets + built-in tuple."""
     out: set[str] = set()
@@ -7446,6 +7464,10 @@ def main():
             _seen_email = (current_user or "").strip()
             if _seen_email:
                 st.caption(f"Signed-in email detected: `{_seen_email}`")
+            _dbg = _market_membership_debug(current_user)
+            if _dbg:
+                _parts = [f"{label}: match={'yes' if matched else 'no'}, ids={count}" for (label, matched, count) in _dbg]
+                st.caption("Market debug: " + " | ".join(_parts))
             st.stop()
         if len(_market_matches) > 1:
             st.error("Access restricted. Your account is assigned to multiple market lists.")
