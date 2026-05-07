@@ -7443,6 +7443,9 @@ def main():
                 "Please ask the admin to add your email to exactly one MARKET_VIEW list "
                 "(KSA, UAE, Kuwait, or Bahrain)."
             )
+            _seen_email = (current_user or "").strip()
+            if _seen_email:
+                st.caption(f"Signed-in email detected: `{_seen_email}`")
             st.stop()
         if len(_market_matches) > 1:
             st.error("Access restricted. Your account is assigned to multiple market lists.")
@@ -7450,6 +7453,7 @@ def main():
                 "Please ask the admin to keep your email in only one MARKET_VIEW list "
                 "to enforce a distinct market scope."
             )
+            st.caption(f"Detected markets: `{', '.join(_market_matches)}`")
             st.stop()
     _market_scope = _market_scope_for_user(current_user, user_role)
     # Product shape: section navigation by role (Admin tab removed).
