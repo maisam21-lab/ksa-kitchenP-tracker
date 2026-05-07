@@ -7464,12 +7464,12 @@ def main():
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
     _is_market_admin = _is_developer() or user_role in ("super_user", "manager_viewer")
+    _market_matches = _market_matches_for_user(current_user)
     if _allowlist_enabled() and not _is_market_admin:
-        _market_matches = _market_matches_for_user(current_user)
         if not _market_matches:
             st.error("Access restricted. Your account is approved, but no market access is configured.")
             st.caption(
-                "Please ask the admin to add your email to exactly one MARKET_VIEW list "
+                "Please ask the admin to add your email to at least one MARKET_VIEW list "
                 "(KSA, UAE, Kuwait, or Bahrain)."
             )
             _seen_email = (current_user or "").strip()
@@ -7480,22 +7480,17 @@ def main():
                 _parts = [f"{label}: match={'yes' if matched else 'no'}, ids={count}" for (label, matched, count) in _dbg]
                 st.caption("Market debug: " + " | ".join(_parts))
             st.stop()
-        if len(_market_matches) > 1:
-            st.error("Access restricted. Your account is assigned to multiple market lists.")
-            st.caption(
-                "Please ask the admin to keep your email in only one MARKET_VIEW list "
-                "to enforce a distinct market scope."
-            )
-            st.caption(f"Detected markets: `{', '.join(_market_matches)}`")
-            st.stop()
     _market_scope = _market_scope_for_user(current_user, user_role)
+    _scoped_markets = [m for m in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain") if m in set(_market_matches)]
     def _section_display_name(opt: str) -> str:
         if (
             opt == SECTION_KSA
             and not _is_market_admin
-            and _market_scope in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain")
+            and _scoped_markets
         ):
-            return "KSA" if _market_scope == "Saudi Arabia" else _market_scope
+            if len(_scoped_markets) == 1:
+                return "KSA" if _scoped_markets[0] == "Saudi Arabia" else _scoped_markets[0]
+            return "Markets"
         return opt
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
@@ -7554,15 +7549,31 @@ def main():
     # Master Kitchens: prefer persisted Superset store; else legacy Kitchens/generic_tab
     if section == SECTION_KSA:
         st.session_state.pop("preview_kitchen_region", None)
-        if _market_scope in ("Kuwait", "UAE", "Bahrain"):
-            st.caption(f"Market-scoped view: **{_market_scope}**")
-            _render_preview_regional_kitchen_master(
-                _market_scope, can_export=can_export, is_developer=is_developer
+        if not _is_market_admin and _scoped_markets:
+            if len(_scoped_markets) == 1:
+                _single = _scoped_markets[0]
+                if _single in ("Kuwait", "UAE", "Bahrain"):
+                    st.caption(f"Market-scoped view: **{_single}**")
+                    _render_preview_regional_kitchen_master(
+                        _single, can_export=can_export, is_developer=is_developer
+                    )
+                    return
+                st.caption("Market-scoped view: **Saudi Arabia (KSA)**")
+                _render_kitchen_master_ksa_main(can_export=can_export, is_developer=is_developer)
+                return
+            _market_pick = st.selectbox(
+                "Market view",
+                options=_scoped_markets,
+                key="market_scoped_kitchen_picker",
+                format_func=lambda x: "Saudi Arabia (KSA)" if x == "Saudi Arabia" else x,
             )
-            return
-        if _market_scope == "Saudi Arabia":
-            st.caption("Market-scoped view: **Saudi Arabia (KSA)**")
-            _render_kitchen_master_ksa_main(can_export=can_export, is_developer=is_developer)
+            st.caption(f"Market-scoped view: **{'Saudi Arabia (KSA)' if _market_pick == 'Saudi Arabia' else _market_pick}**")
+            if _market_pick == "Saudi Arabia":
+                _render_kitchen_master_ksa_main(can_export=can_export, is_developer=is_developer)
+            else:
+                _render_preview_regional_kitchen_master(
+                    _market_pick, can_export=can_export, is_developer=is_developer
+                )
             return
         # PREVIEW_ONLY_IDS / super_user / manager_viewer: KSA master + optional Kuwait / UAE / Bahrain workbooks.
         if _user_sees_dashboard_all_countries(current_user, user_role):
@@ -7683,10 +7694,10 @@ def main():
                 return _country_label(inferred)
             return "Saudi Arabia"
 
-        if _market_scope in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain"):
+        if _scoped_markets:
             rows_kitchens = [
                 r for r in (rows_kitchens or [])
-                if _dashboard_row_country(r) == _market_scope
+                if _dashboard_row_country(r) in set(_scoped_markets)
             ]
 
         def _facility_select_options(sel_country: str, rows_subset: list) -> list[str]:
@@ -7734,8 +7745,8 @@ def main():
         )
         _regional_preview_dash = _user_sees_dashboard_all_countries(current_user, user_role)
         _core_countries = list(DASHBOARD_COUNTRY_FILTER_CORE)
-        if _market_scope in ("Saudi Arabia", "UAE", "Kuwait", "Bahrain"):
-            _core_countries = [_market_scope]
+        if _scoped_markets:
+            _core_countries = list(_scoped_markets)
             _extras = []
         elif not _regional_preview_dash:
             _core_countries = [c for c in _core_countries if c == "Saudi Arabia"]
