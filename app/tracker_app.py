@@ -2591,6 +2591,26 @@ def _market_scope_for_user(current_user: str | None, user_role: str | None) -> s
     return None
 
 
+def _market_matches_for_user(current_user: str | None) -> list[str]:
+    """Return all market labels matched by current_user using MARKET_VIEW_* lists."""
+    u = (current_user or "").strip().lower()
+    if not u:
+        return []
+    local = u.split("@", 1)[0] if "@" in u else u
+    checks = (
+        ("Saudi Arabia", _market_view_ids_from_secrets("ksa")),
+        ("UAE", _market_view_ids_from_secrets("uae")),
+        ("Kuwait", _market_view_ids_from_secrets("kuwait")),
+        ("Bahrain", _market_view_ids_from_secrets("bahrain")),
+    )
+    out: list[str] = []
+    for label, ids in checks:
+        expanded = _email_set_with_local_parts(ids)
+        if expanded and (u in expanded or local in expanded):
+            out.append(label)
+    return out
+
+
 def _bahrain_preview_ids_from_secrets() -> set[str]:
     """Emails allowed for Kitchen Master regional previews (Kuwait, UAE, Bahrain). Merges all PREVIEW_* secrets + built-in tuple."""
     out: set[str] = set()
@@ -7414,6 +7434,23 @@ def main():
     st.session_state["user_role"] = user_role
     can_export = _can_user_export(current_user)
     st.session_state["can_export"] = can_export
+    _is_market_admin = _is_developer() or user_role in ("super_user", "manager_viewer")
+    if _allowlist_enabled() and not _is_market_admin:
+        _market_matches = _market_matches_for_user(current_user)
+        if not _market_matches:
+            st.error("Access restricted. Your account is approved, but no market access is configured.")
+            st.caption(
+                "Please ask the admin to add your email to exactly one MARKET_VIEW list "
+                "(KSA, UAE, Kuwait, or Bahrain)."
+            )
+            st.stop()
+        if len(_market_matches) > 1:
+            st.error("Access restricted. Your account is assigned to multiple market lists.")
+            st.caption(
+                "Please ask the admin to keep your email in only one MARKET_VIEW list "
+                "to enforce a distinct market scope."
+            )
+            st.stop()
     _market_scope = _market_scope_for_user(current_user, user_role)
     # Product shape: section navigation by role (Admin tab removed).
     # PREVIEW_ONLY_IDS / regional preview secrets: same users who see KW/UAE/BH in Kitchen Master get Dashboard (all countries UX).
