@@ -1684,6 +1684,42 @@ def _use_compact_tables() -> bool:
     return False
 
 
+def _facility_pill_picker(labels: list, *, key: str, label: str = "Facility") -> str:
+    """Tab-like horizontal picker that mounts only one item's content at a time.
+
+    Uses st.segmented_control when available (looks like tabs natively, Streamlit >=1.39);
+    falls back to st.radio(horizontal=True) on older Streamlit. Importantly this returns
+    the chosen label instead of rendering all options' contents in parallel like st.tabs,
+    so mobile Safari does not OOM-crash when many facilities are selected.
+    """
+    labels = [str(l) for l in (labels or [])]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    _seg = getattr(st, "segmented_control", None)
+    if callable(_seg):
+        try:
+            picked = _seg(
+                label,
+                options=labels,
+                default=labels[0],
+                key=key,
+                label_visibility="collapsed",
+            )
+            return picked if picked in labels else labels[0]
+        except Exception:
+            pass
+    picked = st.radio(
+        label,
+        options=labels,
+        horizontal=True,
+        key=key,
+        label_visibility="collapsed",
+    )
+    return picked if picked in labels else labels[0]
+
+
 def _table_height_px(default: int = 700) -> int:
     """Adaptive table height; supports expanded table view on mobile."""
     return default
@@ -4390,54 +4426,28 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                 hide_account_country=True,
             )
         else:
-            # st.tabs renders ALL tab contents simultaneously (just CSS-hides the inactive
-            # ones), so each selected facility loads its own AgGrid. Mobile Safari crashes
-            # and reloads the tab once memory exceeds its per-page budget (~30+ AgGrids).
-            # Above the threshold, switch to a single dropdown so only one facility is
-            # mounted at a time. Threshold is tighter on mobile.
-            _many_threshold = 3 if _mobile_mode_enabled() else 10
-            if len(_labels_to_use) > _many_threshold:
-                st.caption(
-                    f"**{len(_labels_to_use)} facilities selected** — too many to show as tabs without risking a mobile crash. "
-                    f"Pick one below to view; deselect facilities above to see fewer at once."
-                )
-                _picked = st.selectbox(
-                    "Facility to view",
-                    options=_labels_to_use,
-                    key="master_other_overflow_picker",
-                )
-                _tab_id = source_ids.get(_picked, _picked)
-                _rows = _list_generic_tab_cached(_tab_id, source="gsheet")
-                _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
-                _rows = _filter_junk_kitchen_records(_rows)
-                _slug = re.sub(r"\W+", "_", str(_picked).strip().lower()) or "tab"
-                _render_generic_tab(
-                    _tab_id,
-                    key_suffix=f"master_other_overflow_{_slug}",
-                    is_developer=is_developer,
-                    source="gsheet",
-                    allow_download=can_export,
-                    hide_account_country=True,
-                    rows_override=_rows,
-                )
-            else:
-                _facility_tabs = st.tabs([str(label) for label in _labels_to_use])
-                for _tab, _label in zip(_facility_tabs, _labels_to_use):
-                    with _tab:
-                        _tab_id = source_ids.get(_label, _label)
-                        _rows = _list_generic_tab_cached(_tab_id, source="gsheet")
-                        _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
-                        _rows = _filter_junk_kitchen_records(_rows)
-                        _slug = re.sub(r"\W+", "_", str(_label).strip().lower()) or "tab"
-                        _render_generic_tab(
-                            _tab_id,
-                            key_suffix=f"master_other_{_slug}",
-                            is_developer=is_developer,
-                            source="gsheet",
-                            allow_download=can_export,
-                            hide_account_country=True,
-                            rows_override=_rows,
-                        )
+            # Master-detail: tab-like picker at top, single content pane below. Only one
+            # facility's AgGrid is mounted at a time, regardless of how many are selected,
+            # so mobile Safari can't OOM-crash. _facility_pill_picker uses st.segmented_control
+            # when available (looks like tabs) and falls back to st.radio(horizontal=True).
+            _picked = _facility_pill_picker(
+                _labels_to_use,
+                key="master_other_facility_picker",
+            )
+            _tab_id = source_ids.get(_picked, _picked)
+            _rows = _list_generic_tab_cached(_tab_id, source="gsheet")
+            _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
+            _rows = _filter_junk_kitchen_records(_rows)
+            _slug = re.sub(r"\W+", "_", str(_picked).strip().lower()) or "tab"
+            _render_generic_tab(
+                _tab_id,
+                key_suffix=f"master_other_{_slug}",
+                is_developer=is_developer,
+                source="gsheet",
+                allow_download=can_export,
+                hide_account_country=True,
+                rows_override=_rows,
+            )
     if not rows and not is_other_sheet and chosen_label:
         st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
     elif not is_other_sheet and source_id:
@@ -4621,53 +4631,26 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
             regional_display=region if region in ("Kuwait", "UAE") else None,
         )
         return
-    # Mobile/many-facility safety: see KSA branch above. Tabs render all contents at once,
-    # so above the threshold switch to a single dropdown to keep memory in check.
-    _many_threshold = 3 if _mobile_mode_enabled() else 10
-    if len(_labels_to_use) > _many_threshold:
-        st.caption(
-            f"**{len(_labels_to_use)} facilities selected** — too many to show as tabs without risking a mobile crash. "
-            f"Pick one below to view; deselect facilities above to see fewer at once."
-        )
-        _picked = st.selectbox(
-            "Facility to view",
-            options=_labels_to_use,
-            key=f"regional_overflow_picker_{gsource}",
-        )
-        _tab_id = source_ids.get(_picked, _picked)
-        _rows = _list_generic_tab_cached(_tab_id, source=gsource)
-        _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
-        _slug = re.sub(r"\W+", "_", str(_picked).strip().lower()) or "tab"
-        _render_generic_tab(
-            _tab_id,
-            key_suffix=f"preview_{gsource}_overflow_{_slug}",
-            is_developer=is_developer,
-            source=gsource,
-            allow_download=can_export,
-            hide_account_country=True,
-            rows_override=_rows,
-            drop_facility_name_column=(region == "Kuwait"),
-            regional_display=region if region in ("Kuwait", "UAE") else None,
-        )
-        return
-    _facility_tabs = st.tabs([str(label) for label in _labels_to_use])
-    for _tab, _label in zip(_facility_tabs, _labels_to_use):
-        with _tab:
-            _tab_id = source_ids.get(_label, _label)
-            _rows = _list_generic_tab_cached(_tab_id, source=gsource)
-            _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
-            _slug = re.sub(r"\W+", "_", str(_label).strip().lower()) or "tab"
-            _render_generic_tab(
-                _tab_id,
-                key_suffix=f"preview_{gsource}_{_slug}",
-                is_developer=is_developer,
-                source=gsource,
-                allow_download=can_export,
-                hide_account_country=True,
-                rows_override=_rows,
-                drop_facility_name_column=(region == "Kuwait"),
-                regional_display=region if region in ("Kuwait", "UAE") else None,
-            )
+    # Master-detail: same pattern as KSA. Pill-style picker, one AgGrid mounted at a time.
+    _picked = _facility_pill_picker(
+        _labels_to_use,
+        key=f"regional_facility_picker_{gsource}",
+    )
+    _tab_id = source_ids.get(_picked, _picked)
+    _rows = _list_generic_tab_cached(_tab_id, source=gsource)
+    _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
+    _slug = re.sub(r"\W+", "_", str(_picked).strip().lower()) or "tab"
+    _render_generic_tab(
+        _tab_id,
+        key_suffix=f"preview_{gsource}_{_slug}",
+        is_developer=is_developer,
+        source=gsource,
+        allow_download=can_export,
+        hide_account_country=True,
+        rows_override=_rows,
+        drop_facility_name_column=(region == "Kuwait"),
+        regional_display=region if region in ("Kuwait", "UAE") else None,
+    )
 
 
 def _fetch_bq_export_sheet() -> tuple[list[dict] | None, str | None]:
