@@ -4412,8 +4412,7 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     if not chosen_labels:
         chosen_labels = [_first_tab]
     _labels_to_use = [t for t in chosen_labels if t in source_options] or [_first_tab]
-    _show_combined = len(_labels_to_use) > 1
-    if not _show_combined:
+    if len(_labels_to_use) == 1:
         _single_tab_id = source_ids.get(_labels_to_use[0], _labels_to_use[0])
         _single_rows = _list_generic_tab_cached(_single_tab_id, source=gsource)
         _single_rows = _filter_empty_records([r for r in _single_rows if isinstance(r, dict)])
@@ -4429,33 +4428,24 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
             regional_display=region if region in ("Kuwait", "UAE") else None,
         )
         return
-    combined_rows = []
-    for label in _labels_to_use:
-        tab_id = source_ids.get(label, label)
-        sheet_rows = _list_generic_tab_cached(tab_id, source=gsource)
-        for r in sheet_rows:
-            if not isinstance(r, dict):
-                continue
-            row = dict(r)
-            row["Sheet"] = label
-            combined_rows.append(row)
-    combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
-    combined_rows = _apply_kitchen_labels_to_combined_facility_rows(combined_rows)
-    if not combined_rows:
-        st.info("No rows in the selected sheets yet.")
-        return
-    st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
-    _render_generic_tab(
-        f"{region} Combined",
-        key_suffix=f"preview_{gsource}_combined",
-        is_developer=is_developer,
-        source=gsource,
-        allow_download=can_export,
-        hide_account_country=True,
-        rows_override=combined_rows,
-        drop_facility_name_column=(region == "Kuwait"),
-        regional_display=region if region in ("Kuwait", "UAE") else None,
-    )
+    _facility_tabs = st.tabs([str(label) for label in _labels_to_use])
+    for _tab, _label in zip(_facility_tabs, _labels_to_use):
+        with _tab:
+            _tab_id = source_ids.get(_label, _label)
+            _rows = _list_generic_tab_cached(_tab_id, source=gsource)
+            _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
+            _slug = re.sub(r"\W+", "_", str(_label).strip().lower()) or "tab"
+            _render_generic_tab(
+                _tab_id,
+                key_suffix=f"preview_{gsource}_{_slug}",
+                is_developer=is_developer,
+                source=gsource,
+                allow_download=can_export,
+                hide_account_country=True,
+                rows_override=_rows,
+                drop_facility_name_column=(region == "Kuwait"),
+                regional_display=region if region in ("Kuwait", "UAE") else None,
+            )
 
 
 def _fetch_bq_export_sheet() -> tuple[list[dict] | None, str | None]:
