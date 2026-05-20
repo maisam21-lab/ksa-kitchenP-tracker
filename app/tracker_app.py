@@ -6419,9 +6419,9 @@ def _render_master_table_aggrid_or_df(
         except Exception:
             go = None
             _ag_lic = None
-        # On mobile the floating toolbar and AgGrid sidebar tab overlap content and clip
-        # off the right edge of the viewport. Suppress both; keep the column header
-        # filters (floating filter row) so users can still filter their data inline.
+        # On mobile the AgGrid sidebar tab ("Columns" vertical strip on the right edge)
+        # gets clipped off-screen. Hide just the sidebar; keep the floating toolbar so
+        # the expand/fullscreen button stays accessible and column header filters work.
         _is_mobile_view = _mobile_mode_enabled()
         if go and _is_mobile_view:
             go["sideBar"] = False
@@ -6440,7 +6440,7 @@ def _render_master_table_aggrid_or_df(
                 fit_columns_on_grid_load=False,
                 height=_ag_iframe_h,
                 theme="streamlit",
-                show_toolbar=not _is_mobile_view,
+                show_toolbar=True,
                 # Quick search persists client-side and has caused blank / "No rows" grids; column filters stay on.
                 show_search=False,
                 show_download_button=False,
