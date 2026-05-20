@@ -1152,6 +1152,7 @@ def _do_sign_out() -> None:
         del st.session_state["user_display_name"]
     st.session_state["developer_unlocked"] = False
     _clear_session_params()
+    _clear_remember_me_cookie()
     try:
         qp = getattr(st, "query_params", None)
         if qp is not None:
@@ -1161,60 +1162,135 @@ def _do_sign_out() -> None:
     _rerun()
 
 
-def _render_session_persistence_bridge() -> None:
-    """Mirror session URL params to/from localStorage so mobile keeps users signed in.
+# Remember-me cookie (mobile-safe verified-sign-in persistence).
+#
+# Streamlit Cloud's OIDC cookie is cleared aggressively on iOS Safari (ITP) and on link
+# previewers / "Add to Home Screen" flows, so users get bounced to "Sign in with Google"
+# even though they signed in recently. To bridge that, after a successful OIDC sign-in
+# we mint a signed token containing (email, expiry) and store it in an HTTP cookie via
+# extra-streamlit-components.CookieManager. On subsequent loads, if the cookie verifies
+# and the email is still on the allowlist, we treat the user as verified without the
+# OIDC round-trip. Cookie is cleared on explicit Sign out. If REMEMBER_ME_SECRET is not
+# configured the feature stays dormant and the app falls back to current behavior.
+_REMEMBER_ME_COOKIE = "ktracker_rm"
+_REMEMBER_ME_TOKEN_VERSION = "v1"
+_REMEMBER_ME_TTL_DAYS = 30
 
-    Mobile browsers (Safari/Chrome on iOS/Android) strip URL query params on common flows:
-    opening from Slack/WhatsApp link previewers, pull-to-refresh, "Add to Home Screen"
-    shortcuts, and WebSocket reconnects after the tab backgrounds. The URL-only persistence
-    in _persist_session_to_params then silently fails and users get kicked to sign-in.
 
-    This bridge runs a tiny JS snippet that (1) copies any session params from the URL
-    into localStorage on every load, and (2) when the URL is missing them but a non-expired
-    copy exists in localStorage, redirects the parent page so Streamlit reads them on the
-    next render. A "?so=1" sign-out marker clears the stored copy.
-    """
-    _u, _e, _r, _so = _TRACKER_PARAM_USER, _TRACKER_PARAM_EXPIRY, _TRACKER_PARAM_REMEMBER, _TRACKER_PARAM_SIGNED_OUT
-    _js = (
-        "<script>\n"
-        "(function(){\n"
-        "  try{\n"
-        "    var top = window.top || window.parent || window;\n"
-        "    if(!top || !top.location) return;\n"
-        "    var url = new URL(top.location.href);\n"
-        "    var qp = url.searchParams;\n"
-        f"    var KU='kt_{_u}', KE='kt_{_e}', KR='kt_{_r}';\n"
-        f"    var u=qp.get('{_u}'), e=qp.get('{_e}'), r=qp.get('{_r}'), so=qp.get('{_so}');\n"
-        "    if(so && (so==='1'||so==='true'||so==='yes')){\n"
-        "      try{localStorage.removeItem(KU);localStorage.removeItem(KE);}catch(_){}\n"
-        "      return;\n"
-        "    }\n"
-        "    var ls;\n"
-        "    try{ls = window.localStorage;}catch(_){ls = null;}\n"
-        "    if(!ls) return;\n"
-        "    if(u) ls.setItem(KU, u);\n"
-        "    if(e) ls.setItem(KE, e);\n"
-        "    if(r) ls.setItem(KR, r);\n"
-        "    if(!u){\n"
-        "      var lsU = ls.getItem(KU), lsE = ls.getItem(KE), lsR = ls.getItem(KR);\n"
-        "      var nowSec = Math.floor(Date.now()/1000);\n"
-        "      var expSec = lsE ? parseInt(lsE, 10) : 0;\n"
-        "      if(lsU && expSec && nowSec < expSec){\n"
-        f"        qp.set('{_u}', lsU);\n"
-        f"        qp.set('{_e}', String(expSec));\n"
-        f"        if(lsR) qp.set('{_r}', lsR);\n"
-        "        url.search = qp.toString();\n"
-        "        top.location.replace(url.toString());\n"
-        "      }\n"
-        "    }\n"
-        "  }catch(err){}\n"
-        "})();\n"
-        "</script>"
-    )
+def _get_remember_me_secret() -> str:
+    """HMAC signing key for remember-me tokens; from secrets or env."""
     try:
-        st_components.html(_js, height=0, width=0)
+        v = (getattr(st, "secrets", None) or {}).get("REMEMBER_ME_SECRET") or ""
+    except Exception:
+        v = ""
+    if not v:
+        v = os.environ.get("REMEMBER_ME_SECRET", "") or ""
+    return str(v).strip()
+
+
+def _mint_remember_me_token(email: str, expiry_ts: int) -> str:
+    """Return base64url(payload).hex(hmac) where payload = 'v1|email|expiry'."""
+    import hmac, hashlib
+    secret = _get_remember_me_secret()
+    if not secret:
+        return ""
+    payload = f"{_REMEMBER_ME_TOKEN_VERSION}|{(email or '').strip()}|{int(expiry_ts)}"
+    sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    body = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    return f"{body}.{sig}"
+
+
+def _verify_remember_me_token(token: str) -> str | None:
+    """Return verified email if token is well-formed, signature is valid, and expiry is in the future."""
+    if not token or "." not in token:
+        return None
+    secret = _get_remember_me_secret()
+    if not secret:
+        return None
+    import hmac, hashlib
+    try:
+        body_b64, sig = token.split(".", 1)
+        pad = "=" * (-len(body_b64) % 4)
+        payload = base64.urlsafe_b64decode((body_b64 + pad).encode()).decode()
+        expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        parts = payload.split("|")
+        if len(parts) != 3 or parts[0] != _REMEMBER_ME_TOKEN_VERSION:
+            return None
+        email, expiry_str = parts[1], parts[2]
+        if int(expiry_str) < int(time.time()):
+            return None
+        if not email or "@" not in email:
+            return None
+        return email
+    except Exception:
+        return None
+
+
+def _get_cookie_manager():
+    """Lazily import + cache an extra-streamlit-components CookieManager.
+    Returns None if the package is not installed (feature stays dormant)."""
+    if "_cookie_manager" in st.session_state:
+        return st.session_state["_cookie_manager"]
+    try:
+        import extra_streamlit_components as stx
+    except Exception:
+        st.session_state["_cookie_manager"] = None
+        return None
+    try:
+        cm = stx.CookieManager(key="ktracker_cookies")
+    except Exception:
+        cm = None
+    st.session_state["_cookie_manager"] = cm
+    return cm
+
+
+def _set_remember_me_cookie(email: str) -> None:
+    """Issue a fresh signed cookie for this email (30-day TTL)."""
+    if not email or not _get_remember_me_secret():
+        return
+    cm = _get_cookie_manager()
+    if cm is None:
+        return
+    expiry_ts = int(time.time()) + (_REMEMBER_ME_TTL_DAYS * 24 * 3600)
+    token = _mint_remember_me_token(email, expiry_ts)
+    if not token:
+        return
+    try:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=_REMEMBER_ME_TTL_DAYS)
+        cm.set(_REMEMBER_ME_COOKIE, token, expires_at=expires_at, key=f"set_rm_{int(time.time())}")
     except Exception:
         pass
+
+
+def _clear_remember_me_cookie() -> None:
+    cm = st.session_state.get("_cookie_manager")
+    if cm is None:
+        return
+    try:
+        cm.delete(_REMEMBER_ME_COOKIE, key=f"del_rm_{int(time.time())}")
+    except Exception:
+        pass
+
+
+def _try_restore_from_remember_me_cookie() -> str | None:
+    """Return verified email if a valid remember-me cookie is present, else None.
+    Allowlist re-check is the caller's job."""
+    if st.session_state.get("_force_signed_out"):
+        return None
+    if not _get_remember_me_secret():
+        return None
+    cm = _get_cookie_manager()
+    if cm is None:
+        return None
+    try:
+        token = cm.get(cookie=_REMEMBER_ME_COOKIE)
+    except Exception:
+        token = None
+    if not token:
+        return None
+    return _verify_remember_me_token(str(token))
 
 
 def list_allowed_users():
@@ -6576,13 +6652,13 @@ def _render_generic_tab(
 
 def main():
     st.set_page_config(page_title=APP_DISPLAY_TITLE, layout="wide", initial_sidebar_state="collapsed")
-    # Mobile-safe session persistence (mirrors session params to localStorage so phones
-    # that strip URL query strings on link-open / pull-to-refresh keep the user signed in).
-    _render_session_persistence_bridge()
     # Session-level guardrail marker for any future feature toggles.
     st.session_state["_production_safe_mode"] = _production_safe_mode_enabled()
     init_db()
     _backfill_gsheet_family_refresh_metadata()
+    # Initialize the cookie manager early so its component iframe renders before any
+    # cookie read happens below; subsequent reads will return cached values.
+    _get_cookie_manager()
 
     if _signed_out_gate_active():
         _render_signed_out_gate()
@@ -6590,14 +6666,30 @@ def main():
     # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
     _streamlit_user = getattr(st, "user", None)
     _verified_email = None
+    _oidc_verified = False
     if _streamlit_user and getattr(_streamlit_user, "is_logged_in", False) and getattr(_streamlit_user, "email", None):
         _verified_email = (_streamlit_user.email or "").strip()
+        _oidc_verified = bool(_verified_email)
         if _verified_email and not st.session_state.get("_force_signed_out"):
             st.session_state["user_display_name"] = _verified_email
     # After clicking Sign out, ignore st.user until user explicitly identifies again.
     if st.session_state.get("_force_signed_out"):
         _verified_email = None
+        _oidc_verified = False
         st.session_state.pop("user_display_name", None)
+    # Remember-me cookie fallback: when Streamlit's OIDC cookie has been cleared by the
+    # mobile browser (iOS Safari ITP, link previewers, "Add to Home Screen" reopen), but
+    # a valid signed remember-me cookie exists, treat the user as verified. Allowlist is
+    # re-checked below, so a user removed from the allowlist still loses access on next load.
+    if not _verified_email and not st.session_state.get("_force_signed_out"):
+        _cookie_email = _try_restore_from_remember_me_cookie()
+        if _cookie_email:
+            _verified_email = _cookie_email
+            st.session_state["user_display_name"] = _cookie_email
+    # Refresh the remember-me cookie whenever we have a fresh OIDC verification, so each
+    # successful sign-in extends the 30-day window. (No-op when the secret is unset.)
+    if _oidc_verified and _verified_email:
+        _set_remember_me_cookie(_verified_email)
     # Do NOT pre-fill from URL (?email= etc.) — that would allow anyone to impersonate by link
 
     # One-time fetch from Salesforce (direct report IDs) when Superset store is empty, so data is available without manual refresh.
