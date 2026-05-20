@@ -6436,6 +6436,14 @@ def _render_master_table_aggrid_or_df(
         except Exception:
             go = None
             _ag_lic = None
+        # On mobile the floating toolbar and AgGrid sidebar tab overlap content and clip
+        # off the right edge of the viewport. Suppress both; keep the column header
+        # filters (floating filter row) so users can still filter their data inline.
+        _is_mobile_view = _mobile_mode_enabled()
+        if go and _is_mobile_view:
+            go["sideBar"] = False
+            _dcd = go.setdefault("defaultColDef", {})
+            _dcd["suppressHeaderMenuButton"] = True
         if go:
             if not _aggrid_use_enterprise_modules():
                 st.caption(
@@ -6449,7 +6457,7 @@ def _render_master_table_aggrid_or_df(
                 fit_columns_on_grid_load=False,
                 height=_ag_iframe_h,
                 theme="streamlit",
-                show_toolbar=True,
+                show_toolbar=not _is_mobile_view,
                 # Quick search persists client-side and has caused blank / "No rows" grids; column filters stay on.
                 show_search=False,
                 show_download_button=False,
