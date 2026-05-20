@@ -1161,6 +1161,62 @@ def _do_sign_out() -> None:
     _rerun()
 
 
+def _render_session_persistence_bridge() -> None:
+    """Mirror session URL params to/from localStorage so mobile keeps users signed in.
+
+    Mobile browsers (Safari/Chrome on iOS/Android) strip URL query params on common flows:
+    opening from Slack/WhatsApp link previewers, pull-to-refresh, "Add to Home Screen"
+    shortcuts, and WebSocket reconnects after the tab backgrounds. The URL-only persistence
+    in _persist_session_to_params then silently fails and users get kicked to sign-in.
+
+    This bridge runs a tiny JS snippet that (1) copies any session params from the URL
+    into localStorage on every load, and (2) when the URL is missing them but a non-expired
+    copy exists in localStorage, redirects the parent page so Streamlit reads them on the
+    next render. A "?so=1" sign-out marker clears the stored copy.
+    """
+    _u, _e, _r, _so = _TRACKER_PARAM_USER, _TRACKER_PARAM_EXPIRY, _TRACKER_PARAM_REMEMBER, _TRACKER_PARAM_SIGNED_OUT
+    _js = (
+        "<script>\n"
+        "(function(){\n"
+        "  try{\n"
+        "    var top = window.top || window.parent || window;\n"
+        "    if(!top || !top.location) return;\n"
+        "    var url = new URL(top.location.href);\n"
+        "    var qp = url.searchParams;\n"
+        f"    var KU='kt_{_u}', KE='kt_{_e}', KR='kt_{_r}';\n"
+        f"    var u=qp.get('{_u}'), e=qp.get('{_e}'), r=qp.get('{_r}'), so=qp.get('{_so}');\n"
+        "    if(so && (so==='1'||so==='true'||so==='yes')){\n"
+        "      try{localStorage.removeItem(KU);localStorage.removeItem(KE);}catch(_){}\n"
+        "      return;\n"
+        "    }\n"
+        "    var ls;\n"
+        "    try{ls = window.localStorage;}catch(_){ls = null;}\n"
+        "    if(!ls) return;\n"
+        "    if(u) ls.setItem(KU, u);\n"
+        "    if(e) ls.setItem(KE, e);\n"
+        "    if(r) ls.setItem(KR, r);\n"
+        "    if(!u){\n"
+        "      var lsU = ls.getItem(KU), lsE = ls.getItem(KE), lsR = ls.getItem(KR);\n"
+        "      var nowSec = Math.floor(Date.now()/1000);\n"
+        "      var expSec = lsE ? parseInt(lsE, 10) : 0;\n"
+        "      if(lsU && expSec && nowSec < expSec){\n"
+        f"        qp.set('{_u}', lsU);\n"
+        f"        qp.set('{_e}', String(expSec));\n"
+        f"        if(lsR) qp.set('{_r}', lsR);\n"
+        "        url.search = qp.toString();\n"
+        "        top.location.replace(url.toString());\n"
+        "      }\n"
+        "    }\n"
+        "  }catch(err){}\n"
+        "})();\n"
+        "</script>"
+    )
+    try:
+        st_components.html(_js, height=0, width=0)
+    except Exception:
+        pass
+
+
 def list_allowed_users():
     """Return list of allowed identifiers with role: [{identifier, added_at, role}, ...]."""
     with get_conn() as c:
@@ -3605,19 +3661,31 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
 
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(sheet_id)
-    out = {}
-    for ws in spreadsheet.worksheets():
-        rows = ws.get_all_values()
-        if not rows:
-            out[ws.title] = []
-            continue
-        headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
-        # Pad short rows so zip doesn't drop columns
-        data = []
-        for row in rows[1:]:
-            r = list(row) + [""] * (len(headers) - len(row))
-            data.append(dict(zip(headers, r[: len(headers)])))
-        out[ws.title] = data
+    worksheets = list(spreadsheet.worksheets())
+    # Parallelize the per-worksheet get_all_values() calls. gspread is safe for concurrent
+    # reads against distinct worksheet objects; the serial loop dominated refresh time
+    # (one HTTPS round-trip per tab) and was the main reason cold-start refreshes felt slow.
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _load(ws):
+        try:
+            return ws.title, ws.get_all_values()
+        except Exception:
+            return ws.title, []
+
+    out: dict[str, list[dict]] = {}
+    if worksheets:
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(worksheets)))) as pool:
+            for title, rows in pool.map(_load, worksheets):
+                if not rows:
+                    out[title] = []
+                    continue
+                headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
+                data = []
+                for row in rows[1:]:
+                    r = list(row) + [""] * (len(headers) - len(row))
+                    data.append(dict(zip(headers, r[: len(headers)])))
+                out[title] = data
     return out
 
 
@@ -3791,22 +3859,40 @@ def _fetch_regional_workbook_data(region: str, sheet_id: str, credentials_path: 
 
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(sheet_id)
-    out: dict[str, list[dict]] = {}
+    # Resolve gid -> worksheet up front (cheap), then fetch values in parallel — same reason
+    # as _fetch_online_sheet: the serial per-tab round-trip dominated refresh time.
+    targets: list = []
     for gid in target_gids:
-        ws = spreadsheet.get_worksheet_by_id(int(gid))
-        if ws is None:
-            continue
+        try:
+            ws = spreadsheet.get_worksheet_by_id(int(gid))
+        except Exception:
+            ws = None
+        if ws is not None:
+            targets.append((gid, ws))
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _load(item):
+        gid, ws = item
         title = str(ws.title).strip() or f"gid_{gid}"
-        rows = ws.get_all_values()
-        if not rows:
-            out[title] = []
-            continue
-        headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
-        ws_data = []
-        for row in rows[1:]:
-            r = list(row) + [""] * (len(headers) - len(row))
-            ws_data.append(dict(zip(headers, r[: len(headers)])))
-        out[title] = ws_data
+        try:
+            return title, ws.get_all_values()
+        except Exception:
+            return title, []
+
+    out: dict[str, list[dict]] = {}
+    if targets:
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(targets)))) as pool:
+            for title, rows in pool.map(_load, targets):
+                if not rows:
+                    out[title] = []
+                    continue
+                headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(rows[0])]
+                ws_data = []
+                for row in rows[1:]:
+                    r = list(row) + [""] * (len(headers) - len(row))
+                    ws_data.append(dict(zip(headers, r[: len(headers)])))
+                out[title] = ws_data
     # Stale GID lists (e.g. after workbook rebuild) yield no tabs — load every worksheet instead.
     if not out:
         return _fetch_online_sheet(sheet_id, credentials_path) or {}
@@ -6490,6 +6576,9 @@ def _render_generic_tab(
 
 def main():
     st.set_page_config(page_title=APP_DISPLAY_TITLE, layout="wide", initial_sidebar_state="collapsed")
+    # Mobile-safe session persistence (mirrors session params to localStorage so phones
+    # that strip URL query strings on link-open / pull-to-refresh keep the user signed in).
+    _render_session_persistence_bridge()
     # Session-level guardrail marker for any future feature toggles.
     st.session_state["_production_safe_mode"] = _production_safe_mode_enabled()
     init_db()
