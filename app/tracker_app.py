@@ -3854,9 +3854,11 @@ def _dashboard_kitchen_master_tab_names_for_country(
     return None
 
 
-@st.cache_data(ttl=20, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def _list_generic_tab_cached(tab_id: str, *, source: str | None = None) -> list[dict]:
-    """Small read cache to reduce rerun stalls while switching filters/facilities."""
+    """Read cache so facility switches and filter clicks don't re-query SQLite.
+    Any write/refresh path goes through save_generic_tab, which clears this cache
+    via _clear_list_generic_tab_cache — so stale reads aren't possible."""
     rows = list_generic_tab(tab_id, source=source) if source else list_generic_tab(tab_id)
     return rows or []
 
@@ -4144,28 +4146,32 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
             _has_bq_cfg = _bq_cfg and isinstance(_bq_cfg, dict) and (_bq_cfg.get("project_id") or _bq_cfg.get("query") or _bq_cfg.get("query_file"))
             # Kitchen Master Data: GSheet only, no SF. Show tabs only if GSheet has been refreshed.
             last_refresh = get_last_refresh("gsheet")
-            # Auto-refresh from Google Sheets when stale: first-ever sync runs immediately;
-            # after that use a short cooldown (90s) instead of 15 min so online data returns quickly.
+            # Performance: never block a normal rerun (e.g. switching facility) on a Google Sheets refresh.
+            # The full-workbook fetch can take minutes; on a widget change Streamlit reruns and would freeze the UI.
+            # Inline refresh only on COLD START (no data in local DB yet). Routine freshness comes from the scheduler
+            # and the explicit "Refresh from Google Sheet" button under Admin / Data Health.
             import time
             now_sec = time.time()
-            last_run = st.session_state.get("gsheet_auto_refresh_last_run") or 0
             _never_gsheet = not last_refresh
-            _cooldown = (
-                0
-                if _never_gsheet and not st.session_state.get("gsheet_initial_fetch_failed")
-                else 90
-            )
+            _has_any_gsheet_tabs = bool(list_tab_ids_for_source("gsheet"))
+            _refresh_inflight_key = "gsheet_refresh_inflight"
             _creds_ok = bool(_get_google_credentials_path())
+            _cold_start = _never_gsheet and not _has_any_gsheet_tabs
             if (
                 _creds_ok
-                and _gsheet_refresh_is_stale(15)
-                and (now_sec - last_run) >= _cooldown
+                and _cold_start
+                and not st.session_state.get(_refresh_inflight_key)
+                and not st.session_state.get("gsheet_initial_fetch_failed")
             ):
-                st.session_state["gsheet_auto_refresh_last_run"] = now_sec
-                ok, msg = _refresh_from_online_sheet()
-                if not ok and _never_gsheet:
+                st.session_state[_refresh_inflight_key] = now_sec
+                try:
+                    with st.spinner("Loading Google Sheet data for the first time…"):
+                        ok, msg = _refresh_from_online_sheet()
+                finally:
+                    st.session_state.pop(_refresh_inflight_key, None)
+                if not ok:
                     st.session_state["gsheet_initial_fetch_failed"] = True
-                if ok:
+                else:
                     st.session_state.pop("gsheet_initial_fetch_failed", None)
                     set_last_refresh("gsheet")
                     st.session_state["data_source"] = "gsheet"
@@ -4355,16 +4361,23 @@ def _render_preview_regional_kitchen_master(region: str, *, can_export: bool, is
     """Kitchen Master Data view for Kuwait/UAE/Bahrain regional workbooks (Google Sheets)."""
     sid, gid, _legacy_tab_id, gsource = _regional_kitchen_workbook_settings(region)
     st.caption(f"**{region} kitchen master**")
-    # Avoid blocking every rerun: refresh only if stale/missing, or when user explicitly clicks refresh.
+    # Performance: never block a normal rerun (e.g. switching facility) on a Google Sheets refresh.
+    # Inline refresh only on COLD START (no data in local DB yet) and only if no other rerun is mid-refresh.
+    # Routine freshness comes from the scheduler and the explicit "Refresh {region} sheet now" button below.
     _has_any_loaded_tabs = bool(list_tab_ids_for_source(gsource))
-    _needs_refresh = _source_refresh_is_stale(gsource, 15) or not _has_any_loaded_tabs
-    if _needs_refresh:
-        if region == "Kuwait":
-            _refresh_kuwait_workbook_from_sheets(silent=False)
-        elif region == "UAE":
-            _refresh_uae_workbook_from_sheets(silent=False)
-        elif region == "Bahrain":
-            _refresh_bahrain_workbook_from_sheets(silent=False)
+    _refresh_inflight_key = f"regional_refresh_inflight_{gsource}"
+    if not _has_any_loaded_tabs and not st.session_state.get(_refresh_inflight_key):
+        st.session_state[_refresh_inflight_key] = True
+        try:
+            with st.spinner(f"Loading {region} Google Sheet data for the first time…"):
+                if region == "Kuwait":
+                    _refresh_kuwait_workbook_from_sheets(silent=False)
+                elif region == "UAE":
+                    _refresh_uae_workbook_from_sheets(silent=False)
+                elif region == "Bahrain":
+                    _refresh_bahrain_workbook_from_sheets(silent=False)
+        finally:
+            st.session_state.pop(_refresh_inflight_key, None)
 
     _legacy_hidden = _regional_preview_hidden_tab_names_lower()
     source_options = [
