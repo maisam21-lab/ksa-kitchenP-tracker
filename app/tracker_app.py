@@ -4213,13 +4213,12 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                 source_id = source_ids.get(chosen_labels[0], first_tab)
                 rows = _list_generic_tab_cached(source_id, source="gsheet")
                 is_other_sheet = True
-    # Render: 1 facility = single view; 2+ = combined table (no extra View choice)
+    # Render: 1 facility = single view; 2+ = one Streamlit tab per selected facility.
     if is_other_sheet and chosen_labels:
         _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
         if not _labels_to_use:
             _labels_to_use = chosen_labels[:1]
-        _show_combined = len(_labels_to_use) > 1
-        if not _show_combined:
+        if len(_labels_to_use) == 1:
             _render_generic_tab(
                 source_ids.get(_labels_to_use[0], _labels_to_use[0]),
                 key_suffix="master_other",
@@ -4229,46 +4228,22 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                 hide_account_country=True,
             )
         else:
-            # Combined view: load every selected sheet and merge into one table
-            combined_rows = []
-            for label in _labels_to_use:
-                tab_id = source_ids.get(label, label)
-                sheet_rows = _list_generic_tab_cached(tab_id, source="gsheet")
-                for r in sheet_rows:
-                    if not isinstance(r, dict):
-                        continue
-                    row = dict(r)
-                    # Always stamp facility from current selector; don't trust incoming "Sheet" payload.
-                    row["Sheet"] = label
-                    combined_rows.append(row)
-            combined_rows = _filter_empty_records([r for r in combined_rows if isinstance(r, dict)])
-            combined_rows = _apply_kitchen_labels_to_combined_facility_rows(combined_rows)
-            combined_rows = _filter_junk_kitchen_records(combined_rows)
-            if not combined_rows:
-                st.info("No rows in the selected sheets yet. Pick sheets that have data, or check that the refresh has run.")
-            else:
-                st.caption(f"**Combined view:** {len(combined_rows):,} rows from **{len(_labels_to_use)}** sheets.")
-                cols_combined = sorted(set().union(*(r.keys() for r in combined_rows if isinstance(r, dict)))) if combined_rows else []
-                if combined_rows and isinstance(combined_rows[0], dict):
-                    _df_temp = pd.DataFrame(combined_rows)
-                    cols_combined = sorted(_df_temp.columns.tolist())
-                cols_combined = [c for c in cols_combined if not _is_account_country_column(c) and str(c).strip().lower() != "sheet"]
-                rows_shown = combined_rows
-                df_combined = pd.DataFrame(rows_shown)
-                _disp_cols = [c for c in df_combined.columns if c in cols_combined]
-                if _disp_cols:
-                    df_combined = df_combined[_disp_cols]
-                df_combined["_has_opportunity"] = [_row_has_opportunity_name(r) for r in rows_shown]
-                status_col_combined = _status_column_from_dataframe(df_combined)
-                if HAS_EXCEL and not df_combined.empty:
-                    _render_master_table_aggrid_or_df(
-                        df_combined,
-                        rows_shown,
-                        grid_key="master_kitchens_grid_combined",
-                        status_col=status_col_combined,
+            _facility_tabs = st.tabs([str(label) for label in _labels_to_use])
+            for _tab, _label in zip(_facility_tabs, _labels_to_use):
+                with _tab:
+                    _tab_id = source_ids.get(_label, _label)
+                    _rows = _list_generic_tab_cached(_tab_id, source="gsheet")
+                    _rows = _filter_empty_records([r for r in _rows if isinstance(r, dict)])
+                    _rows = _filter_junk_kitchen_records(_rows)
+                    _slug = re.sub(r"\W+", "_", str(_label).strip().lower()) or "tab"
+                    _render_generic_tab(
+                        _tab_id,
+                        key_suffix=f"master_other_{_slug}",
+                        is_developer=is_developer,
+                        source="gsheet",
                         allow_download=can_export,
-                        export_file_stem="master_kitchens_combined_filtered",
-                        export_button_key="export_master_kitchens_combined_master",
+                        hide_account_country=True,
+                        rows_override=_rows,
                     )
     if not rows and not is_other_sheet and chosen_label:
         st.info(f"No rows in **{chosen_label}** yet. Data refreshes automatically every 15 minutes — try again shortly or check the source sheet.")
