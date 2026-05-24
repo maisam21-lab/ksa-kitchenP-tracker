@@ -7433,6 +7433,15 @@ def main():
     # Persist session to URL params so refresh keeps user for SESSION_PERSISTENCE_HOURS
     if current_user:
         _persist_session_to_params(current_user)
+        # Also mint/refresh the 30-day remember-me cookie. This covers both the OIDC
+        # path (where _verified_email was set earlier) and the typed-email gate, so
+        # users who just type their email keep their session across mobile-Safari
+        # cookie clears too. Only persist when the value is an email (skips the
+        # developer-key path where current_user can be a display name). Allowlist
+        # is still rechecked on every restore, so a removed user loses access on
+        # next load even if their cookie is still valid.
+        if "@" in current_user and "." in current_user.split("@")[-1]:
+            _set_remember_me_cookie(current_user)
 
     def _developer_section_visible(user: str) -> bool:
         ids_list = _developer_ids_merged_list()
