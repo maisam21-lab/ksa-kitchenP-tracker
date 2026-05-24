@@ -4375,6 +4375,33 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                     st.session_state["data_source"] = "gsheet"
                     _rerun()
                 last_refresh = get_last_refresh("gsheet")
+            # Per-session auto-refresh: once per browser tab, if data is older than 30 min,
+            # refresh from Google Sheets so users don't end up looking at days-old data. We
+            # guard with a session_state flag so this fires AT MOST once per session — switching
+            # facilities or filtering does NOT re-trigger it (which is what was causing the
+            # 6-minute hang before). Stale check uses the last gsheet refresh timestamp from
+            # the DB, so concurrent users coordinate too: first one through pays the cost,
+            # others see the refreshed data on their next page load.
+            _session_refresh_done_key = "gsheet_session_refresh_done"
+            if (
+                _creds_ok
+                and not _cold_start
+                and not st.session_state.get(_session_refresh_done_key)
+                and not st.session_state.get(_refresh_inflight_key)
+                and _gsheet_refresh_is_stale(30)
+            ):
+                st.session_state[_refresh_inflight_key] = now_sec
+                st.session_state[_session_refresh_done_key] = True
+                try:
+                    with st.spinner("Refreshing latest data from Google Sheets… (one-time per session)"):
+                        ok, _msg = _refresh_from_online_sheet()
+                finally:
+                    st.session_state.pop(_refresh_inflight_key, None)
+                if ok:
+                    set_last_refresh("gsheet")
+                    _clear_list_generic_tab_cache()
+                    _rerun()
+                last_refresh = get_last_refresh("gsheet")
             # Refresh from Google Sheet moved to Admin / Data Health
             sources = _master_kitchens_sources()
             source_options = [s[0] for s in sources]
