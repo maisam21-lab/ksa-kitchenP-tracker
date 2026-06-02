@@ -4440,7 +4440,11 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                 is_other_sheet = True
     # Render: 1 facility = single view; 2+ = one Streamlit tab per selected facility.
     if is_other_sheet and chosen_labels:
-        _labels_to_use = [t for t in (st.session_state.get("master_sheets_selection") or chosen_labels) if t in (source_options or [])]
+        # Trust the live widget return value only — do NOT also read session_state for
+        # the same key. The two should always agree, but if they ever diverge (which can
+        # happen across deploys when an old session has a stale selection cached) we end
+        # up rendering data for facilities the user didn't pick.
+        _labels_to_use = [t for t in (chosen_labels or []) if t in (source_options or [])]
         if not _labels_to_use:
             _labels_to_use = chosen_labels[:1]
         if len(_labels_to_use) == 1:
