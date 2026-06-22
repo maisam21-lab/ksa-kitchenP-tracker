@@ -6745,11 +6745,29 @@ def main():
     if _signed_out_gate_active():
         _render_signed_out_gate()
 
-    # Identity: prefer verified (Streamlit OIDC st.user) when available; never trust URL params for access
-    _streamlit_user = getattr(st, "user", None)
+    # Identity: prefer verified email. Two platforms are supported with one code path:
+    #   1) CSS data-apps (internal Notebooks): Okta SSO at the platform level. The
+    #      streamlit_utils.auth helper is only importable inside that environment and
+    #      returns the verified Okta email. Same code on Streamlit Cloud just hits the
+    #      ImportError fallback and never touches this branch.
+    #   2) Streamlit Cloud: st.user.is_logged_in from Streamlit's own OIDC, plus the
+    #      remember-me cookie shim further down for mobile-Safari cookie clears.
+    # Never trust URL params for access in either case.
     _verified_email = None
     _oidc_verified = False
-    if _streamlit_user and getattr(_streamlit_user, "is_logged_in", False) and getattr(_streamlit_user, "email", None):
+    _streamlit_user = getattr(st, "user", None)
+    try:
+        from streamlit_utils import auth as _css_auth
+        _css_email = (_css_auth.get_user_email() or "").strip()
+        if _css_email and "@" in _css_email and not st.session_state.get("_force_signed_out"):
+            _verified_email = _css_email
+            _oidc_verified = True
+            st.session_state["user_display_name"] = _css_email
+    except Exception:
+        # streamlit_utils not installed (Streamlit Cloud) or transient failure — fall through
+        # to the Streamlit Cloud OIDC path below.
+        pass
+    if not _verified_email and _streamlit_user and getattr(_streamlit_user, "is_logged_in", False) and getattr(_streamlit_user, "email", None):
         _verified_email = (_streamlit_user.email or "").strip()
         _oidc_verified = bool(_verified_email)
         if _verified_email and not st.session_state.get("_force_signed_out"):
