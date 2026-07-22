@@ -4108,6 +4108,34 @@ def _start_background_gsheet_refresh() -> bool:
         return True
 
 
+_GSHEET_SCHEDULER_LOCK = threading.Lock()
+_GSHEET_SCHEDULER_STARTED = False
+
+
+def _gsheet_scheduler_loop(stale_minutes: int = 15, poll_seconds: int = 300) -> None:
+    while True:
+        try:
+            if _get_google_credentials_path() and _gsheet_refresh_is_stale(stale_minutes):
+                _start_background_gsheet_refresh()
+        except Exception:
+            pass
+        time.sleep(poll_seconds)
+
+
+def _ensure_gsheet_scheduler() -> None:
+    """In-process replacement for cron: the CSS/Jupyter container has no crontab,
+    so the app keeps its own data fresh. Coordination across processes/replicas
+    stays on the refresh_metadata timestamps, so an external refresh_jobs cron
+    (where one exists) and this scheduler don't fight — whoever runs first wins
+    the window. Daemon thread; dies with the process by design."""
+    global _GSHEET_SCHEDULER_STARTED
+    with _GSHEET_SCHEDULER_LOCK:
+        if _GSHEET_SCHEDULER_STARTED:
+            return
+        _GSHEET_SCHEDULER_STARTED = True
+        threading.Thread(target=_gsheet_scheduler_loop, name="gsheet-scheduler", daemon=True).start()
+
+
 def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
     """Fetch Kuwait facility sheets and persist under gsheet_kw. Returns True on success."""
     sid, _, _, gsource = _regional_kitchen_workbook_settings("Kuwait")
@@ -6773,6 +6801,7 @@ def main():
     st.session_state["_production_safe_mode"] = _production_safe_mode_enabled()
     init_db()
     _backfill_gsheet_family_refresh_metadata()
+    _ensure_gsheet_scheduler()
     # Initialize the cookie manager early so its component iframe renders before any
     # cookie read happens below; subsequent reads will return cached values.
     _get_cookie_manager()
