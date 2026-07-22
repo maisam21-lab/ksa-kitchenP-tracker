@@ -14,6 +14,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -4069,6 +4070,44 @@ def _clear_list_generic_tab_cache() -> None:
         pass
 
 
+_BG_GSHEET_REFRESH_LOCK = threading.Lock()
+_BG_GSHEET_REFRESH_THREAD: threading.Thread | None = None
+
+
+def _background_gsheet_refresh_running() -> bool:
+    t = _BG_GSHEET_REFRESH_THREAD
+    return bool(t is not None and t.is_alive())
+
+
+def _start_background_gsheet_refresh() -> bool:
+    """Refresh Google Sheets data without blocking the render path.
+
+    The worker must only touch SQLite (get_conn opens a fresh connection per
+    call) and the read cache — never st.session_state or widgets, which are
+    not thread-safe. At most one worker per process; concurrent sessions
+    coordinate through the refresh_metadata timestamps, same as the scheduler.
+    Returns True if a new refresh was started.
+    """
+    global _BG_GSHEET_REFRESH_THREAD
+    with _BG_GSHEET_REFRESH_LOCK:
+        if _background_gsheet_refresh_running():
+            return False
+
+        def _worker() -> None:
+            try:
+                ok, _msg = _refresh_from_online_sheet()
+                if ok:
+                    set_last_refresh("gsheet")
+                    _clear_list_generic_tab_cache()
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_worker, name="gsheet-bg-refresh", daemon=True)
+        _BG_GSHEET_REFRESH_THREAD = t
+        t.start()
+        return True
+
+
 def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
     """Fetch Kuwait facility sheets and persist under gsheet_kw. Returns True on success."""
     sid, _, _, gsource = _regional_kitchen_workbook_settings("Kuwait")
@@ -4390,18 +4429,14 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                 and not st.session_state.get(_refresh_inflight_key)
                 and _gsheet_refresh_is_stale(30)
             ):
-                st.session_state[_refresh_inflight_key] = now_sec
+                # Never block first paint on the workbook fetch (it can take minutes and
+                # was the "app is slow to open" complaint): render the latest saved data
+                # immediately and refresh in a background thread. Fresh rows show up on
+                # the next rerun; the status pill reflects staleness meanwhile.
                 st.session_state[_session_refresh_done_key] = True
-                try:
-                    with st.spinner("Refreshing latest data from Google Sheets… (one-time per session)"):
-                        ok, _msg = _refresh_from_online_sheet()
-                finally:
-                    st.session_state.pop(_refresh_inflight_key, None)
-                if ok:
-                    set_last_refresh("gsheet")
-                    _clear_list_generic_tab_cache()
-                    _rerun()
-                last_refresh = get_last_refresh("gsheet")
+                _start_background_gsheet_refresh()
+            if _background_gsheet_refresh_running():
+                st.caption("🔄 Refreshing the latest data from Google Sheets in the background — showing the most recent saved data meanwhile.")
             # Refresh from Google Sheet moved to Admin / Data Health
             sources = _master_kitchens_sources()
             source_options = [s[0] for s in sources]
