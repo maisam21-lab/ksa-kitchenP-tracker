@@ -7774,6 +7774,9 @@ def main():
             st.stop()
         if not is_user_allowed(current_user):
             st.error("Access restricted. Your account is not on the authorized list.")
+            # Shown so access requests include the exact identity the login carries —
+            # allowlist matches are letter-for-letter and aliases differ from expected spellings.
+            st.caption(f"Signed-in as: `{(current_user or '').strip()}`")
             st.caption("Contact [Maysam on Slack](https://urbankitchens.slack.com/team/U0A9Q0NJ9KJ) to be added.")
             st.stop()
 
