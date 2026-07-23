@@ -195,7 +195,10 @@ PREVIEW_ONLY_IDS = (
 # - MARKET_VIEW_BAHRAIN_IDS
 # Comma/newline/semicolon-separated emails. When a user is in one of these lists,
 # Kitchen Master and Dashboard views are restricted to that market.
-MARKET_VIEW_KSA_IDS = ""
+MARKET_VIEW_KSA_IDS = (
+    "moath.alomair@cloudkitchens.com,"
+    "moath.alomair@namaame.com"
+)
 MARKET_VIEW_UAE_IDS = ""
 MARKET_VIEW_KUWAIT_IDS = ""
 MARKET_VIEW_BAHRAIN_IDS = ""
@@ -209,6 +212,8 @@ EXPORT_ALLOWED_IDS = (
 )
 # Sign-in allowlist (merged with ALLOWLIST_IDS in secrets/env). Deduplicated emails; order not significant.
 ALLOWLIST_IDS = (
+    "moath.alomair@cloudkitchens.com,"
+    "moath.alomair@namaame.com,"
     "masa.barhoumeh@cloudkitchens.com,"
     "yousif.almohammedali@cloudkitchens.com,"
     "osama.eliewa@cloudkitchens.com,"
