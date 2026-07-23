@@ -197,7 +197,11 @@ PREVIEW_ONLY_IDS = (
 # Kitchen Master and Dashboard views are restricted to that market.
 MARKET_VIEW_KSA_IDS = (
     "moath.alomair@cloudkitchens.com,"
-    "moath.alomair@namaame.com"
+    "moath.alomair@namaame.com,"
+    # secrets list has this one mistyped as mohammed.al-otaib@@namaame.com;
+    # without it the cloudkitchens (Okta) login is not KSA-scoped
+    "mohammed.al-otaibi@cloudkitchens.com,"
+    "mohammed.al-otaibi@namaame.com"
 )
 MARKET_VIEW_UAE_IDS = ""
 MARKET_VIEW_KUWAIT_IDS = ""
