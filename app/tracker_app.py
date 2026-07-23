@@ -201,10 +201,18 @@ MARKET_VIEW_KSA_IDS = (
     # secrets list has this one mistyped as mohammed.al-otaib@@namaame.com;
     # without it the cloudkitchens (Okta) login is not KSA-scoped
     "mohammed.al-otaibi@cloudkitchens.com,"
-    "mohammed.al-otaibi@namaame.com"
+    "mohammed.al-otaibi@namaame.com,"
+    "diala.alresheq@cloudkitchens.com,"
+    "diala.alresheq@namaame.com"
 )
-MARKET_VIEW_UAE_IDS = ""
-MARKET_VIEW_KUWAIT_IDS = ""
+MARKET_VIEW_UAE_IDS = (
+    "leen.shihabaldin@cloudkitchens.com,"
+    "leen.shihabaldin@namaame.com"
+)
+MARKET_VIEW_KUWAIT_IDS = (
+    "diala.alresheq@cloudkitchens.com,"
+    "diala.alresheq@namaame.com"
+)
 MARKET_VIEW_BAHRAIN_IDS = ""
 # CSV export allowlist (merged with EXPORT_ALLOWED_IDS in Streamlit secrets or env).
 EXPORT_ALLOWED_IDS = (
@@ -218,6 +226,10 @@ EXPORT_ALLOWED_IDS = (
 ALLOWLIST_IDS = (
     "moath.alomair@cloudkitchens.com,"
     "moath.alomair@namaame.com,"
+    "leen.shihabaldin@cloudkitchens.com,"
+    "leen.shihabaldin@namaame.com,"
+    "diala.alresheq@cloudkitchens.com,"
+    "diala.alresheq@namaame.com,"
     "masa.barhoumeh@cloudkitchens.com,"
     "yousif.almohammedali@cloudkitchens.com,"
     "osama.eliewa@cloudkitchens.com,"
