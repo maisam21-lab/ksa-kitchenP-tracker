@@ -4079,13 +4079,25 @@ def _clear_list_generic_tab_cache() -> None:
         pass
 
 
-_BG_GSHEET_REFRESH_LOCK = threading.Lock()
-_BG_GSHEET_REFRESH_THREAD: threading.Thread | None = None
+# Streamlit re-executes this script (fresh module globals) on every rerun, so
+# plain module globals cannot guard "one thread per process". Identify our
+# daemon threads by NAME across reruns, and keep the lock in st.cache_resource,
+# which is process-wide and survives reruns.
+_BG_GSHEET_REFRESH_THREAD_NAME = "gsheet-bg-refresh"
+_GSHEET_SCHEDULER_THREAD_NAME = "gsheet-scheduler"
+
+
+@st.cache_resource(show_spinner=False)
+def _bg_gsheet_refresh_lock() -> threading.Lock:
+    return threading.Lock()
+
+
+def _thread_alive(name: str) -> bool:
+    return any(t.name == name and t.is_alive() for t in threading.enumerate())
 
 
 def _background_gsheet_refresh_running() -> bool:
-    t = _BG_GSHEET_REFRESH_THREAD
-    return bool(t is not None and t.is_alive())
+    return _thread_alive(_BG_GSHEET_REFRESH_THREAD_NAME)
 
 
 def _start_background_gsheet_refresh() -> bool:
@@ -4097,8 +4109,7 @@ def _start_background_gsheet_refresh() -> bool:
     coordinate through the refresh_metadata timestamps, same as the scheduler.
     Returns True if a new refresh was started.
     """
-    global _BG_GSHEET_REFRESH_THREAD
-    with _BG_GSHEET_REFRESH_LOCK:
+    with _bg_gsheet_refresh_lock():
         if _background_gsheet_refresh_running():
             return False
 
@@ -4111,14 +4122,8 @@ def _start_background_gsheet_refresh() -> bool:
             except Exception:
                 pass
 
-        t = threading.Thread(target=_worker, name="gsheet-bg-refresh", daemon=True)
-        _BG_GSHEET_REFRESH_THREAD = t
-        t.start()
+        threading.Thread(target=_worker, name=_BG_GSHEET_REFRESH_THREAD_NAME, daemon=True).start()
         return True
-
-
-_GSHEET_SCHEDULER_LOCK = threading.Lock()
-_GSHEET_SCHEDULER_STARTED = False
 
 
 def _gsheet_scheduler_loop(stale_minutes: int = 15, poll_seconds: int = 300) -> None:
@@ -4136,13 +4141,14 @@ def _ensure_gsheet_scheduler() -> None:
     so the app keeps its own data fresh. Coordination across processes/replicas
     stays on the refresh_metadata timestamps, so an external refresh_jobs cron
     (where one exists) and this scheduler don't fight — whoever runs first wins
-    the window. Daemon thread; dies with the process by design."""
-    global _GSHEET_SCHEDULER_STARTED
-    with _GSHEET_SCHEDULER_LOCK:
-        if _GSHEET_SCHEDULER_STARTED:
-            return
-        _GSHEET_SCHEDULER_STARTED = True
-        threading.Thread(target=_gsheet_scheduler_loop, name="gsheet-scheduler", daemon=True).start()
+    the window. Daemon thread; dies with the process by design.
+
+    Must stay rerun-safe: guarded by thread name (survives Streamlit's
+    fresh-globals re-exec) under a cache_resource lock, so concurrent sessions
+    cannot double-start it."""
+    with _bg_gsheet_refresh_lock():
+        if not _thread_alive(_GSHEET_SCHEDULER_THREAD_NAME):
+            threading.Thread(target=_gsheet_scheduler_loop, name=_GSHEET_SCHEDULER_THREAD_NAME, daemon=True).start()
 
 
 def _refresh_kuwait_workbook_from_sheets(*, silent: bool = True) -> bool:
