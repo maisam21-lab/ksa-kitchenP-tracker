@@ -265,7 +265,9 @@ DEVELOPER_IDS = (
     "maysam.abukashabeh@cloudkitchens.com,"
     "jad.hajjar@cloudkitchens.com,"
     "tala.zeineddine@cloudkitchens.com,"
-    "yazan.saeed@cloudkitchens.com"
+    "yazan.saeed@cloudkitchens.com,"
+    "mohammad.khader@cloudkitchens.com,"
+    "mohammad.khader@namaame.com"
 )
 # Bahrain facilities live in the main workbook; only these worksheets (gids) load into gsheet_bh.
 # Share sheet with service account; restrict who sees regional tabs via PREVIEW_ONLY_IDS / secrets.
