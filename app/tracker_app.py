@@ -203,17 +203,26 @@ MARKET_VIEW_KSA_IDS = (
     "mohammed.al-otaibi@cloudkitchens.com,"
     "mohammed.al-otaibi@namaame.com,"
     "diala.alresheq@cloudkitchens.com,"
-    "diala.alresheq@namaame.com"
+    "diala.alresheq@namaame.com,"
+    "mohammad.khader@cloudkitchens.com,"
+    "mohammad.khader@namaame.com"
 )
 MARKET_VIEW_UAE_IDS = (
     "leen.shihabaldin@cloudkitchens.com,"
-    "leen.shihabaldin@namaame.com"
+    "leen.shihabaldin@namaame.com,"
+    "mohammad.khader@cloudkitchens.com,"
+    "mohammad.khader@namaame.com"
 )
 MARKET_VIEW_KUWAIT_IDS = (
     "diala.alresheq@cloudkitchens.com,"
-    "diala.alresheq@namaame.com"
+    "diala.alresheq@namaame.com,"
+    "mohammad.khader@cloudkitchens.com,"
+    "mohammad.khader@namaame.com"
 )
-MARKET_VIEW_BAHRAIN_IDS = ""
+MARKET_VIEW_BAHRAIN_IDS = (
+    "mohammad.khader@cloudkitchens.com,"
+    "mohammad.khader@namaame.com"
+)
 # CSV export allowlist (merged with EXPORT_ALLOWED_IDS in Streamlit secrets or env).
 EXPORT_ALLOWED_IDS = (
     "maysam.abukashabeh@cloudkitchens.com,"
@@ -230,6 +239,8 @@ ALLOWLIST_IDS = (
     "leen.shihabaldin@namaame.com,"
     "diala.alresheq@cloudkitchens.com,"
     "diala.alresheq@namaame.com,"
+    "mohammad.khader@cloudkitchens.com,"
+    "mohammad.khader@namaame.com,"
     "masa.barhoumeh@cloudkitchens.com,"
     "yousif.almohammedali@cloudkitchens.com,"
     "osama.eliewa@cloudkitchens.com,"
@@ -265,9 +276,7 @@ DEVELOPER_IDS = (
     "maysam.abukashabeh@cloudkitchens.com,"
     "jad.hajjar@cloudkitchens.com,"
     "tala.zeineddine@cloudkitchens.com,"
-    "yazan.saeed@cloudkitchens.com,"
-    "mohammad.khader@cloudkitchens.com,"
-    "mohammad.khader@namaame.com"
+    "yazan.saeed@cloudkitchens.com"
 )
 # Bahrain facilities live in the main workbook; only these worksheets (gids) load into gsheet_bh.
 # Share sheet with service account; restrict who sees regional tabs via PREVIEW_ONLY_IDS / secrets.
