@@ -4539,8 +4539,6 @@ def _render_kitchen_master_ksa_main(*, can_export: bool, is_developer: bool) -> 
                 # the next rerun; the status pill reflects staleness meanwhile.
                 st.session_state[_session_refresh_done_key] = True
                 _start_background_gsheet_refresh()
-            if _background_gsheet_refresh_running():
-                st.caption("🔄 Refreshing the latest data from Google Sheets in the background — showing the most recent saved data meanwhile.")
             # Refresh from Google Sheet moved to Admin / Data Health
             sources = _master_kitchens_sources()
             source_options = [s[0] for s in sources]
