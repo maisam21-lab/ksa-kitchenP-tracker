@@ -206,6 +206,8 @@ MARKET_VIEW_KSA_IDS = (
     "diala.alresheq@namaame.com,"
     "mohammad.khader@cloudkitchens.com,"
     "mohammad.khader@namaame.com,"
+    "alissar.alia@cloudkitchens.com,"
+    "alissar.alia@namaame.com,"
     "abdulrahman.aljirfeen@cloudkitchens.com,"
     "abdulrahman.aljirfeen@namaame.com"
 )
@@ -213,17 +215,23 @@ MARKET_VIEW_UAE_IDS = (
     "leen.shihabaldin@cloudkitchens.com,"
     "leen.shihabaldin@namaame.com,"
     "mohammad.khader@cloudkitchens.com,"
-    "mohammad.khader@namaame.com"
+    "mohammad.khader@namaame.com,"
+    "alissar.alia@cloudkitchens.com,"
+    "alissar.alia@namaame.com"
 )
 MARKET_VIEW_KUWAIT_IDS = (
     "diala.alresheq@cloudkitchens.com,"
     "diala.alresheq@namaame.com,"
     "mohammad.khader@cloudkitchens.com,"
-    "mohammad.khader@namaame.com"
+    "mohammad.khader@namaame.com,"
+    "alissar.alia@cloudkitchens.com,"
+    "alissar.alia@namaame.com"
 )
 MARKET_VIEW_BAHRAIN_IDS = (
     "mohammad.khader@cloudkitchens.com,"
     "mohammad.khader@namaame.com,"
+    "alissar.alia@cloudkitchens.com,"
+    "alissar.alia@namaame.com,"
     "abdulrahman.aljirfeen@cloudkitchens.com,"
     "abdulrahman.aljirfeen@namaame.com"
 )
@@ -245,6 +253,8 @@ ALLOWLIST_IDS = (
     "diala.alresheq@namaame.com,"
     "mohammad.khader@cloudkitchens.com,"
     "mohammad.khader@namaame.com,"
+    "alissar.alia@cloudkitchens.com,"
+    "alissar.alia@namaame.com,"
     "abdulrahman.aljirfeen@cloudkitchens.com,"
     "abdulrahman.aljirfeen@namaame.com,"
     "masa.barhoumeh@cloudkitchens.com,"
