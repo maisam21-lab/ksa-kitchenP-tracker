@@ -4145,12 +4145,17 @@ def _start_background_gsheet_refresh() -> bool:
 
         def _worker() -> None:
             try:
-                ok, _msg = _refresh_from_online_sheet()
+                ok, msg = _refresh_from_online_sheet()
                 if ok:
                     set_last_refresh("gsheet")
                     _clear_list_generic_tab_cache()
+                    print("[GSHEET-REFRESH] ok", flush=True)
+                else:
+                    print(f"[GSHEET-REFRESH] not ok: {msg}", flush=True)
             except Exception:
-                pass
+                import traceback
+                print("[GSHEET-REFRESH] EXCEPTION:", flush=True)
+                traceback.print_exc()
 
         threading.Thread(target=_worker, name=_BG_GSHEET_REFRESH_THREAD_NAME, daemon=True).start()
         return True
