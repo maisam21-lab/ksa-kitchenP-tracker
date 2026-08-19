@@ -3253,7 +3253,8 @@ def _get_google_credentials_path():
         path = REPO_ROOT / rel
         if path.exists():
             return str(path)
-    return None
+    # Background thread where st.secrets was unreachable: fall back to main-thread cache.
+    return _GSHEET_CREDS_PATH_CACHE
 
 
 def _fetch_facility_go_live_csv() -> list[dict] | None:
@@ -3802,7 +3803,7 @@ def _fetch_online_sheet(sheet_id: str, credentials_path: str) -> dict:
 
     # Use service account from secrets when credentials_path is the sentinel
     if credentials_path == "__FROM_SECRETS__":
-        info = dict(st.secrets["gsheet_service_account"])
+        info = _gsheet_sa_info()
         # Google sometimes requires these; add if missing so "working before" configs keep working
         info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
         info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
@@ -3896,7 +3897,7 @@ def _fetch_gsheet_worksheet_by_gid(sheet_id: str, worksheet_gid: int, credential
 
     scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     if credentials_path == "__FROM_SECRETS__":
-        info = dict(st.secrets["gsheet_service_account"])
+        info = _gsheet_sa_info()
         info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
         info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
         creds = Credentials.from_service_account_info(info, scopes=scopes)
@@ -4001,7 +4002,7 @@ def _fetch_regional_workbook_data(region: str, sheet_id: str, credentials_path: 
 
     scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     if credentials_path == "__FROM_SECRETS__":
-        info = dict(st.secrets["gsheet_service_account"])
+        info = _gsheet_sa_info()
         info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
         info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
         creds = Credentials.from_service_account_info(info, scopes=scopes)
@@ -4155,10 +4156,41 @@ def _start_background_gsheet_refresh() -> bool:
         return True
 
 
+# st.secrets is not reliably reachable from background threads (no ScriptRunContext),
+# so the scheduler's refresh silently no-op'd. Resolve creds once on the main thread
+# and let the worker reuse them without touching st.secrets.
+_GSHEET_CREDS_PATH_CACHE = None
+_GSHEET_SA_INFO_CACHE = None
+
+
+def _prime_gsheet_creds_cache() -> None:
+    """Capture Google creds on the MAIN thread for the background worker to reuse."""
+    global _GSHEET_CREDS_PATH_CACHE, _GSHEET_SA_INFO_CACHE
+    try:
+        _GSHEET_CREDS_PATH_CACHE = _get_google_credentials_path()
+    except Exception:
+        return
+    if _GSHEET_CREDS_PATH_CACHE == "__FROM_SECRETS__":
+        try:
+            info = _gsheet_sa_info()
+            info.setdefault("token_uri", "https://oauth2.googleapis.com/token")
+            info.setdefault("auth_uri", "https://accounts.google.com/o/oauth2/auth")
+            _GSHEET_SA_INFO_CACHE = info
+        except Exception:
+            pass
+
+
+def _gsheet_sa_info() -> dict:
+    """Service-account dict, from the main-thread cache when st.secrets is unreachable."""
+    if _GSHEET_SA_INFO_CACHE:
+        return dict(_GSHEET_SA_INFO_CACHE)
+    return dict(st.secrets["gsheet_service_account"])
+
+
 def _gsheet_scheduler_loop(stale_minutes: int = 15, poll_seconds: int = 300) -> None:
     while True:
         try:
-            if _get_google_credentials_path() and _gsheet_refresh_is_stale(stale_minutes):
+            if (_GSHEET_CREDS_PATH_CACHE or _get_google_credentials_path()) and _gsheet_refresh_is_stale(stale_minutes):
                 _start_background_gsheet_refresh()
         except Exception:
             pass
@@ -6845,6 +6877,7 @@ def main():
     st.session_state["_production_safe_mode"] = _production_safe_mode_enabled()
     init_db()
     _backfill_gsheet_family_refresh_metadata()
+    _prime_gsheet_creds_cache()
     _ensure_gsheet_scheduler()
     # Initialize the cookie manager early so its component iframe renders before any
     # cookie read happens below; subsequent reads will return cached values.
