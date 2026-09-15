@@ -210,7 +210,9 @@ MARKET_VIEW_KSA_IDS = (
     "alissar.alia@namaame.com,"
     "abdulrahman.aljirfeen@cloudkitchens.com,"
     "abdulrahman.aljirfeen@namaame.com,"
-    "mohammad.bezzi@atoms.com"
+    "mohammad.bezzi@atoms.com,"
+    "zaid.awais@cloudkitchens.com,"
+    "zaid.awais@namaame.com"
 )
 MARKET_VIEW_UAE_IDS = (
     "leen.shihabaldin@cloudkitchens.com,"
@@ -218,7 +220,9 @@ MARKET_VIEW_UAE_IDS = (
     "mohammad.khader@cloudkitchens.com,"
     "mohammad.khader@namaame.com,"
     "alissar.alia@cloudkitchens.com,"
-    "alissar.alia@namaame.com"
+    "alissar.alia@namaame.com,"
+    "zaid.awais@cloudkitchens.com,"
+    "zaid.awais@namaame.com"
 )
 MARKET_VIEW_KUWAIT_IDS = (
     "diala.alresheq@cloudkitchens.com,"
@@ -226,7 +230,9 @@ MARKET_VIEW_KUWAIT_IDS = (
     "mohammad.khader@cloudkitchens.com,"
     "mohammad.khader@namaame.com,"
     "alissar.alia@cloudkitchens.com,"
-    "alissar.alia@namaame.com"
+    "alissar.alia@namaame.com,"
+    "zaid.awais@cloudkitchens.com,"
+    "zaid.awais@namaame.com"
 )
 MARKET_VIEW_BAHRAIN_IDS = (
     "mohammad.khader@cloudkitchens.com,"
@@ -234,7 +240,9 @@ MARKET_VIEW_BAHRAIN_IDS = (
     "alissar.alia@cloudkitchens.com,"
     "alissar.alia@namaame.com,"
     "abdulrahman.aljirfeen@cloudkitchens.com,"
-    "abdulrahman.aljirfeen@namaame.com"
+    "abdulrahman.aljirfeen@namaame.com,"
+    "zaid.awais@cloudkitchens.com,"
+    "zaid.awais@namaame.com"
 )
 # CSV export allowlist (merged with EXPORT_ALLOWED_IDS in Streamlit secrets or env).
 EXPORT_ALLOWED_IDS = (
@@ -258,6 +266,8 @@ ALLOWLIST_IDS = (
     "alissar.alia@namaame.com,"
     "abdulrahman.aljirfeen@cloudkitchens.com,"
     "abdulrahman.aljirfeen@namaame.com,"
+    "zaid.awais@cloudkitchens.com,"
+    "zaid.awais@namaame.com,"
     "masa.barhoumeh@cloudkitchens.com,"
     "yousif.almohammedali@cloudkitchens.com,"
     "osama.eliewa@cloudkitchens.com,"
