@@ -212,7 +212,8 @@ MARKET_VIEW_KSA_IDS = (
     "abdulrahman.aljirfeen@namaame.com,"
     "mohammad.bezzi@atoms.com,"
     "zaid.awais@cloudkitchens.com,"
-    "zaid.awais@namaame.com"
+    "zaid.awais@namaame.com,"
+    "jawaher.fahad@atoms.co"
 )
 MARKET_VIEW_UAE_IDS = (
     "leen.shihabaldin@cloudkitchens.com,"
@@ -268,6 +269,7 @@ ALLOWLIST_IDS = (
     "abdulrahman.aljirfeen@namaame.com,"
     "zaid.awais@cloudkitchens.com,"
     "zaid.awais@namaame.com,"
+    "jawaher.fahad@atoms.co,"
     "masa.barhoumeh@cloudkitchens.com,"
     "yousif.almohammedali@cloudkitchens.com,"
     "osama.eliewa@cloudkitchens.com,"
